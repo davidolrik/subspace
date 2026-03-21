@@ -16,6 +16,7 @@ brews:
   - repository:
       owner: davidolrik
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://subspace.olrik.dev/
     description: Transparent proxy with upstream routing
     license: MIT
