@@ -118,10 +118,13 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	// Parse follow mode (default: true)
 	follow := r.URL.Query().Get("follow") != "false"
 
-	// Send buffered lines filtered by level
-	lines := s.buf.Last(n, minLevel)
-	for _, line := range lines {
-		fmt.Fprintln(w, line)
+	// Parse color mode (default: false)
+	color := r.URL.Query().Get("color") == "true"
+
+	// Send buffered entries filtered by level
+	entries := s.buf.Last(n, minLevel)
+	for _, e := range entries {
+		fmt.Fprintln(w, FormatEntry(e, color))
 	}
 	flusher.Flush()
 
@@ -141,7 +144,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		case entry := <-ch:
 			if entry.Level >= minLevel {
-				fmt.Fprintln(w, entry.Line)
+				fmt.Fprintln(w, FormatEntry(entry, color))
 				flusher.Flush()
 			}
 		}

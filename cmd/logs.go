@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 
 	"github.com/spf13/cobra"
 	"go.olrik.dev/subspace/config"
+	"golang.org/x/term"
 )
 
 var (
@@ -43,7 +45,11 @@ Levels: debug, info, warn, error`,
 		if !logsFollow {
 			followStr = "false"
 		}
-		url := fmt.Sprintf("http://subspace/logs?n=%d&level=%s&follow=%s", logsLines, logsLevel, followStr)
+		colorStr := "false"
+		if term.IsTerminal(int(os.Stdout.Fd())) {
+			colorStr = "true"
+		}
+		url := fmt.Sprintf("http://subspace/logs?n=%d&level=%s&follow=%s&color=%s", logsLines, logsLevel, followStr, colorStr)
 		resp, err := client.Get(url)
 		if err != nil {
 			return fmt.Errorf("connecting to control socket %s: %w\n(is subspace serve running?)", cfg.ControlSocket, err)

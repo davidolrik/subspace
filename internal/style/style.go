@@ -151,7 +151,7 @@ func UpstreamColor(name string) string {
 	return upstreamColors[h%uint32(len(upstreamColors))]
 }
 
-// enabled tracks whether color output is supported.
+// enabled tracks whether color output is supported for direct terminal output.
 var enabled = detectColor()
 
 func detectColor() bool {
@@ -159,4 +159,19 @@ func detectColor() bool {
 		return false
 	}
 	return term.IsTerminal(int(os.Stderr.Fd()))
+}
+
+// ForceColorize wraps text in color regardless of the terminal detection flag.
+func ForceColorize(c, text string) string {
+	return c + text + Reset
+}
+
+// ForceBoldC wraps text in bold + color regardless of the terminal detection flag.
+func ForceBoldC(c, text string) string {
+	return Bold + c + text + Reset
+}
+
+// ForceBadge renders a colored badge regardless of the terminal detection flag.
+func ForceBadge(fgc, bgc, text string) string {
+	return bgc + fgc + Bold + " " + text + " " + Reset
 }

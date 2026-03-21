@@ -4,16 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"go.olrik.dev/subspace/internal/style"
 )
 
-// LogEntry holds a log line together with its level for filtering.
+// LogEntry holds a structured log record for deferred formatting.
+// Color is applied at output time rather than at capture time, so that
+// the decision can be made by the client (which knows whether its
+// output is a terminal).
 type LogEntry struct {
-	Level slog.Level
-	Line  string
+	Level   slog.Level
+	Time    time.Time
+	Message string
+	Attrs   string // pre-joined "key=val key=val" plain text
 }
 
 // LogBuffer is a thread-safe ring buffer that stores log entries and supports
@@ -60,19 +66,19 @@ func (b *LogBuffer) Append(entry LogEntry) {
 	}
 }
 
-// Last returns the last n lines from the buffer matching the minimum level,
-// in chronological order. If fewer than n lines match, returns all that match.
-func (b *LogBuffer) Last(n int, minLevel slog.Level) []string {
+// Last returns the last n entries from the buffer matching the minimum level,
+// in chronological order. If fewer than n entries match, returns all that match.
+func (b *LogBuffer) Last(n int, minLevel slog.Level) []LogEntry {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	// Scan backwards to find the last n matching entries
-	var matched []string
+	var matched []LogEntry
 	for i := 0; i < b.count && len(matched) < n; i++ {
 		idx := (b.writePos - 1 - i + b.capacity) % b.capacity
 		e := b.entries[idx]
 		if e.Level >= minLevel {
-			matched = append(matched, e.Line)
+			matched = append(matched, e)
 		}
 	}
 
@@ -128,27 +134,26 @@ func (h *LogHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 func (h *LogHandler) Handle(_ context.Context, r slog.Record) error {
-	ts := style.Colorize(style.Ghost, r.Time.Format(time.DateTime))
-	lvl := style.ColorLevel(r.Level)
-	msg := style.BoldC(style.Steel, r.Message)
-
-	line := fmt.Sprintf("%s %s %s", ts, lvl, msg)
-
 	prefix := ""
 	if h.group != "" {
 		prefix = h.group + "."
 	}
 
+	var attrs []string
 	for _, a := range h.attrs {
-		line += " " + style.FormatAttr(prefix, a)
+		attrs = append(attrs, prefix+a.Key+"="+a.Value.String())
 	}
-
 	r.Attrs(func(a slog.Attr) bool {
-		line += " " + style.FormatAttr(prefix, a)
+		attrs = append(attrs, prefix+a.Key+"="+a.Value.String())
 		return true
 	})
 
-	h.buf.Append(LogEntry{Level: r.Level, Line: line})
+	h.buf.Append(LogEntry{
+		Level:   r.Level,
+		Time:    r.Time,
+		Message: r.Message,
+		Attrs:   strings.Join(attrs, " "),
+	})
 	return nil
 }
 
@@ -175,4 +180,59 @@ func (h *LogHandler) WithGroup(name string) slog.Handler {
 		attrs: h.attrs,
 		group: newGroup,
 	}
+}
+
+// FormatEntry renders a LogEntry as a single line. When color is true,
+// ANSI escape codes are included for terminal display.
+func FormatEntry(e LogEntry, color bool) string {
+	ts := e.Time.Format(time.DateTime)
+	lvl := levelTag(e.Level)
+	msg := e.Message
+	if color {
+		ts = style.ForceColorize(style.Ghost, ts)
+		lvl = style.ForceColorLevel(e.Level)
+		msg = style.ForceBoldC(style.Steel, msg)
+	}
+
+	line := fmt.Sprintf("%s %s %s", ts, lvl, msg)
+	if e.Attrs != "" {
+		if color {
+			line += " " + colorAttrs(e.Attrs)
+		} else {
+			line += " " + e.Attrs
+		}
+	}
+	return line
+}
+
+// levelTag returns a plain text level label.
+func levelTag(level slog.Level) string {
+	switch {
+	case level >= slog.LevelError:
+		return "ERR"
+	case level >= slog.LevelWarn:
+		return "WRN"
+	case level >= slog.LevelInfo:
+		return "INF"
+	default:
+		return "DBG"
+	}
+}
+
+// colorAttrs applies color to a pre-joined "key=val key=val" string.
+func colorAttrs(attrs string) string {
+	var parts []string
+	for _, pair := range strings.Split(attrs, " ") {
+		if eq := strings.IndexByte(pair, '='); eq >= 0 {
+			key := pair[:eq]
+			val := pair[eq+1:]
+			colored := style.ForceColorize(style.Smoke, key) +
+				style.ForceColorize(style.Ghost, "=") +
+				style.ForceColorize(style.Green, val)
+			parts = append(parts, colored)
+		} else {
+			parts = append(parts, pair)
+		}
+	}
+	return strings.Join(parts, " ")
 }

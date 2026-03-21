@@ -8,17 +8,22 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"go.olrik.dev/subspace/stats"
 )
 
+func testEntry(level slog.Level, msg string) LogEntry {
+	return LogEntry{Level: level, Time: time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC), Message: msg}
+}
+
 func TestControlServerStreamLogs(t *testing.T) {
 	buf := NewLogBuffer(100)
-	buf.Append(LogEntry{Level: slog.LevelInfo, Line: "old line 1"})
-	buf.Append(LogEntry{Level: slog.LevelInfo, Line: "old line 2"})
-	buf.Append(LogEntry{Level: slog.LevelInfo, Line: "old line 3"})
+	buf.Append(testEntry(slog.LevelInfo, "old line 1"))
+	buf.Append(testEntry(slog.LevelInfo, "old line 2"))
+	buf.Append(testEntry(slog.LevelInfo, "old line 3"))
 
 	sockPath := tempSocket(t)
 	srv, err := NewServer(sockPath, buf, nil, nil, nil)
@@ -48,26 +53,26 @@ func TestControlServerStreamLogs(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("got %d buffered lines, want 2", len(lines))
 	}
-	if lines[0] != "old line 2" || lines[1] != "old line 3" {
+	if !strings.Contains(lines[0], "old line 2") || !strings.Contains(lines[1], "old line 3") {
 		t.Errorf("buffered lines = %v", lines)
 	}
 
 	// Brief pause to ensure the server's subscription is active
 	time.Sleep(100 * time.Millisecond)
-	buf.Append(LogEntry{Level: slog.LevelInfo, Line: "live line"})
+	buf.Append(testEntry(slog.LevelInfo, "live line"))
 	liveLines := readChunkedLines(t, scanner, 1)
 	if len(liveLines) != 1 {
 		t.Fatalf("got %d live lines, want 1", len(liveLines))
 	}
-	if liveLines[0] != "live line" {
-		t.Errorf("live line = %q, want %q", liveLines[0], "live line")
+	if !strings.Contains(liveLines[0], "live line") {
+		t.Errorf("live line = %q, want it to contain %q", liveLines[0], "live line")
 	}
 }
 
 func TestControlServerDefaultLines(t *testing.T) {
 	buf := NewLogBuffer(100)
 	for i := 0; i < 20; i++ {
-		buf.Append(LogEntry{Level: slog.LevelInfo, Line: fmt.Sprintf("line %d", i)})
+		buf.Append(testEntry(slog.LevelInfo, fmt.Sprintf("line %d", i)))
 	}
 
 	sockPath := tempSocket(t)
@@ -98,17 +103,17 @@ func TestControlServerDefaultLines(t *testing.T) {
 	if len(lines) != 10 {
 		t.Fatalf("got %d lines, want 10", len(lines))
 	}
-	if lines[0] != "line 10" || lines[9] != "line 19" {
+	if !strings.Contains(lines[0], "line 10") || !strings.Contains(lines[9], "line 19") {
 		t.Errorf("lines[0]=%q lines[9]=%q", lines[0], lines[9])
 	}
 }
 
 func TestControlServerLevelFilter(t *testing.T) {
 	buf := NewLogBuffer(100)
-	buf.Append(LogEntry{Level: slog.LevelDebug, Line: "debug msg"})
-	buf.Append(LogEntry{Level: slog.LevelInfo, Line: "info msg"})
-	buf.Append(LogEntry{Level: slog.LevelWarn, Line: "warn msg"})
-	buf.Append(LogEntry{Level: slog.LevelError, Line: "error msg"})
+	buf.Append(testEntry(slog.LevelDebug, "debug msg"))
+	buf.Append(testEntry(slog.LevelInfo, "info msg"))
+	buf.Append(testEntry(slog.LevelWarn, "warn msg"))
+	buf.Append(testEntry(slog.LevelError, "error msg"))
 
 	sockPath := tempSocket(t)
 	srv, err := NewServer(sockPath, buf, nil, nil, nil)
@@ -138,8 +143,57 @@ func TestControlServerLevelFilter(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
-	if lines[0] != "error msg" {
-		t.Errorf("line = %q, want %q", lines[0], "error msg")
+	if !strings.Contains(lines[0], "error msg") {
+		t.Errorf("line = %q, want it to contain %q", lines[0], "error msg")
+	}
+}
+
+func TestControlServerColorParam(t *testing.T) {
+	buf := NewLogBuffer(100)
+	buf.Append(testEntry(slog.LevelInfo, "colored test"))
+
+	sockPath := tempSocket(t)
+	srv, err := NewServer(sockPath, buf, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	go srv.Serve()
+
+	client := unixClient(sockPath)
+
+	// Without color
+	resp, err := client.Get("http://subspace/logs?n=1&follow=false")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Scan()
+	plainLine := scanner.Text()
+	resp.Body.Close()
+
+	if strings.Contains(plainLine, "\033[") {
+		t.Errorf("plain mode should not contain ANSI escapes: %q", plainLine)
+	}
+	if !strings.Contains(plainLine, "colored test") {
+		t.Errorf("expected message in output: %q", plainLine)
+	}
+
+	// With color
+	resp, err = client.Get("http://subspace/logs?n=1&follow=false&color=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanner = bufio.NewScanner(resp.Body)
+	scanner.Scan()
+	colorLine := scanner.Text()
+	resp.Body.Close()
+
+	if !strings.Contains(colorLine, "\033[") {
+		t.Errorf("color mode should contain ANSI escapes: %q", colorLine)
+	}
+	if !strings.Contains(colorLine, "colored test") {
+		t.Errorf("expected message in output: %q", colorLine)
 	}
 }
 

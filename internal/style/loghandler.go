@@ -71,17 +71,26 @@ func (h *LogHandler) WithGroup(name string) slog.Handler {
 	return &LogHandler{w: h.w, level: h.level, attrs: h.attrs, group: newGroup}
 }
 
-// ColorLevel returns a colored level badge.
+// ColorLevel returns a colored level badge, respecting the terminal detection flag.
 func ColorLevel(level slog.Level) string {
+	return colorLevel(level, Badge)
+}
+
+// ForceColorLevel returns a colored level badge regardless of the terminal detection flag.
+func ForceColorLevel(level slog.Level) string {
+	return colorLevel(level, ForceBadge)
+}
+
+func colorLevel(level slog.Level, badge func(string, string, string) string) string {
 	switch {
 	case level >= slog.LevelError:
-		return Badge(Red, bgErr, "ERR")
+		return badge(Red, bgErr, "ERR")
 	case level >= slog.LevelWarn:
-		return Badge(Yellow, bgWarn, "WRN")
+		return badge(Yellow, bgWarn, "WRN")
 	case level >= slog.LevelInfo:
-		return Badge(Cyan, bgInfo, "INF")
+		return badge(Cyan, bgInfo, "INF")
 	default:
-		return Badge(Ghost, bgDbg, "DBG")
+		return badge(Ghost, bgDbg, "DBG")
 	}
 }
 

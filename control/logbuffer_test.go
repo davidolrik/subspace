@@ -4,27 +4,28 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
 
-func entry(line string) LogEntry {
-	return LogEntry{Level: slog.LevelInfo, Line: line}
+func entry(msg string) LogEntry {
+	return LogEntry{Level: slog.LevelInfo, Time: time.Now(), Message: msg}
 }
 
-func TestLogBufferStoresLines(t *testing.T) {
+func TestLogBufferStoresEntries(t *testing.T) {
 	buf := NewLogBuffer(100)
 
 	buf.Append(entry("line 1"))
 	buf.Append(entry("line 2"))
 	buf.Append(entry("line 3"))
 
-	lines := buf.Last(10, slog.LevelDebug)
-	if len(lines) != 3 {
-		t.Fatalf("got %d lines, want 3", len(lines))
+	entries := buf.Last(10, slog.LevelDebug)
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
 	}
-	if lines[0] != "line 1" || lines[1] != "line 2" || lines[2] != "line 3" {
-		t.Errorf("lines = %v", lines)
+	if entries[0].Message != "line 1" || entries[1].Message != "line 2" || entries[2].Message != "line 3" {
+		t.Errorf("messages = %v", []string{entries[0].Message, entries[1].Message, entries[2].Message})
 	}
 }
 
@@ -36,12 +37,13 @@ func TestLogBufferWrapsAround(t *testing.T) {
 	buf.Append(entry("c"))
 	buf.Append(entry("d"))
 
-	lines := buf.Last(10, slog.LevelDebug)
-	if len(lines) != 3 {
-		t.Fatalf("got %d lines, want 3", len(lines))
+	entries := buf.Last(10, slog.LevelDebug)
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
 	}
-	if lines[0] != "b" || lines[1] != "c" || lines[2] != "d" {
-		t.Errorf("lines = %v, want [b c d]", lines)
+	if entries[0].Message != "b" || entries[1].Message != "c" || entries[2].Message != "d" {
+		t.Errorf("messages = [%s %s %s], want [b c d]",
+			entries[0].Message, entries[1].Message, entries[2].Message)
 	}
 }
 
@@ -51,12 +53,12 @@ func TestLogBufferLastN(t *testing.T) {
 		buf.Append(entry(fmt.Sprintf("line %d", i)))
 	}
 
-	lines := buf.Last(5, slog.LevelDebug)
-	if len(lines) != 5 {
-		t.Fatalf("got %d lines, want 5", len(lines))
+	entries := buf.Last(5, slog.LevelDebug)
+	if len(entries) != 5 {
+		t.Fatalf("got %d entries, want 5", len(entries))
 	}
-	if lines[0] != "line 15" || lines[4] != "line 19" {
-		t.Errorf("lines = %v", lines)
+	if entries[0].Message != "line 15" || entries[4].Message != "line 19" {
+		t.Errorf("first=%q last=%q", entries[0].Message, entries[4].Message)
 	}
 }
 
@@ -64,42 +66,42 @@ func TestLogBufferLastMoreThanAvailable(t *testing.T) {
 	buf := NewLogBuffer(100)
 	buf.Append(entry("only"))
 
-	lines := buf.Last(10, slog.LevelDebug)
-	if len(lines) != 1 {
-		t.Fatalf("got %d lines, want 1", len(lines))
+	entries := buf.Last(10, slog.LevelDebug)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
 	}
 }
 
 func TestLogBufferLastFiltersByLevel(t *testing.T) {
 	buf := NewLogBuffer(100)
 
-	buf.Append(LogEntry{Level: slog.LevelDebug, Line: "debug"})
-	buf.Append(LogEntry{Level: slog.LevelInfo, Line: "info"})
-	buf.Append(LogEntry{Level: slog.LevelWarn, Line: "warn"})
-	buf.Append(LogEntry{Level: slog.LevelError, Line: "error"})
+	buf.Append(LogEntry{Level: slog.LevelDebug, Time: time.Now(), Message: "debug"})
+	buf.Append(LogEntry{Level: slog.LevelInfo, Time: time.Now(), Message: "info"})
+	buf.Append(LogEntry{Level: slog.LevelWarn, Time: time.Now(), Message: "warn"})
+	buf.Append(LogEntry{Level: slog.LevelError, Time: time.Now(), Message: "error"})
 
 	// Only errors
-	lines := buf.Last(10, slog.LevelError)
-	if len(lines) != 1 || lines[0] != "error" {
-		t.Errorf("error filter: got %v", lines)
+	entries := buf.Last(10, slog.LevelError)
+	if len(entries) != 1 || entries[0].Message != "error" {
+		t.Errorf("error filter: got %v", entries)
 	}
 
 	// Warn and above
-	lines = buf.Last(10, slog.LevelWarn)
-	if len(lines) != 2 || lines[0] != "warn" || lines[1] != "error" {
-		t.Errorf("warn filter: got %v", lines)
+	entries = buf.Last(10, slog.LevelWarn)
+	if len(entries) != 2 || entries[0].Message != "warn" || entries[1].Message != "error" {
+		t.Errorf("warn filter: got %v", entries)
 	}
 
 	// Last 1 at warn level should be the error (most recent matching)
-	lines = buf.Last(1, slog.LevelWarn)
-	if len(lines) != 1 || lines[0] != "error" {
-		t.Errorf("warn filter n=1: got %v", lines)
+	entries = buf.Last(1, slog.LevelWarn)
+	if len(entries) != 1 || entries[0].Message != "error" {
+		t.Errorf("warn filter n=1: got %v", entries)
 	}
 
 	// Debug shows all
-	lines = buf.Last(10, slog.LevelDebug)
-	if len(lines) != 4 {
-		t.Errorf("debug filter: got %d lines, want 4", len(lines))
+	entries = buf.Last(10, slog.LevelDebug)
+	if len(entries) != 4 {
+		t.Errorf("debug filter: got %d entries, want 4", len(entries))
 	}
 }
 
@@ -113,11 +115,11 @@ func TestLogBufferSubscribe(t *testing.T) {
 
 	select {
 	case e := <-ch:
-		if e.Line != "live line" {
-			t.Errorf("got %q, want %q", e.Line, "live line")
+		if e.Message != "live line" {
+			t.Errorf("got %q, want %q", e.Message, "live line")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for subscribed line")
+		t.Fatal("timed out waiting for subscribed entry")
 	}
 }
 
@@ -137,12 +139,19 @@ func TestLogHandlerWritesToBuffer(t *testing.T) {
 
 	logger.Info("test message", "key", "value")
 
-	lines := buf.Last(1, slog.LevelDebug)
-	if len(lines) != 1 {
-		t.Fatalf("got %d lines, want 1", len(lines))
+	entries := buf.Last(1, slog.LevelDebug)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
 	}
-	if !containsAll(lines[0], "INF", "test message", "key=value") {
-		t.Errorf("line = %q, expected it to contain INF, test message, key=value", lines[0])
+	e := entries[0]
+	if e.Message != "test message" {
+		t.Errorf("message = %q, want %q", e.Message, "test message")
+	}
+	if e.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", e.Level)
+	}
+	if !strings.Contains(e.Attrs, "key=value") {
+		t.Errorf("attrs = %q, expected it to contain key=value", e.Attrs)
 	}
 }
 
@@ -158,11 +167,14 @@ func TestLogHandlerStreamsToSubscriber(t *testing.T) {
 
 	select {
 	case e := <-ch:
-		if !containsAll(e.Line, "WRN", "live warning") {
-			t.Errorf("line = %q, expected WRN and live warning", e.Line)
+		if e.Message != "live warning" {
+			t.Errorf("message = %q, want %q", e.Message, "live warning")
+		}
+		if e.Level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", e.Level)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for log line")
+		t.Fatal("timed out waiting for log entry")
 	}
 }
 
@@ -175,9 +187,9 @@ func TestLogHandlerCapturesAllLevels(t *testing.T) {
 	logger.Info("info msg")
 	logger.Warn("warn msg")
 
-	lines := buf.Last(10, slog.LevelDebug)
-	if len(lines) != 3 {
-		t.Fatalf("got %d lines, want 3 (handler should capture all levels)", len(lines))
+	entries := buf.Last(10, slog.LevelDebug)
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3 (handler should capture all levels)", len(entries))
 	}
 }
 
@@ -193,24 +205,84 @@ func TestLogHandlerEnabled(t *testing.T) {
 	}
 }
 
-func containsAll(s string, substrings ...string) bool {
-	for _, sub := range substrings {
-		if !contains(s, sub) {
-			return false
-		}
+func TestFormatEntryPlain(t *testing.T) {
+	e := LogEntry{
+		Level:   slog.LevelInfo,
+		Time:    time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
+		Message: "server started",
+		Attrs:   "addr=:8118 upstreams=2",
 	}
-	return true
+
+	line := FormatEntry(e, false)
+	if !strings.Contains(line, "2025-01-15 10:30:00") {
+		t.Errorf("expected timestamp, got %q", line)
+	}
+	if !strings.Contains(line, "INF") {
+		t.Errorf("expected INF, got %q", line)
+	}
+	if !strings.Contains(line, "server started") {
+		t.Errorf("expected message, got %q", line)
+	}
+	if !strings.Contains(line, "addr=:8118") {
+		t.Errorf("expected attrs, got %q", line)
+	}
+	// Plain mode should have no ANSI escapes
+	if strings.Contains(line, "\033[") {
+		t.Errorf("plain mode should not contain ANSI escapes, got %q", line)
+	}
 }
 
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && searchString(s, sub)
+func TestFormatEntryColored(t *testing.T) {
+	e := LogEntry{
+		Level:   slog.LevelError,
+		Time:    time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
+		Message: "connection failed",
+		Attrs:   "host=example.com",
+	}
+
+	line := FormatEntry(e, true)
+	if !strings.Contains(line, "connection failed") {
+		t.Errorf("expected message, got %q", line)
+	}
+	if !strings.Contains(line, "ERR") {
+		t.Errorf("expected ERR, got %q", line)
+	}
+	// Colored mode should contain ANSI escapes
+	if !strings.Contains(line, "\033[") {
+		t.Errorf("color mode should contain ANSI escapes, got %q", line)
+	}
 }
 
-func searchString(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
+func TestFormatEntryNoAttrs(t *testing.T) {
+	e := LogEntry{
+		Level:   slog.LevelInfo,
+		Time:    time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
+		Message: "ready",
+	}
+
+	line := FormatEntry(e, false)
+	// Should not have trailing space or empty attrs
+	if strings.HasSuffix(line, " ") {
+		t.Errorf("line should not have trailing space: %q", line)
+	}
+}
+
+func TestFormatEntryLevels(t *testing.T) {
+	tests := []struct {
+		level slog.Level
+		tag   string
+	}{
+		{slog.LevelDebug, "DBG"},
+		{slog.LevelInfo, "INF"},
+		{slog.LevelWarn, "WRN"},
+		{slog.LevelError, "ERR"},
+	}
+
+	for _, tt := range tests {
+		e := LogEntry{Level: tt.level, Time: time.Now(), Message: "msg"}
+		line := FormatEntry(e, false)
+		if !strings.Contains(line, tt.tag) {
+			t.Errorf("level %v: expected %q in %q", tt.level, tt.tag, line)
 		}
 	}
-	return false
 }
