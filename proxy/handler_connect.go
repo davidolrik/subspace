@@ -20,7 +20,7 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 	host, _, _ := net.SplitHostPort(targetAddr)
 	route := s.dialerFor(host)
 
-	slog.Info("CONNECT", "target", targetAddr, "via", route.upstream)
+	slog.Debug("CONNECT", "target", targetAddr, "via", route.upstream)
 
 	upstream, err := route.dialer.DialContext(s.ctx, "tcp", targetAddr)
 	if err != nil {

@@ -38,7 +38,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 
 	keepAlive := !req.Close
 
-	slog.Info("HTTP", "host", host, "method", req.Method, "path", req.URL.Path, "via", route.upstream)
+	slog.Debug("HTTP", "host", host, "method", req.Method, "path", req.URL.Path, "via", route.upstream)
 
 	// Try the connection pool first, fall back to dialing fresh
 	var upstreamConn net.Conn
@@ -109,7 +109,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 // handleWebSocket handles a WebSocket upgrade by forwarding the upgrade request
 // to the target and then relaying traffic bidirectionally.
 func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr string, route resolvedRoute) {
-	slog.Info("WebSocket", "host", req.Host, "target", targetAddr, "via", route.upstream)
+	slog.Debug("WebSocket", "host", req.Host, "target", targetAddr, "via", route.upstream)
 
 	upstreamConn, err := route.dialer.DialContext(s.ctx, "tcp", targetAddr)
 	if err != nil {

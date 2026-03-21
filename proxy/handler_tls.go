@@ -162,7 +162,7 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 	targetAddr := sni + ":" + listenPort
 	route := s.dialerFor(sni)
 
-	slog.Info("TLS", "sni", sni, "target", targetAddr, "via", route.upstream)
+	slog.Debug("TLS", "sni", sni, "target", targetAddr, "via", route.upstream)
 
 	upstream, err := route.dialer.DialContext(s.ctx, "tcp", targetAddr)
 	if err != nil {
