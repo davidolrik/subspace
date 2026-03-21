@@ -1,5 +1,23 @@
 # Installation
 
+## Homebrew (macOS)
+
+```sh
+brew install davidolrik/tap/subspace
+```
+
+To run subspace as a background service that starts automatically at login:
+
+```sh
+brew services start subspace
+```
+
+To stop the service:
+
+```sh
+brew services stop subspace
+```
+
 ## From Source
 
 Requires Go 1.26 or later.
@@ -11,7 +29,7 @@ go install go.olrik.dev/subspace@latest
 Or clone and build:
 
 ```sh
-git clone https://github.com/djo/subspace.git
+git clone https://github.com/davidolrik/subspace.git
 cd subspace
 go build -o subspace .
 ```

@@ -12,6 +12,23 @@ builds:
     ldflags:
       - -s -w -X go.olrik.dev/subspace/cmd.Version={{.Version}}
 
+brews:
+  - repository:
+      owner: davidolrik
+      name: homebrew-tap
+    homepage: https://subspace.olrik.dev/
+    description: Transparent proxy with upstream routing
+    license: MIT
+    install: |
+      bin.install "subspace"
+
+      generate_completions_from_executable(bin/"subspace", "completion")
+    service: |
+      run [opt_bin/"subspace", "serve"]
+      keep_alive true
+      log_path var/"log/subspace.log"
+      error_log_path var/"log/subspace.log"
+
 changelog:
   sort: asc
   filters:

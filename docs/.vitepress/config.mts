@@ -1,5 +1,10 @@
+import { execSync } from "node:child_process";
 import { defineConfig } from "vitepress";
 import { withMermaid } from "vitepress-plugin-mermaid";
+
+const version = execSync("git describe --tags --abbrev=0 2>/dev/null || echo dev")
+  .toString()
+  .trim();
 
 export default withMermaid(
   defineConfig({
@@ -19,6 +24,10 @@ export default withMermaid(
       nav: [
         { text: "Guide", link: "/guide/what-is-subspace" },
         { text: "Reference", link: "/reference/configuration" },
+        {
+          text: version,
+          link: `https://github.com/davidolrik/subspace/releases/tag/${version}`,
+        },
       ],
 
       sidebar: [

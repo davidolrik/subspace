@@ -18,11 +18,27 @@ A transparent proxy that routes traffic through upstream proxies based on hostna
 
 ## Installation
 
+### Homebrew (macOS)
+
+```sh
+brew install davidolrik/tap/subspace
+```
+
+To run subspace as a background service that starts automatically at login:
+
+```sh
+brew services start subspace
+```
+
+### From Source
+
+Requires Go 1.26 or later.
+
 ```sh
 go install go.olrik.dev/subspace@latest
 ```
 
-Or build from source:
+Or clone and build:
 
 ```sh
 git clone https://github.com/davidolrik/subspace.git
