@@ -1,0 +1,56 @@
+[tools]
+go = "1.26.1"
+node = "latest"
+prek = "latest"
+
+[hooks]
+postinstall = [
+  "git config --unset-all core.hooksPath || true",
+  "rm -f .git/hooks/pre-commit*",
+  "prek install"
+]
+
+[tasks.help]
+description = "📚 Help"
+alias = "default"
+run = '''# mise tasks --local
+    echo " ____        _                              "
+    echo "/ ___| _   _| |__  ___ _ __   __ _  ___ ___ "
+    echo '\___ \| | | |  ''_ \/ __|  ''_ \ / _` |/ __/ _ \'
+    echo ' ___) | |_| | |_) \__ \ |_) | (_| | (_|  __/'
+    echo "|____/ \__,_|_.__/|___/ .__/ \__,_|\___\___|"
+    echo "  Personal proxy      |_|                   "
+    mise tasks --local
+'''
+
+[tasks.build]
+description = "🛠️  Build binary"
+run = ["go mod tidy", "go build -o subspace ."]
+
+[tasks."build:snapshot"]
+description = "🧪 Build snapshot"
+run = ["goreleaser build --snapshot --clean"]
+
+[tasks."docs:server"]
+description = "🚀 Run documentation server"
+run = ["npm run docs:dev"]
+
+[tasks."docs:build"]
+description = "🛠️ Build documentation"
+run = ["npm run docs:build"]
+
+[tasks."docs:preview"]
+description = "👀 Preview doc site"
+depends = "docs:build"
+run = ["npm run docs:preview"]
+
+[tasks."docs:publish"]
+description = "📦 Publish to subspace.olrik.dev"
+depends = "docs:build"
+run = [
+  "rsync -avO --no-perms --delete ./docs/.vitepress/dist/ {{ env.DOCUMENTATION_HOST }}:{{ env.DOCUMENTATION_PATH }}"
+]
+
+[tasks."github:publish"]
+description = "📦 Publish to GitHub"
+run = ["git push", "git push --tags"]

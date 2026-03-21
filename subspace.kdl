@@ -1,0 +1,10 @@
+listen ":8118"
+
+// upstream "corporate" {
+//   type "http"
+//   address "proxy.corp.com:3128"
+//   username "user"
+//   password "pass"
+// }
+
+// route ".corp.internal" via="corporate"
