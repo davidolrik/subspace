@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"go.olrik.dev/subspace/pages"
 )
 
 // handleHTTP handles a plaintext HTTP request, either forwarding it to the
@@ -17,7 +19,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 	if host == "" {
 		slog.Error("HTTP request missing Host header")
 		s.Stats.IncError("bad_request")
-		conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\nMissing Host header"))
+		conn.Write(pages.ErrorPage(400, "Bad Request", "Missing Host header"))
 		return false
 	}
 
@@ -28,6 +30,13 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 	}
 
 	hostname, _, _ := net.SplitHostPort(targetAddr)
+
+	// Serve internal pages for *.subspace and subspace.dk hostnames
+	if s.Pages != nil && (pages.IsInternalHost(hostname) || pages.IsRootHost(hostname)) {
+		s.Pages.ServeHTTP(conn, req)
+		return false
+	}
+
 	route := s.dialerFor(hostname)
 
 	// WebSocket upgrade takes over the connection
@@ -49,10 +58,16 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 		var err error
 		upstreamConn, err = route.dialer.DialContext(s.ctx, "tcp", targetAddr)
 		if err != nil {
-			slog.Error("HTTP dial failed", "target", targetAddr, "via", route.upstream, "error", err)
-			s.Stats.IncUpstream(route.upstream, false)
-			s.Stats.IncError("dial_failed")
-			conn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+			if isDNSError(err) {
+				slog.Error("DNS lookup failed", "host", hostname, "error", err)
+				s.Stats.IncError("dns_failed")
+				conn.Write(pages.ErrorPage(502, "Host Not Found", hostname))
+			} else {
+				slog.Error("HTTP dial failed", "target", targetAddr, "via", route.upstream, "error", err)
+				s.Stats.IncUpstream(route.upstream, false)
+				s.Stats.IncError("dial_failed")
+				conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
+			}
 			return false
 		}
 	}
@@ -64,7 +79,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 	if err := req.Write(cw); err != nil {
 		slog.Error("HTTP request write failed", "error", err)
 		upstreamConn.Close()
-		conn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		conn.Write(pages.ErrorPage(502, "Request Failed", err.Error()))
 		return false
 	}
 
@@ -74,7 +89,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 	if err != nil {
 		slog.Error("HTTP response read failed", "error", err)
 		upstreamConn.Close()
-		conn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		conn.Write(pages.ErrorPage(502, "Response Failed", err.Error()))
 		return false
 	}
 	defer resp.Body.Close()
@@ -113,10 +128,16 @@ func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr s
 
 	upstreamConn, err := route.dialer.DialContext(s.ctx, "tcp", targetAddr)
 	if err != nil {
-		slog.Error("WebSocket dial failed", "target", targetAddr, "via", route.upstream, "error", err)
-		s.Stats.IncUpstream(route.upstream, false)
-		s.Stats.IncError("dial_failed")
-		conn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		if isDNSError(err) {
+			slog.Error("DNS lookup failed", "host", req.Host, "error", err)
+			s.Stats.IncError("dns_failed")
+			conn.Write(pages.ErrorPage(502, "Host Not Found", req.Host))
+		} else {
+			slog.Error("WebSocket dial failed", "target", targetAddr, "via", route.upstream, "error", err)
+			s.Stats.IncUpstream(route.upstream, false)
+			s.Stats.IncError("dial_failed")
+			conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
+		}
 		return
 	}
 
@@ -126,7 +147,7 @@ func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr s
 	if err := req.Write(upstreamConn); err != nil {
 		slog.Error("WebSocket request write failed", "error", err)
 		upstreamConn.Close()
-		conn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		conn.Write(pages.ErrorPage(502, "Request Failed", err.Error()))
 		return
 	}
 

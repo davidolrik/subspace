@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"go.olrik.dev/subspace/pages"
 	"go.olrik.dev/subspace/route"
 	"go.olrik.dev/subspace/upstream"
 )
@@ -892,4 +893,205 @@ func certPool(t *testing.T, ts *httptest.Server) *x509.CertPool {
 	pool := x509.NewCertPool()
 	pool.AddCert(ts.Certificate())
 	return pool
+}
+
+// --- internal pages tests ---
+
+func TestInternalPagesInterception(t *testing.T) {
+	matcher := route.NewMatcher(nil)
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+
+	// Set up the pages handler with test links
+	linkPages := []pages.PageInfo{{
+		Host: "dashboard",
+		Page: &pages.PageConfig{
+			Sections: []pages.ListSection{
+				{Name: "Test", Links: []pages.Link{
+					{Name: "Example", URL: "https://example.com"},
+				}},
+			},
+		},
+	}}
+	srv.Pages = pages.New(linkPages, srv.Stats, nil)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+		},
+	}
+
+	// Request to dashboard.subspace should be served internally
+	resp, err := client.Get("http://dashboard.subspace/")
+	if err != nil {
+		t.Fatalf("GET dashboard.subspace failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !containsStr(string(body), "Subspace Dashboard") {
+		t.Errorf("body does not contain dashboard title")
+	}
+}
+
+func TestInternalPagesLinksAPI(t *testing.T) {
+	matcher := route.NewMatcher(nil)
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+
+	linkPages := []pages.PageInfo{{
+		Host: "dashboard",
+		Page: &pages.PageConfig{
+			Sections: []pages.ListSection{
+				{Name: "Dev", Links: []pages.Link{
+					{Name: "GitHub", URL: "https://github.com"},
+				}},
+			},
+		},
+	}}
+	srv.Pages = pages.New(linkPages, srv.Stats, nil)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+		},
+	}
+
+	resp, err := client.Get("http://dashboard.subspace/api/links")
+	if err != nil {
+		t.Fatalf("GET /api/links failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+	if !containsStr(s, "GitHub") || !containsStr(s, "https://github.com") {
+		t.Errorf("links API response missing expected data: %s", s)
+	}
+}
+
+func TestInternalPagesDoNotForwardUpstream(t *testing.T) {
+	// Start a backend that should NOT receive the request
+	var backendHit atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backendHit.Add(1)
+		fmt.Fprintf(w, "should not reach backend")
+	}))
+	t.Cleanup(backend.Close)
+
+	matcher := route.NewMatcher(nil)
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+	srv.Pages = pages.New(nil, srv.Stats, nil)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+		},
+	}
+
+	resp, err := client.Get("http://dashboard.subspace/")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if backendHit.Load() != 0 {
+		t.Error("request to *.subspace was forwarded to upstream backend")
+	}
+}
+
+func TestCONNECTToSubspaceRedirects(t *testing.T) {
+	matcher := route.NewMatcher(nil)
+	proxyAddr := startProxy(t, matcher, nil)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT dashboard.subspace:443 HTTP/1.1\r\nHost: dashboard.subspace:443\r\n\r\n")
+
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("response: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 302 {
+		t.Errorf("CONNECT to *.subspace returned %d, want 302", resp.StatusCode)
+	}
+	loc := resp.Header.Get("Location")
+	if loc != "http://dashboard.subspace/" {
+		t.Errorf("Location = %q, want %q", loc, "http://dashboard.subspace/")
+	}
+}
+
+func TestCONNECTToSubspaceDKPassesThrough(t *testing.T) {
+	// subspace.dk should NOT be intercepted on CONNECT — it tunnels to the real server
+	matcher := route.NewMatcher(nil)
+	proxyAddr := startProxy(t, matcher, nil)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT subspace.dk:443 HTTP/1.1\r\nHost: subspace.dk:443\r\n\r\n")
+
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("response: %v", err)
+	}
+	resp.Body.Close()
+
+	// Should NOT get a 302 redirect — it should attempt to dial (and fail with DNS or connection error)
+	if resp.StatusCode == 302 {
+		t.Error("CONNECT to subspace.dk should not be intercepted, should tunnel through")
+	}
+}
+
+func TestStatisticsPage(t *testing.T) {
+	matcher := route.NewMatcher(nil)
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+	srv.Pages = pages.New(nil, srv.Stats, nil)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+		},
+	}
+
+	resp, err := client.Get("http://statistics.subspace/")
+	if err != nil {
+		t.Fatalf("GET statistics.subspace failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !containsStr(string(body), "Subspace Statistics") {
+		t.Errorf("body does not contain statistics title")
+	}
+}
+
+func containsStr(s, substr string) bool {
+	return len(s) >= len(substr) && searchStr(s, substr)
+}
+
+func searchStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

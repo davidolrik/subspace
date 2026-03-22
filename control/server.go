@@ -176,7 +176,10 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(snap)
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+// Status runs health checks against all upstreams and returns a
+// StatusResponse. This is used by both the control socket /status
+// endpoint and the internal statistics page.
+func (s *Server) Status() StatusResponse {
 	s.mu.RLock()
 	upstreams := s.upstreams
 	s.mu.RUnlock()
@@ -252,6 +255,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Pool = &ps
 	}
 
+	return resp
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(s.Status())
 }

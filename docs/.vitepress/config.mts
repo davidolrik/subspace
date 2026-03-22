@@ -40,6 +40,7 @@ export default withMermaid(
             { text: "Configuration", link: "/guide/configuration" },
             { text: "Routing", link: "/guide/routing" },
             { text: "Commands", link: "/guide/commands" },
+            { text: "Troubleshooting", link: "/guide/troubleshooting" },
           ],
         },
         {

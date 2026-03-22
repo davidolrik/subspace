@@ -15,6 +15,11 @@ import (
 	"go.olrik.dev/subspace/upstream"
 )
 
+// InternalPages serves requests for internal *.subspace hostnames.
+type InternalPages interface {
+	ServeHTTP(conn net.Conn, req *http.Request)
+}
+
 // Server is the main proxy server that accepts connections and dispatches
 // them to the appropriate handler based on protocol detection.
 type Server struct {
@@ -29,6 +34,7 @@ type Server struct {
 	Stats       *stats.Collector
 	Pool        *upstream.Pool
 	IdleTimeout time.Duration
+	Pages       InternalPages
 }
 
 // NewServer creates a new proxy server. The pool parameter is optional —
@@ -164,6 +170,12 @@ func (s *Server) Reload(matcher *route.Matcher, dialers map[string]upstream.Dial
 type resolvedRoute struct {
 	upstream string
 	dialer   upstream.Dialer
+}
+
+// isDNSError returns true if the error is caused by a failed DNS lookup.
+func isDNSError(err error) bool {
+	var dnsErr *net.DNSError
+	return errors.As(err, &dnsErr)
 }
 
 // dialerFor returns the upstream dialer and name for the given hostname,

@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Subspace Statistics</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 900px) {
+            .stats-grid { grid-template-columns: 1fr; }
+        }
+        .chart-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 1.25rem;
+            box-shadow: 0 0 8px rgba(0, 255, 234, 0.04);
+            transition: box-shadow 0.2s ease;
+        }
+        .chart-card:hover {
+            box-shadow: 0 0 16px rgba(0, 255, 234, 0.12), 0 0 4px rgba(0, 255, 234, 0.06);
+        }
+        .chart-card.wide {
+            grid-column: 1 / -1;
+        }
+        .chart-card h2 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+        .chart-wrap {
+            position: relative;
+            height: 250px;
+        }
+        .chart-wrap canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        .time-selector {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .time-selector button {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .time-selector button:hover {
+            border-color: var(--text-muted);
+            color: var(--text);
+        }
+        .time-selector button.active {
+            border-color: var(--cyan);
+            color: var(--cyan);
+        }
+        .section-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+            margin-top: 1.5rem;
+        }
+        .section-title:first-of-type {
+            margin-top: 0;
+        }
+        .live-stats {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 1rem 1.25rem;
+            min-width: 140px;
+            box-shadow: 0 0 8px rgba(0, 255, 234, 0.04);
+            transition: box-shadow 0.2s ease;
+        }
+        .stat-card:hover {
+            box-shadow: 0 0 16px rgba(0, 255, 234, 0.12), 0 0 4px rgba(0, 255, 234, 0.06);
+        }
+        .stat-card .label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text);
+            text-align: center;
+        }
+        .upstreams-section {
+            margin-bottom: 1.5rem;
+        }
+        .upstreams-section h2 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+        }
+        .upstream-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 0.75rem;
+        }
+        .upstream-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 1rem 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            box-shadow: 0 0 8px rgba(0, 255, 234, 0.04);
+            transition: box-shadow 0.2s ease;
+        }
+        .upstream-card:hover {
+            box-shadow: 0 0 16px rgba(0, 255, 234, 0.12), 0 0 4px rgba(0, 255, 234, 0.06);
+        }
+        .upstream-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .upstream-indicator.healthy { background: #00ff88; box-shadow: 0 0 6px rgba(0,255,136,0.4); }
+        .upstream-indicator.unhealthy { background: #ff375f; box-shadow: 0 0 6px rgba(255,55,95,0.4); }
+        .upstream-info { flex: 1; min-width: 0; }
+        .upstream-name {
+            font-weight: 600;
+            color: var(--text);
+            font-size: 0.95rem;
+        }
+        .upstream-detail {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.15rem;
+        }
+        .upstream-meta {
+            text-align: right;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .upstream-meta .latency {
+            color: var(--text);
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body x-data="statistics" x-init="init()">
+    <header>
+        <h1>
+            <span class="sub">sub</span><span class="space">space</span>
+            <span><span class="title-dash">-</span> <span class="title">Statistics</span></span>
+        </h1>
+        <nav>
+            <template x-for="item in nav" :key="item.url">
+                <a :href="item.url" :class="{ active: item.active }" x-text="item.label"></a>
+            </template>
+        </nav>
+    </header>
+    <main>
+        <h2 class="section-title">Live</h2>
+        <div class="live-stats">
+            <div class="stat-card">
+                <div class="label">Total Connections</div>
+                <div class="value" x-text="formatNumber(live.connections)"></div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Active</div>
+                <div class="value" x-text="formatNumber(live.active)"></div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Upstreams</div>
+                <div class="value" x-text="Object.keys(live.upstreams || {}).length"></div>
+            </div>
+        </div>
+
+        <div class="upstreams-section" x-show="Object.keys(statusData.upstreams || {}).length > 0">
+            <h2>Upstreams</h2>
+            <div class="upstream-grid">
+                <template x-for="[name, up] in sortedUpstreams()" :key="name">
+                    <div class="upstream-card">
+                        <div class="upstream-indicator" :class="up.healthy ? 'healthy' : 'unhealthy'"></div>
+                        <div class="upstream-info">
+                            <div class="upstream-name" x-text="name"></div>
+                            <div class="upstream-detail">
+                                <span x-text="up.type"></span>
+                                <template x-if="up.address">
+                                    <span> · <span x-text="up.address"></span></span>
+                                </template>
+                            </div>
+                        </div>
+                        <div class="upstream-meta">
+                            <template x-if="up.latency">
+                                <div class="latency" x-text="up.latency"></div>
+                            </template>
+                            <template x-if="up.stats">
+                                <div x-text="formatNumber(up.stats.success) + ' ok'"></div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <h2 class="section-title">History</h2>
+        <div class="time-selector">
+            <template x-for="opt in timeOptions" :key="opt.seconds">
+                <button
+                    :class="{ active: duration === opt.seconds }"
+                    @click="setDuration(opt.seconds)"
+                    x-text="opt.label">
+                </button>
+            </template>
+        </div>
+
+        <div class="stats-grid">
+            <div class="chart-card wide">
+                <h2>Connections Over Time</h2>
+                <div class="chart-wrap">
+                    <canvas x-ref="connectionsChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h2>Traffic by Upstream</h2>
+                <div class="chart-wrap">
+                    <canvas x-ref="trafficChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h2>Protocol Breakdown</h2>
+                <div class="chart-wrap">
+                    <canvas x-ref="protocolChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </main>
+    <script src="/static/chart.min.js"></script>
+    <script src="/static/alpine.min.js" defer></script>
+    <script>
+        const chartColors = {
+            cyan:   'rgba(0, 255, 234, 0.8)',
+            pink:   'rgba(255, 41, 117, 0.8)',
+            green:  'rgba(0, 255, 136, 0.8)',
+            blue:   'rgba(30, 144, 255, 0.8)',
+            amber:  'rgba(255, 183, 0, 0.8)',
+            violet: 'rgba(187, 134, 252, 0.8)',
+            red:    'rgba(255, 55, 95, 0.8)',
+            yellow: 'rgba(255, 234, 0, 0.8)',
+        };
+        const colorList = Object.values(chartColors);
+
+        const defaultChartOpts = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#8b949e', font: { size: 11 } } }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#585b70', font: { size: 10 } },
+                    grid: { color: 'rgba(48,54,61,0.5)' }
+                },
+                y: {
+                    ticks: { color: '#585b70', font: { size: 10 } },
+                    grid: { color: 'rgba(48,54,61,0.5)' },
+                    beginAtZero: true
+                }
+            }
+        };
+
+        Chart.defaults.color = '#8b949e';
+
+        // Chart instances stored outside Alpine to avoid reactive proxy wrapping
+        const chartInstances = {};
+
+        // Preserve dataset hidden state across chart data updates
+        function updateChartData(chart, newData) {
+            const hidden = {};
+            if (chart.data && chart.data.datasets) {
+                chart.data.datasets.forEach((ds, i) => {
+                    const meta = chart.getDatasetMeta(i);
+                    if (meta.hidden !== null) hidden[ds.label] = meta.hidden;
+                });
+            }
+            chart.data = newData;
+            newData.datasets.forEach((ds, i) => {
+                if (ds.label in hidden) {
+                    chart.getDatasetMeta(i).hidden = hidden[ds.label];
+                }
+            });
+            chart.update('none');
+        }
+
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('statistics', () => ({
+                live: { connections: 0, active: 0, upstreams: {}, protocols: {} },
+                statusData: { upstreams: {} },
+                nav: [],
+                duration: 3600,
+                refreshTimer: null,
+                timeOptions: [
+                    { label: '5m', seconds: 300 },
+                    { label: '1h', seconds: 3600 },
+                    { label: '6h', seconds: 21600 },
+                    { label: '24h', seconds: 86400 },
+                    { label: '7d', seconds: 604800 },
+                    { label: '14d', seconds: 1209600 },
+                    { label: '30d', seconds: 2592000 },
+                    { label: '90d', seconds: 7776000 },
+                    { label: '180d', seconds: 15552000 },
+                    { label: '365d', seconds: 31536000 },
+                ],
+
+                async init() {
+                    await this.refresh();
+                    this.refreshTimer = setInterval(() => this.refresh(), 5000);
+                },
+
+                destroy() {
+                    if (this.refreshTimer) clearInterval(this.refreshTimer);
+                },
+
+                setDuration(d) {
+                    this.duration = d;
+                    this.refresh();
+                },
+
+                async refresh() {
+                    const [liveData, timeseriesData, statusData, navData] = await Promise.all([
+                        fetch('/api/snapshot').then(r => r.json()).catch(() => null),
+                        fetch(`/api/timeseries?duration=${this.duration}`).then(r => r.json()).catch(() => null),
+                        fetch('/api/status').then(r => r.json()).catch(() => null),
+                        fetch('/api/nav').then(r => r.json()).catch(() => null),
+                    ]);
+
+                    if (liveData) this.live = liveData;
+                    if (statusData) this.statusData = statusData;
+                    if (navData) this.nav = navData;
+
+                    // Update charts after Alpine has finished processing DOM
+                    // updates from the reactive data changes above
+                    this.$nextTick(() => {
+                        const points = (timeseriesData && timeseriesData.points) || [];
+                        this.updateCharts(points);
+                    });
+                },
+
+                sortedUpstreams() {
+                    const entries = Object.entries(this.statusData.upstreams || {});
+                    return entries.sort((a, b) => {
+                        // Healthy before unhealthy
+                        if (a[1].healthy !== b[1].healthy) return a[1].healthy ? -1 : 1;
+                        // Direct last
+                        if (a[0] === 'direct') return 1;
+                        if (b[0] === 'direct') return -1;
+                        return a[0].localeCompare(b[0]);
+                    });
+                },
+
+                updateCharts(points) {
+                    const labels = points.map(p => {
+                        const d = new Date(p.timestamp);
+                        if (this.duration <= 3600) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                        if (this.duration <= 86400) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        return d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    });
+
+                    this.updateConnectionsChart(labels, points);
+                    this.updateTrafficChart(labels, points);
+                    this.updateProtocolChart();
+                },
+
+                updateConnectionsChart(labels, points) {
+                    const ctx = this.$refs.connectionsChart;
+
+                    // Compute new connections per interval (delta of cumulative counter)
+                    const newConns = points.map((p, i) => {
+                        if (i === 0) return 0;
+                        const delta = p.connections - points[i - 1].connections;
+                        return delta > 0 ? delta : 0;
+                    });
+
+                    const data = {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'New',
+                                data: newConns,
+                                borderColor: chartColors.cyan,
+                                backgroundColor: 'rgba(0, 255, 234, 0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 0,
+                            },
+                            {
+                                label: 'Active',
+                                data: points.map(p => p.active),
+                                borderColor: chartColors.green,
+                                backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 0,
+                            }
+                        ]
+                    };
+                    if (chartInstances.connections) {
+                        updateChartData(chartInstances.connections, data);
+                    } else {
+                        chartInstances.connections = new Chart(ctx, {
+                            type: 'line',
+                            data,
+                            options: defaultChartOpts
+                        });
+                    }
+                },
+
+                updateTrafficChart(labels, points) {
+                    const ctx = this.$refs.trafficChart;
+                    const upstreamNames = new Set();
+                    points.forEach(p => Object.keys(p.upstreams || {}).forEach(n => upstreamNames.add(n)));
+
+                    const datasets = [...upstreamNames].map((name, i) => {
+                        // Compute per-interval throughput (delta of cumulative bytes)
+                        const totals = points.map(p => {
+                            const u = (p.upstreams || {})[name];
+                            return u ? u.bytes_in + u.bytes_out : 0;
+                        });
+                        const deltas = totals.map((v, j) => {
+                            if (j === 0) return 0;
+                            const d = v - totals[j - 1];
+                            return d > 0 ? d : 0;
+                        });
+                        return {
+                            label: name,
+                            data: deltas,
+                            backgroundColor: colorList[i % colorList.length],
+                            borderColor: 'transparent',
+                        };
+                    });
+
+                    const data = { labels, datasets };
+                    if (chartInstances.traffic) {
+                        updateChartData(chartInstances.traffic, data);
+                    } else {
+                        chartInstances.traffic = new Chart(ctx, {
+                            type: 'bar',
+                            data,
+                            options: {
+                                ...defaultChartOpts,
+                                plugins: {
+                                    ...defaultChartOpts.plugins,
+                                    legend: { ...defaultChartOpts.plugins.legend, position: 'bottom' }
+                                },
+                                scales: {
+                                    ...defaultChartOpts.scales,
+                                    x: { ...defaultChartOpts.scales.x, stacked: true },
+                                    y: {
+                                        ...defaultChartOpts.scales.y,
+                                        stacked: true,
+                                        ticks: {
+                                            ...defaultChartOpts.scales.y.ticks,
+                                            callback: v => this.formatBytes(v)
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                },
+
+                updateProtocolChart() {
+                    const ctx = this.$refs.protocolChart;
+                    const protocols = this.live.protocols || {};
+                    const protoNames = Object.keys(protocols).filter(k => protocols[k] > 0);
+
+                    const data = {
+                        labels: protoNames,
+                        datasets: [{
+                            data: protoNames.map(k => protocols[k]),
+                            backgroundColor: protoNames.map((_, i) => colorList[i % colorList.length]),
+                            borderColor: '#161b22',
+                            borderWidth: 2,
+                        }]
+                    };
+
+                    if (chartInstances.protocol) {
+                        updateChartData(chartInstances.protocol, data);
+                    } else {
+                        chartInstances.protocol = new Chart(ctx, {
+                            type: 'pie',
+                            data,
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        position: 'bottom',
+                                        labels: { color: '#8b949e', font: { size: 11 }, padding: 15 }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                },
+
+                formatNumber(n) {
+                    if (n === undefined || n === null) return '0';
+                    return n.toLocaleString();
+                },
+
+                formatBytes(bytes) {
+                    if (bytes === 0) return '0';
+                    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+                    return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+                }
+            }));
+        });
+    </script>
+</body>
+</html>

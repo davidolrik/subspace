@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Subspace Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/fonts/fontawesome.min.css">
+    <link rel="stylesheet" href="/static/fonts/simple-icons.min.css">
+</head>
+<body x-data="dashboard" x-init="loadLinks()">
+    <header>
+        <h1>
+            <span class="sub">sub</span><span class="space">space</span>
+            <template x-if="title">
+                <span><span class="title-dash">-</span> <span class="title" x-text="title"></span></span>
+            </template>
+        </h1>
+        <nav>
+            <template x-for="item in nav" :key="item.url">
+                <a :href="item.url" :class="{ active: item.active }" x-text="item.label"></a>
+            </template>
+        </nav>
+    </header>
+    <main>
+        <div class="grid" x-show="groups.length > 0">
+            <template x-for="group in groups" :key="group.Name">
+                <section class="group">
+                    <h2 x-text="group.Name"></h2>
+                    <ul>
+                        <template x-for="link in group.Links" :key="link.URL">
+                            <li>
+                                <a :href="link.URL">
+                                    <template x-if="link.Icon">
+                                        <i :class="iconClass(link.Icon)" class="link-icon"></i>
+                                    </template>
+                                    <template x-if="!link.Icon">
+                                        <span class="default-icon">&#x2022;</span>
+                                    </template>
+                                    <span class="link-text">
+                                        <span class="link-name" x-text="link.Name"></span>
+                                        <template x-if="link.Description">
+                                            <span class="link-desc" x-text="link.Description"></span>
+                                        </template>
+                                    </span>
+                                </a>
+                            </li>
+                        </template>
+                    </ul>
+                </section>
+            </template>
+        </div>
+        <p class="empty" x-show="groups.length === 0">No links configured.</p>
+    </main>
+    <footer x-show="footer" x-text="footer"></footer>
+    <script src="/static/alpine.min.js" defer></script>
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('dashboard', () => ({
+                title: '',
+                footer: '',
+                groups: [],
+                nav: [],
+                async loadLinks() {
+                    try {
+                        const [linksResp, navResp] = await Promise.all([
+                            fetch('/api/links').then(r => r.json()),
+                            fetch('/api/nav').then(r => r.json()),
+                        ]);
+                        this.title = linksResp.Title || '';
+                        this.footer = linksResp.Footer || '';
+                        this.groups = linksResp.Sections || [];
+                        this.nav = navResp || [];
+                    } catch (e) {
+                        console.error('Failed to load links:', e);
+                    }
+                },
+                iconClass(icon) {
+                    if (icon.startsWith('si-')) return 'si ' + icon;
+                    if (icon.startsWith('fa-')) return 'fa-solid ' + icon;
+                    return icon;
+                }
+            }));
+        });
+    </script>
+</body>
+</html>

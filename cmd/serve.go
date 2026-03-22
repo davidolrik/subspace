@@ -14,7 +14,9 @@ import (
 	"go.olrik.dev/subspace/config"
 	"go.olrik.dev/subspace/control"
 	"go.olrik.dev/subspace/internal/style"
+	"go.olrik.dev/subspace/pages"
 	"go.olrik.dev/subspace/proxy"
+	"go.olrik.dev/subspace/stats"
 	"go.olrik.dev/subspace/route"
 	"go.olrik.dev/subspace/upstream"
 )
@@ -51,6 +53,27 @@ var serveCmd = &cobra.Command{
 		pool := upstream.NewPool(upstream.PoolConfig{})
 		srv := proxy.NewServer(ln, matcher, dialers, pool)
 
+		// Open the statistics database
+		statsDBPath := filepath.Join(filepath.Dir(configFile), "stats.db")
+		statsStore, err := stats.OpenStore(statsDBPath)
+		if err != nil {
+			return fmt.Errorf("opening stats database: %w", err)
+		}
+		defer statsStore.Close()
+
+		// Start the periodic stats recorder
+		recorder := stats.NewRecorder(srv.Stats, statsStore, stats.DefaultRecorderConfig())
+		go recorder.Run()
+		defer recorder.Stop()
+
+		// Set up internal pages (link pages, statistics, error pages)
+		pageInfos, err := loadPages(cfg)
+		if err != nil {
+			return err
+		}
+		pagesHandler := pages.New(pageInfos, srv.Stats, statsStore)
+		srv.Pages = pagesHandler
+
 		// Ensure the control socket directory exists
 		if err := os.MkdirAll(filepath.Dir(cfg.ControlSocket), 0700); err != nil {
 			return fmt.Errorf("creating control socket directory: %w", err)
@@ -65,6 +88,9 @@ var serveCmd = &cobra.Command{
 		defer ctrlSrv.Close()
 		go ctrlSrv.Serve()
 
+		// Give the statistics page access to upstream health data
+		pagesHandler.SetStatusProvider(func() any { return ctrlSrv.Status() })
+
 		slog.Info("subspace listening",
 			"version", Version,
 			"addr", cfg.Listen,
@@ -74,7 +100,7 @@ var serveCmd = &cobra.Command{
 		)
 
 		// Watch config files for changes (main config + included files)
-		go watchConfig(cfg, srv, ctrlSrv)
+		go watchConfig(cfg, srv, ctrlSrv, pagesHandler)
 
 		// Graceful shutdown
 		sigCh := make(chan os.Signal, 1)
@@ -131,7 +157,7 @@ func buildUpstreamInfo(cfg *config.Config) map[string]control.UpstreamInfo {
 
 // watchConfig watches the main config file and all included files for changes,
 // reloading the proxy server's routing when any of them are modified.
-func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server) {
+func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		slog.Error("config watcher setup failed", "error", err)
@@ -173,7 +199,12 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 				continue
 			}
 
-			newCfg := reloadConfig(currentCfg, srv, ctrlSrv)
+			// Ignore non-KDL files (e.g. stats.db, WAL/SHM files)
+			if ext := filepath.Ext(eventAbs); ext != ".kdl" {
+				continue
+			}
+
+			newCfg := reloadConfig(currentCfg, srv, ctrlSrv, pagesHandler)
 			if newCfg == nil {
 				continue
 			}
@@ -217,7 +248,7 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 // reloadConfig re-parses the config from the main file (which resolves
 // includes), validates it, and applies it. Returns the new config on
 // success, or nil if the reload failed.
-func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server) *config.Config {
+func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler) *config.Config {
 	// The main config file is always the first in IncludedFiles
 	mainFile := currentCfg.IncludedFiles[0]
 
@@ -246,12 +277,39 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	srv.Reload(matcher, dialers)
 	ctrlSrv.SetUpstreams(buildUpstreamInfo(newCfg))
 
+	// Reload link pages
+	if pagesHandler != nil {
+		pageInfos, err := loadPages(newCfg)
+		if err != nil {
+			slog.Warn("config reload: failed to load link pages, keeping current", "error", err)
+		} else {
+			pagesHandler.ReloadPages(pageInfos)
+		}
+	}
+
 	slog.Info("config reloaded",
 		"upstreams", len(newCfg.Upstreams),
 		"routes", len(newCfg.Routes),
 	)
 
 	return newCfg
+}
+
+// loadPages parses all configured link page files into PageInfo structs.
+func loadPages(cfg *config.Config) ([]pages.PageInfo, error) {
+	var infos []pages.PageInfo
+	for _, pg := range cfg.Pages {
+		pageCfg, err := pages.ParsePageFile(pg.File)
+		if err != nil {
+			return nil, fmt.Errorf("loading page %q: %w", pg.File, err)
+		}
+		infos = append(infos, pages.PageInfo{
+			Host:  pg.Host,
+			Alias: pg.Alias,
+			Page:  pageCfg,
+		})
+	}
+	return infos, nil
 }
 
 func init() {

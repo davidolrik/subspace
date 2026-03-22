@@ -174,6 +174,162 @@ func TestParseConfigControlSocketDefault(t *testing.T) {
 	}
 }
 
+func TestParseConfigPageDerivedHost(t *testing.T) {
+	input := `
+listen ":8080"
+page "dev.kdl"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(cfg.Pages) != 1 {
+		t.Fatalf("got %d links pages, want 1", len(cfg.Pages))
+	}
+	if cfg.Pages[0].Host != "dev" {
+		t.Errorf("Host = %q, want %q", cfg.Pages[0].Host, "dev")
+	}
+}
+
+func TestParseConfigPageExplicitHost(t *testing.T) {
+	input := `
+listen ":8080"
+page "my-file.kdl" host="internal"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.Pages[0].Host != "internal" {
+		t.Errorf("Host = %q, want %q", cfg.Pages[0].Host, "internal")
+	}
+}
+
+func TestParseConfigPageAlias(t *testing.T) {
+	input := `
+listen ":8080"
+page "dashboard.kdl" alias="dash"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	lp := cfg.Pages[0]
+	if lp.Host != "dashboard" {
+		t.Errorf("Host = %q, want %q", lp.Host, "dashboard")
+	}
+	if lp.Alias != "dash" {
+		t.Errorf("Alias = %q, want %q", lp.Alias, "dash")
+	}
+}
+
+func TestParseConfigMultipleLinks(t *testing.T) {
+	input := `
+listen ":8080"
+page "dev.kdl"
+page "ops.kdl"
+page "tools.kdl" host="internal" alias="int"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(cfg.Pages) != 3 {
+		t.Fatalf("got %d links pages, want 3", len(cfg.Pages))
+	}
+	if cfg.Pages[0].Host != "dev" {
+		t.Errorf("[0].Host = %q, want %q", cfg.Pages[0].Host, "dev")
+	}
+	if cfg.Pages[1].Host != "ops" {
+		t.Errorf("[1].Host = %q, want %q", cfg.Pages[1].Host, "ops")
+	}
+	if cfg.Pages[2].Host != "internal" || cfg.Pages[2].Alias != "int" {
+		t.Errorf("[2] = %+v", cfg.Pages[2])
+	}
+}
+
+func TestParseConfigPageNoPages(t *testing.T) {
+	input := `listen ":8080"`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(cfg.Pages) != 0 {
+		t.Errorf("got %d links pages, want 0", len(cfg.Pages))
+	}
+}
+
+func TestParseConfigPageReservedHost(t *testing.T) {
+	for _, reserved := range []string{"stats", "statistics"} {
+		input := `
+listen ":8080"
+page "foo.kdl" host="` + reserved + `"
+`
+		_, err := Parse([]byte(input))
+		if err == nil {
+			t.Errorf("expected error for reserved host %q", reserved)
+		}
+	}
+}
+
+func TestParseConfigPageReservedAlias(t *testing.T) {
+	input := `
+listen ":8080"
+page "foo.kdl" alias="stats"
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for reserved alias")
+	}
+}
+
+func TestParseConfigPageReservedDerivedHost(t *testing.T) {
+	input := `
+listen ":8080"
+page "stats.kdl"
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for reserved derived hostname")
+	}
+}
+
+func TestParseFilePageResolvesPath(t *testing.T) {
+	dir := t.TempDir()
+
+	linksPath := filepath.Join(dir, "dev.kdl")
+	writeFile(t, linksPath, `group "Test" { link "Ex" url="https://example.com" }`)
+
+	configPath := filepath.Join(dir, "config.kdl")
+	writeFile(t, configPath, `
+listen ":8080"
+page "dev.kdl"
+`)
+
+	cfg, err := ParseFile(configPath)
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	if len(cfg.Pages) != 1 {
+		t.Fatalf("got %d links pages, want 1", len(cfg.Pages))
+	}
+	if cfg.Pages[0].File != linksPath {
+		t.Errorf("File = %q, want %q", cfg.Pages[0].File, linksPath)
+	}
+
+	found := false
+	for _, f := range cfg.IncludedFiles {
+		if f == linksPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("IncludedFiles = %v, want it to contain %q", cfg.IncludedFiles, linksPath)
+	}
+}
+
 // --- include tests ---
 
 func writeFile(t *testing.T, path, content string) {

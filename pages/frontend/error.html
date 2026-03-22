@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.Status}} — {{.Title}}</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .error-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 2.5rem;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+        .status {
+            font-size: 3rem;
+            font-weight: 700;
+            color: #ff376f;
+            margin-bottom: 0.5rem;
+        }
+        .title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #c9d1d9;
+            margin-bottom: 1rem;
+        }
+        .detail {
+            font-size: 0.9rem;
+            color: #8b949e;
+            line-height: 1.5;
+            word-break: break-word;
+        }
+        .brand {
+            margin-top: 2rem;
+            font-size: 0.8rem;
+            color: #30363d;
+        }
+        .brand .sub { color: #58616b; }
+        .brand .space { color: #1a5c56; }
+    </style>
+</head>
+<body>
+    <div class="error-card">
+        <div class="status">{{.Status}}</div>
+        <div class="title">{{.Title}}</div>
+        <div class="detail">{{.Detail}}</div>
+    </div>
+    <div class="brand"><span class="sub">sub</span><span class="space">space</span></div>
+</body>
+</html>

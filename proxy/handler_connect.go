@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+
+	"go.olrik.dev/subspace/pages"
 )
 
 // handleCONNECT handles an HTTP CONNECT request by establishing a tunnel
@@ -18,16 +20,31 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 	}
 
 	host, _, _ := net.SplitHostPort(targetAddr)
+
+	// Internal pages are HTTP-only; redirect CONNECT to the HTTP version
+	if pages.IsInternalHost(host) {
+		slog.Debug("CONNECT redirected to HTTP for internal host", "target", targetAddr)
+		conn.Write([]byte("HTTP/1.1 302 Found\r\nLocation: http://" + host + "/\r\nCache-Control: no-store\r\n\r\n"))
+		conn.Close()
+		return
+	}
+
 	route := s.dialerFor(host)
 
 	slog.Debug("CONNECT", "target", targetAddr, "via", route.upstream)
 
 	upstream, err := route.dialer.DialContext(s.ctx, "tcp", targetAddr)
 	if err != nil {
-		slog.Error("CONNECT dial failed", "target", targetAddr, "via", route.upstream, "error", err)
-		s.Stats.IncUpstream(route.upstream, false)
-		s.Stats.IncError("dial_failed")
-		conn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		if isDNSError(err) {
+			slog.Error("DNS lookup failed", "host", host, "error", err)
+			s.Stats.IncError("dns_failed")
+			conn.Write(pages.ErrorPage(502, "Host Not Found", host))
+		} else {
+			slog.Error("CONNECT dial failed", "target", targetAddr, "via", route.upstream, "error", err)
+			s.Stats.IncUpstream(route.upstream, false)
+			s.Stats.IncError("dial_failed")
+			conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
+		}
 		conn.Close()
 		return
 	}

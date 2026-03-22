@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/sblinch/kdl-go"
 	"github.com/sblinch/kdl-go/document"
@@ -25,13 +26,26 @@ type Route struct {
 	Via     string
 }
 
+// Page describes an internal page served on a *.subspace hostname.
+type Page struct {
+	File  string // absolute path to the KDL file
+	Host  string // primary hostname (without .subspace suffix)
+	Alias string // optional alias hostname (without .subspace suffix)
+}
+
 // Config is the top-level configuration for subspace.
 type Config struct {
 	Listen        string
 	ControlSocket string
+	Pages         []Page
 	Upstreams     map[string]Upstream
 	Routes        []Route
 	IncludedFiles []string // absolute paths of all files parsed (main + includes)
+}
+
+var reservedHosts = map[string]bool{
+	"stats":      true,
+	"statistics": true,
 }
 
 var validUpstreamTypes = map[string]bool{
@@ -132,6 +146,16 @@ func (p *parser) parseData(data []byte, baseDir string) error {
 				return fmt.Errorf("control_socket requires a path argument")
 			}
 			p.cfg.ControlSocket = node.Arguments[0].ValueString()
+
+		case "page":
+			pg, err := parsePage(node, baseDir)
+			if err != nil {
+				return err
+			}
+			if baseDir != "" {
+				p.cfg.IncludedFiles = append(p.cfg.IncludedFiles, pg.File)
+			}
+			p.cfg.Pages = append(p.cfg.Pages, pg)
 
 		case "route":
 			r, err := parseRoute(node)
@@ -247,6 +271,46 @@ func parseUpstream(node *document.Node) (Upstream, error) {
 	}
 
 	return u, nil
+}
+
+func parsePage(node *document.Node, baseDir string) (Page, error) {
+	if len(node.Arguments) < 1 {
+		return Page{}, fmt.Errorf("page requires a path argument")
+	}
+
+	filePath := node.Arguments[0].ValueString()
+
+	// Derive hostname from filename by default
+	host := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+
+	// Optional host= override
+	if hostVal, ok := node.Properties.Get("host"); ok && hostVal != nil {
+		host = hostVal.ValueString()
+	}
+
+	if reservedHosts[host] {
+		return Page{}, fmt.Errorf("page host %q is reserved for the statistics page", host)
+	}
+
+	// Optional alias=
+	var alias string
+	if aliasVal, ok := node.Properties.Get("alias"); ok && aliasVal != nil {
+		alias = aliasVal.ValueString()
+		if reservedHosts[alias] {
+			return Page{}, fmt.Errorf("page alias %q is reserved for the statistics page", alias)
+		}
+	}
+
+	// Resolve file path
+	if baseDir != "" {
+		filePath = filepath.Join(baseDir, filePath)
+	}
+
+	return Page{
+		File:  filePath,
+		Host:  host,
+		Alias: alias,
+	}, nil
 }
 
 func parseRoute(node *document.Node) (Route, error) {

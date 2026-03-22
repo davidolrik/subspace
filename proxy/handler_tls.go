@@ -3,6 +3,8 @@ package proxy
 import (
 	"fmt"
 	"log/slog"
+
+	"go.olrik.dev/subspace/pages"
 )
 
 // extractSNI parses the TLS ClientHello from the peeked bytes and returns
@@ -159,6 +161,13 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 		return
 	}
 
+	// Internal pages are HTTP-only; reject TLS to *.subspace
+	if pages.IsInternalHost(sni) {
+		slog.Debug("TLS rejected for internal host", "sni", sni)
+		conn.Close()
+		return
+	}
+
 	targetAddr := sni + ":" + listenPort
 	route := s.dialerFor(sni)
 
@@ -166,9 +175,14 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 
 	upstream, err := route.dialer.DialContext(s.ctx, "tcp", targetAddr)
 	if err != nil {
-		slog.Error("TLS dial failed", "sni", sni, "target", targetAddr, "via", route.upstream, "error", err)
-		s.Stats.IncUpstream(route.upstream, false)
-		s.Stats.IncError("dial_failed")
+		if isDNSError(err) {
+			slog.Error("DNS lookup failed", "sni", sni, "error", err)
+			s.Stats.IncError("dns_failed")
+		} else {
+			slog.Error("TLS dial failed", "sni", sni, "target", targetAddr, "via", route.upstream, "error", err)
+			s.Stats.IncUpstream(route.upstream, false)
+			s.Stats.IncError("dial_failed")
+		}
 		conn.Close()
 		return
 	}

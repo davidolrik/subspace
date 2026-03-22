@@ -15,6 +15,9 @@ A transparent proxy that routes traffic through upstream proxies based on hostna
 - **Config includes** — split config across multiple files with glob support
 - **Live log streaming** — stream colored logs from a running server with level filtering
 - **Health checks** — TCP health checks for all upstreams via the status command
+- **Internal pages** — link dashboards and statistics served at `*.subspace` hostnames
+- **Statistics** — live metrics, upstream health, and historical charts with persistent SQLite storage
+- **Styled error pages** — DNS failures and connection errors show helpful error pages instead of bare 502s
 
 ## Installation
 
@@ -164,6 +167,40 @@ include "routes/corporate.kdl"
 Nested includes are supported. Circular includes are detected and rejected. Glob patterns that match no files are silently ignored; exact paths that don't exist produce an error.
 
 New files added to an already-included directory are picked up automatically on the next config change.
+
+### `page`
+
+Defines an internal page served at `{name}.subspace`. The hostname is derived from the filename by default, or set explicitly with `host=`. An optional `alias=` adds a second hostname.
+
+```kdl
+page "dev.kdl"
+page "ops.kdl"
+page "my-page.kdl" host="internal" alias="int"
+```
+
+This creates pages at `dev.subspace`, `ops.subspace`, and `internal.subspace` (also `int.subspace`). Each page is configured in its own KDL file:
+
+```kdl
+title "Development"
+footer "Acme Corp"
+
+list "Repositories" {
+    link "GitHub" url="https://github.com/org" icon="si-github" description="Source code"
+    link "CI/CD" url="https://ci.example.com" icon="fa-rocket"
+}
+```
+
+Icons are embedded in the binary (no external requests). Use `si-*` for [Simple Icons](https://simpleicons.org) and `fa-*` for [Font Awesome](https://fontawesome.com/icons).
+
+All configured pages and the statistics page appear in a shared navigation menu.
+
+### Built-in Pages
+
+- **Statistics** — always available at `statistics.subspace` (or `stats.subspace`). Shows live metrics (connections, active, upstream health), and historical charts (connections over time, traffic by upstream, protocol breakdown). Statistics are persisted to a SQLite database and retained for one year with automatic downsampling.
+- **Entry point** — navigating to `http://subspace.dk/` redirects to the first configured page, or to statistics if no pages are defined.
+- **Error pages** — DNS failures and connection errors show styled error pages instead of bare HTTP 502 responses.
+
+The hostnames `stats` and `statistics` are reserved and cannot be used for pages.
 
 ### Hot Reload
 
