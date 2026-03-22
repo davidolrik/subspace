@@ -1,6 +1,6 @@
 # What is Subspace?
 
-Subspace is a transparent proxy that routes traffic through upstream proxies based on hostname and IP matching. It supports HTTP, HTTPS, WebSocket, and WSS without terminating TLS.
+Subspace is a transparent proxy that routes traffic through upstream proxies based on hostname and IP matching. It supports HTTP, HTTPS, WebSocket, WSS, and SOCKS5 without terminating TLS.
 
 ## The Problem
 
@@ -10,8 +10,8 @@ You need certain traffic to go through specific proxies — corporate traffic th
 
 Subspace sits between your applications and the network. When a connection arrives:
 
-1. It **peeks at the first byte** to determine the protocol (TLS, HTTP, or CONNECT)
-2. It **extracts the hostname** from the SNI extension (TLS), Host header (HTTP), or CONNECT target
+1. It **peeks at the first byte** to determine the protocol (SOCKS5, TLS, HTTP, or CONNECT)
+2. It **extracts the hostname** from the SOCKS5 request, SNI extension (TLS), Host header (HTTP), or CONNECT target
 3. It **matches the hostname** against your routing rules
 4. It **forwards the connection** through the appropriate upstream proxy, or connects directly
 
@@ -28,14 +28,17 @@ For TLS traffic, Subspace never decrypts the data — it reads just enough of th
 ## Key Features
 
 - **HTTP, HTTPS, WebSocket, WSS** — all protocols handled transparently
+- **SOCKS5 inbound** — accepts SOCKS5 clients on the same port, auto-detected alongside HTTP
 - **HTTP CONNECT and SOCKS5** upstreams with optional authentication
 - **Pattern matching** — exact hostnames, domain suffixes, globs, CIDR subnets
 - **Connection pooling** — reuses upstream connections for HTTP requests
 - **HTTP keep-alive** — multiple requests per client connection
+- **Internal pages** — link dashboards and live statistics at `*.subspace` hostnames
 - **Hot reload** — config changes apply without restart
 - **Config includes** — split config across files with glob support
 - **Health checks** — TCP health checks via the status command
 - **Live logs** — stream colored logs from a running server
+- **Styled error pages** — DNS failures and connection errors show helpful error pages
 
 ## What Subspace Is Not
 

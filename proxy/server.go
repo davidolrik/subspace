@@ -105,6 +105,12 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 
+	if first[0] == 0x05 {
+		s.Stats.IncProtocol("SOCKS5")
+		s.handleSOCKS5(pc)
+		return
+	}
+
 	// HTTP keep-alive loop: read requests until the client signals close,
 	// the connection is idle too long, or a handler takes over (CONNECT/WebSocket).
 	for {

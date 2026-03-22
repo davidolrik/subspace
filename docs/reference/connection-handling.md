@@ -9,6 +9,7 @@ When a connection arrives, Subspace peeks at the first byte to classify it:
 ```mermaid
 flowchart TD
     A[New Connection] --> B{First byte}
+    B -->|0x05| S[SOCKS5 Handler]
     B -->|0x16| C[TLS Handler]
     B -->|HTTP| D{Method?}
     D -->|CONNECT| E[CONNECT Handler]
@@ -16,6 +17,12 @@ flowchart TD
     F -->|WebSocket| G[WebSocket Handler]
     F -->|No| H[HTTP Handler]
 ```
+
+### SOCKS5
+
+The SOCKS5 handler performs the server-side handshake (no-authentication only), extracts the target hostname and port from the connect request, then routes through the same upstream selection as HTTP CONNECT. After a successful dial, it enters a bidirectional relay. SOCKS5 supports IPv4, IPv6, and domain name address types.
+
+SOCKS5 is auto-detected on the same port — no separate listener or configuration needed.
 
 ### TLS
 
@@ -65,7 +72,7 @@ HTTP requests reuse upstream connections when possible:
 - On **Put**, excess connections beyond the per-host limit are closed
 - On **shutdown**, all pooled connections are closed
 
-Pooling applies only to HTTP requests. CONNECT, TLS, and WebSocket connections use bidirectional relay and are not pooled.
+Pooling applies only to HTTP requests. CONNECT, TLS, SOCKS5, and WebSocket connections use bidirectional relay and are not pooled.
 
 ## Zero-Copy Relay
 
@@ -81,11 +88,11 @@ Subspace tracks per-connection statistics:
 |---|---|---|
 | Total connections | Global | Requests handled since startup |
 | Active connections | Global | Currently open connections |
-| Protocol counts | Global | Breakdown by TLS, HTTP, CONNECT, WebSocket |
+| Protocol counts | Global | Breakdown by SOCKS5, TLS, HTTP, CONNECT, WebSocket |
 | Error counts | Global | By error type (peek_failed, parse_failed, etc.) |
 | Success / Failures | Per upstream | Dial outcomes |
 | Bytes in / out | Per upstream | Transfer volume |
 | Pool hits / misses | Global | Connection reuse rate |
 | Idle connections | Per upstream | Currently pooled connections |
 
-Statistics are available via `subspace status` or the `/status` control socket endpoint.
+Statistics are available via `subspace status`, the `/status` control socket endpoint, or the built-in statistics page at `statistics.subspace`. Historical data is persisted to a SQLite database and retained for one year with automatic downsampling.

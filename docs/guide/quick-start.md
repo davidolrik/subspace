@@ -58,8 +58,17 @@ curl -x http://localhost:8118 http://app.corp.internal/api
 # HTTPS — routed based on CONNECT target
 curl -x http://localhost:8118 https://app.corp.internal/api
 
+# SOCKS5 — same port, auto-detected
+curl --socks5-hostname localhost:8118 https://app.corp.internal/api
+
 # Direct — no matching route, connects directly
 curl -x http://localhost:8118 https://example.com
+```
+
+SOCKS5 clients like `git` and `ssh` can use the same port:
+
+```sh
+git -c http.proxy=socks5h://localhost:8118 clone https://github.com/org/repo
 ```
 
 ## Check Status

@@ -17,6 +17,7 @@ import (
 	"go.olrik.dev/subspace/pages"
 	"go.olrik.dev/subspace/route"
 	"go.olrik.dev/subspace/upstream"
+	"golang.org/x/net/proxy"
 )
 
 // startProxy creates and starts a proxy server with the given matcher and dialers.
@@ -105,6 +106,82 @@ func TestProxyCONNECT(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "hello from tls backend" {
 		t.Errorf("got body %q, want %q", body, "hello from tls backend")
+	}
+}
+
+func TestProxySOCKS5(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "hello via socks5")
+	}))
+	t.Cleanup(backend.Close)
+
+	matcher := route.NewMatcher(nil)
+	proxyAddr := startProxy(t, matcher, nil)
+
+	// Use golang.org/x/net/proxy as a SOCKS5 client
+	dialer, err := proxy.SOCKS5("tcp", proxyAddr, nil, proxy.Direct)
+	if err != nil {
+		t.Fatalf("SOCKS5 dialer: %v", err)
+	}
+
+	// Dial the backend through the SOCKS5 proxy
+	conn, err := dialer.Dial("tcp", backend.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("SOCKS5 dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	// Make a plain HTTP request over the connection
+	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", backend.Listener.Addr().String())
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("response: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "hello via socks5" {
+		t.Errorf("got body %q, want %q", body, "hello via socks5")
+	}
+}
+
+func TestProxySOCKS5WithUpstream(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "routed via socks5")
+	}))
+	t.Cleanup(backend.Close)
+
+	_, backendPort, _ := net.SplitHostPort(backend.Listener.Addr().String())
+
+	// Route test.host through direct
+	rules := []route.Rule{{Pattern: "test.host", Upstream: "direct"}}
+	matcher := route.NewMatcher(rules)
+	dialers := map[string]upstream.Dialer{"direct": upstream.NewDirectDialer()}
+	proxyAddr := startProxy(t, matcher, dialers)
+
+	dialer, err := proxy.SOCKS5("tcp", proxyAddr, nil, proxy.Direct)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := dialer.Dial("tcp", "127.0.0.1:"+backendPort)
+	if err != nil {
+		t.Fatalf("SOCKS5 dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: 127.0.0.1:%s\r\nConnection: close\r\n\r\n", backendPort)
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "routed via socks5" {
+		t.Errorf("got body %q, want %q", body, "routed via socks5")
 	}
 }
 

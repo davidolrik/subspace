@@ -1,10 +1,11 @@
 # Subspace
 
-A transparent proxy that routes traffic through upstream proxies based on hostname and IP matching. Supports HTTP, HTTPS, WebSocket, and WSS without terminating TLS.
+A transparent proxy that routes traffic through upstream proxies based on hostname and IP matching. Supports HTTP, HTTPS, WebSocket, WSS, and SOCKS5 without terminating TLS.
 
 ## Features
 
 - **Transparent proxying** — HTTP, HTTPS, WebSocket, and WSS
+- **SOCKS5 inbound** — accepts SOCKS5 clients on the same port, auto-detected alongside HTTP
 - **No TLS termination** — extracts SNI from the ClientHello for routing, then tunnels raw bytes
 - **HTTP CONNECT** — works as an explicit proxy for clients that support it
 - **Flexible routing** — exact hostnames, domain suffixes, glob patterns, and CIDR subnets
@@ -81,11 +82,15 @@ subspace serve
 Use it:
 
 ```sh
-# HTTP
+# HTTP proxy
 curl -x http://localhost:8118 http://example.com
 
 # HTTPS (via CONNECT)
 curl -x http://localhost:8118 https://example.com
+
+# SOCKS5 (same port)
+curl --socks5-hostname localhost:8118 https://example.com
+git -c http.proxy=socks5h://localhost:8118 clone https://github.com/org/repo
 ```
 
 ## Configuration
@@ -257,11 +262,14 @@ subspace logs -L debug -F        # all levels, follow live
 
 ### Connection Classification
 
-When a connection arrives, Subspace peeks at the first byte:
+When a connection arrives, Subspace peeks at the first byte to classify the protocol:
 
+- **`0x05` (SOCKS5)** — Performs the SOCKS5 handshake to extract the target hostname and port. Routes through the same upstream selection as HTTP CONNECT, then relays bidirectionally.
 - **`0x16` (TLS)** — Parses the ClientHello to extract the SNI hostname, reads the full record length for reliable extraction. Routes based on SNI, then tunnels the raw TLS bytes without decryption.
 - **HTTP CONNECT** — Responds with `200 Connection Established` and relays bytes bidirectionally.
 - **Plain HTTP** — Reads the `Host` header for routing. Detects `Upgrade: websocket` for WebSocket upgrade. Supports HTTP/1.1 keep-alive for multiple requests per connection.
+
+All protocols share the same routing rules and upstream configuration. SOCKS5 clients (git, ssh, curl) can use the same port as HTTP proxy clients.
 
 ### Connection Pooling
 
