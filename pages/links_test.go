@@ -176,6 +176,29 @@ list "Dev" {
 	}
 }
 
+func TestParsePageListColor(t *testing.T) {
+	input := []byte(`
+list "Dev" color="#ff6b6b" {
+	link "GitHub" url="https://github.com"
+}
+
+list "Ops" {
+	link "Grafana" url="https://grafana.example.com"
+}
+`)
+	cfg, err := ParsePage(input)
+	if err != nil {
+		t.Fatalf("ParsePage() error: %v", err)
+	}
+
+	if cfg.Sections[0].Color != "#ff6b6b" {
+		t.Errorf("sections[0].Color = %q, want %q", cfg.Sections[0].Color, "#ff6b6b")
+	}
+	if cfg.Sections[1].Color != "" {
+		t.Errorf("sections[1].Color = %q, want empty", cfg.Sections[1].Color)
+	}
+}
+
 func TestParsePageUnknownTopLevel(t *testing.T) {
 	input := []byte(`
 something "foo"

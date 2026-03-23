@@ -18,8 +18,9 @@ type PageConfig struct {
 
 // ListSection is a named section within a page that contains a list of items.
 type ListSection struct {
-	Name  string
-	Links []Link
+	Name  string `json:"Name"`
+	Color string `json:"Color,omitempty"`
+	Links []Link `json:"Links"`
 }
 
 // Link is a single page link.
@@ -81,6 +82,10 @@ func parseListSection(node *document.Node) (ListSection, error) {
 
 	s := ListSection{
 		Name: node.Arguments[0].ValueString(),
+	}
+
+	if colorVal, ok := node.Properties.Get("color"); ok && colorVal != nil {
+		s.Color = colorVal.ValueString()
 	}
 
 	for _, child := range node.Children {

@@ -33,7 +33,7 @@
     <main>
         <div class="grid" x-show="groups.length > 0">
             <template x-for="group in groups" :key="group.Name">
-                <section class="group">
+                <section class="group" :style="group.Color ? `border-top: 2px solid ${group.Color}; box-shadow: 0 0 12px ${group.Color}15; background: linear-gradient(180deg, ${group.Color}1a, transparent)` : ''">
                     <h2 x-text="group.Name"></h2>
                     <ul>
                         <template x-for="link in group.Links" :key="link.URL">
