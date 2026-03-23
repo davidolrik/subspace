@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Subspace Statistics</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/fonts/fontawesome.min.css">
+    <link rel="stylesheet" href="/static/fonts/simple-icons.min.css">
     <style>
         .stats-grid {
             display: grid;
@@ -178,7 +180,14 @@
         </h1>
         <nav>
             <template x-for="item in nav" :key="item.url">
-                <a :href="item.url" :class="{ active: item.active }" x-text="item.label"></a>
+                <a :href="item.url" :class="{ active: item.active }" :title="item.label">
+                    <template x-if="item.icon">
+                        <i :class="iconClass(item.icon)"></i>
+                    </template>
+                    <template x-if="!item.icon">
+                        <span x-text="item.label"></span>
+                    </template>
+                </a>
             </template>
         </nav>
     </header>
@@ -531,6 +540,12 @@
                 formatNumber(n) {
                     if (n === undefined || n === null) return '0';
                     return n.toLocaleString();
+                },
+
+                iconClass(icon) {
+                    if (icon.startsWith('si-')) return 'si ' + icon;
+                    if (icon.startsWith('fa-')) return 'fa-solid ' + icon;
+                    return icon;
                 },
 
                 formatBytes(bytes) {

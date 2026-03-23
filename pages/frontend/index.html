@@ -18,7 +18,14 @@
         </h1>
         <nav>
             <template x-for="item in nav" :key="item.url">
-                <a :href="item.url" :class="{ active: item.active }" x-text="item.label"></a>
+                <a :href="item.url" :class="{ active: item.active }" :title="item.label">
+                    <template x-if="item.icon">
+                        <i :class="iconClass(item.icon)"></i>
+                    </template>
+                    <template x-if="!item.icon">
+                        <span x-text="item.label"></span>
+                    </template>
+                </a>
             </template>
         </nav>
     </header>

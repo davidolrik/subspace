@@ -111,4 +111,4 @@ The hostname cannot be resolved. This typically means:
 ## Still stuck?
 
 - Check the [GitHub issues](https://github.com/davidolrik/subspace/issues) for known problems
-- Open a new issue with the output of `subspace logs -L debug`
+- Search the [Q&A](https://github.com/davidolrik/subspace/discussions/categories/q-a) discussions to see if your problem is unique, or if someone else already have a solution.

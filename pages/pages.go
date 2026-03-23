@@ -40,12 +40,13 @@ type navEntry struct {
 	Label  string `json:"label"`
 	URL    string `json:"url"`
 	Active bool   `json:"active"`
+	Icon   string `json:"icon,omitempty"`
 }
 
 // Handler serves internal pages for *.subspace hostnames.
 type Handler struct {
-	mu        sync.RWMutex
-	mux       *http.ServeMux
+	mu       sync.RWMutex
+	mux      *http.ServeMux
 	pageList []PageInfo
 	// pagesByHost maps "host.subspace" → index into pageList
 	pagesByHost map[string]int
@@ -259,7 +260,14 @@ func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
 		Label:  "Statistics",
 		URL:    "http://stats.subspace/",
 		Active: statsActive,
+		Icon:   "fa-chart-line",
 	})
+
+	// External links (icon-only)
+	nav = append(nav,
+		navEntry{Label: "Documentation", URL: "https://subspace.olrik.dev/", Icon: "fa-book"},
+		navEntry{Label: "GitHub", URL: "https://github.com/davidolrik/subspace", Icon: "si-github"},
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(nav)
