@@ -100,7 +100,7 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 
 	if first[0] == 0x16 {
-		s.Stats.IncProtocol("TLS")
+		s.Stats.IncProtocol("HTTPS")
 		s.handleTLS(pc, s.listenPort)
 		return
 	}
@@ -128,7 +128,12 @@ func (s *Server) handleConn(conn net.Conn) {
 		pc.Conn.SetReadDeadline(time.Time{}) // clear deadline for handler
 
 		if req.Method == http.MethodConnect {
-			s.Stats.IncProtocol("CONNECT")
+			_, port, _ := net.SplitHostPort(req.Host)
+			if port == "443" || port == "" {
+				s.Stats.IncProtocol("HTTPS")
+			} else {
+				s.Stats.IncProtocol("CONNECT:" + port)
+			}
 			s.handleCONNECT(pc, req)
 			return // CONNECT takes over the connection
 		}

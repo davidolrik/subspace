@@ -284,11 +284,42 @@
         };
         const colorList = Object.values(chartColors);
 
+        const tooltipStyle = {
+            tooltip: {
+                mode: 'index',
+                intersect: false,
+                backgroundColor: '#161b22',
+                borderColor: '#30363d',
+                borderWidth: 1,
+                titleColor: '#c9d1d9',
+                titleFont: { weight: '600', size: 12 },
+                bodyColor: '#8b949e',
+                bodyFont: { size: 11 },
+                padding: 10,
+                cornerRadius: 6,
+                usePointStyle: true,
+                callbacks: {
+                    labelColor: function(ctx) {
+                        return {
+                            borderColor: ctx.dataset.borderColor || ctx.dataset.backgroundColor,
+                            backgroundColor: ctx.dataset.borderColor || ctx.dataset.backgroundColor,
+                            borderRadius: 2,
+                        };
+                    }
+                }
+            }
+        };
+
         const defaultChartOpts = {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
             plugins: {
-                legend: { labels: { color: '#8b949e', font: { size: 11 } } }
+                legend: { labels: { color: '#8b949e', font: { size: 11 } } },
+                ...tooltipStyle,
             },
             scales: {
                 x: {
@@ -415,6 +446,17 @@
                         return delta > 0 ? delta : 0;
                     });
 
+                    // Compute errors per interval (delta of summed error counts)
+                    const errorTotals = points.map(p => {
+                        const errs = p.errors || {};
+                        return Object.values(errs).reduce((sum, v) => sum + v, 0);
+                    });
+                    const errorDeltas = errorTotals.map((v, i) => {
+                        if (i === 0) return 0;
+                        const d = v - errorTotals[i - 1];
+                        return d > 0 ? d : 0;
+                    });
+
                     const data = {
                         labels,
                         datasets: [
@@ -432,6 +474,15 @@
                                 data: points.map(p => p.active),
                                 borderColor: chartColors.green,
                                 backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 0,
+                            },
+                            {
+                                label: 'Errors',
+                                data: errorDeltas,
+                                borderColor: chartColors.red,
+                                backgroundColor: 'rgba(255, 55, 95, 0.1)',
                                 fill: true,
                                 tension: 0.3,
                                 pointRadius: 0,
@@ -484,7 +535,14 @@
                                 ...defaultChartOpts,
                                 plugins: {
                                     ...defaultChartOpts.plugins,
-                                    legend: { ...defaultChartOpts.plugins.legend, position: 'bottom' }
+                                    legend: { ...defaultChartOpts.plugins.legend, position: 'bottom' },
+                                    tooltip: {
+                                        ...tooltipStyle.tooltip,
+                                        callbacks: {
+                                            ...tooltipStyle.tooltip.callbacks,
+                                            label: (ctx) => ` ${ctx.dataset.label}: ${this.formatBytes(ctx.parsed.y)}`
+                                        }
+                                    }
                                 },
                                 scales: {
                                     ...defaultChartOpts.scales,
@@ -531,7 +589,8 @@
                                     legend: {
                                         position: 'bottom',
                                         labels: { color: '#8b949e', font: { size: 11 }, padding: 15 }
-                                    }
+                                    },
+                                    ...tooltipStyle,
                                 }
                             }
                         });
