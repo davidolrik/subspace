@@ -13,7 +13,8 @@ builds:
       - -s -w -X go.olrik.dev/subspace/cmd.Version={{.Version}}
 
 brews:
-  - repository:
+  - directory: Formula
+    repository:
       owner: davidolrik
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
