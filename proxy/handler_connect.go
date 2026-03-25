@@ -21,13 +21,8 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 
 	host, _, _ := net.SplitHostPort(targetAddr)
 
-	// Internal pages are HTTP-only; redirect CONNECT to the HTTP version
-	if pages.IsInternalHost(host) {
-		slog.Debug("CONNECT redirected to HTTP for internal host", "target", targetAddr)
-		conn.Write([]byte("HTTP/1.1 302 Found\r\nLocation: http://" + host + "/\r\nCache-Control: no-store\r\n\r\n"))
-		conn.Close()
-		return
-	}
+	// TLS connections to *.subspace.pub pass through to the external
+	// redirect server which handles HTTPS → HTTP redirection.
 
 	route := s.dialerFor(host)
 

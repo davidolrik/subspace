@@ -102,15 +102,13 @@ document.addEventListener('alpine:init', () => {
         onKeydown(e) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                if (this.selectedIndex < this.filteredResults().length - 1) {
-                    this.selectedIndex++;
-                }
+                const len = this.filteredResults().length;
+                this.selectedIndex = len > 0 ? (this.selectedIndex + 1) % len : 0;
                 this.scrollToSelected();
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                if (this.selectedIndex > 0) {
-                    this.selectedIndex--;
-                }
+                const len = this.filteredResults().length;
+                this.selectedIndex = len > 0 ? (this.selectedIndex - 1 + len) % len : 0;
                 this.scrollToSelected();
             } else if (e.key === 'Enter') {
                 e.preventDefault();
@@ -146,9 +144,9 @@ document.addEventListener('alpine:init', () => {
 
         navMeta(item) {
             if (!item.host) return item.url;
-            const parts = [item.host + '.subspace'];
+            const parts = [item.host + '.subspace.pub'];
             if (item.alias) {
-                parts.push(item.alias + '.subspace');
+                parts.push(item.alias + '.subspace.pub');
             }
             return parts.join(' / ');
         },

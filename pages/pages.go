@@ -14,15 +14,9 @@ import (
 	"go.olrik.dev/subspace/stats"
 )
 
-// IsInternalHost returns true if the hostname is an internal *.subspace page.
+// IsInternalHost returns true if the hostname is an internal *.subspace.pub page.
 func IsInternalHost(hostname string) bool {
-	return strings.HasSuffix(hostname, ".subspace")
-}
-
-// IsRootHost returns true if the hostname is the subspace.dk entry point.
-// This is only intercepted for plain HTTP, not HTTPS/CONNECT.
-func IsRootHost(hostname string) bool {
-	return hostname == "subspace.dk"
+	return strings.HasSuffix(hostname, ".subspace.pub") && hostname != "subspace.pub"
 }
 
 // StatusProvider returns upstream health and status as JSON-encodable data.
@@ -30,8 +24,8 @@ type StatusProvider func() any
 
 // PageInfo describes a configured page with its parsed content.
 type PageInfo struct {
-	Host  string      // primary hostname (without .subspace)
-	Alias string      // optional alias (without .subspace)
+	Host  string      // primary hostname (without .subspace.pub)
+	Alias string      // optional alias (without .subspace.pub)
 	Page  *PageConfig // parsed page data
 }
 
@@ -56,12 +50,12 @@ type navEntry struct {
 	Alias  string `json:"alias,omitempty"`
 }
 
-// Handler serves internal pages for *.subspace hostnames.
+// Handler serves internal pages for *.subspace.pub hostnames.
 type Handler struct {
 	mu       sync.RWMutex
 	mux      *http.ServeMux
 	pageList []PageInfo
-	// pagesByHost maps "host.subspace" → index into pageList
+	// pagesByHost maps "host.subspace.pub" → index into pageList
 	pagesByHost map[string]int
 	stats       *stats.Collector
 	store       *stats.Store
@@ -90,9 +84,9 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 	// Register link page routes
 	for i, lp := range pageList {
 		idx := i // capture for closure
-		hosts := []string{lp.Host + ".subspace"}
+		hosts := []string{lp.Host + ".subspace.pub"}
 		if lp.Alias != "" {
-			hosts = append(hosts, lp.Alias+".subspace")
+			hosts = append(hosts, lp.Alias+".subspace.pub")
 		}
 		for _, host := range hosts {
 			hostMap[host] = idx
@@ -104,19 +98,8 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		}
 	}
 
-	// Root redirect: http://subspace/ → first page or stats
-	redirectTarget := "http://stats.subspace/"
-	if len(pageList) > 0 {
-		redirectTarget = "http://" + pageList[0].Host + ".subspace/"
-	}
-	mux.HandleFunc("subspace.dk/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		http.Redirect(w, r, redirectTarget, http.StatusFound)
-	})
-
 	// Statistics routes
-	for _, host := range []string{"statistics.subspace", "stats.subspace"} {
+	for _, host := range []string{"statistics.subspace.pub", "stats.subspace.pub"} {
 		mux.HandleFunc(host+"/api/timeseries", h.handleTimeseriesAPI)
 		mux.HandleFunc(host+"/api/snapshot", h.handleSnapshotAPI)
 		mux.HandleFunc(host+"/api/status", h.handleStatusAPI)
@@ -147,11 +130,23 @@ func (h *Handler) ReloadPages(pages []PageInfo) {
 }
 
 // ServeHTTP handles an internal page request by writing the HTTP
-// response directly to the connection.
+// response directly to the connection. If the host has no configured
+// page, it redirects to the documentation.
 func (h *Handler) ServeHTTP(conn net.Conn, req *http.Request) {
 	h.mu.RLock()
 	mux := h.mux
+	_, known := h.pagesByHost[req.Host]
 	h.mu.RUnlock()
+
+	// Redirect unknown *.subspace.pub hosts to the troubleshooting page
+	if !known && !isStatsHost(req.Host) {
+		rec := httptest.NewRecorder()
+		http.Redirect(rec, req, "https://subspace.pub/guide/troubleshooting?host="+req.Host+"#page-not-defined", http.StatusFound)
+		resp := rec.Result()
+		defer resp.Body.Close()
+		resp.Write(conn)
+		return
+	}
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -159,6 +154,10 @@ func (h *Handler) ServeHTTP(conn net.Conn, req *http.Request) {
 	resp := rec.Result()
 	defer resp.Body.Close()
 	resp.Write(conn)
+}
+
+func isStatsHost(host string) bool {
+	return host == "stats.subspace.pub" || host == "statistics.subspace.pub"
 }
 
 func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +259,7 @@ func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
 		if lp.Page != nil && lp.Page.Title != "" {
 			label = lp.Page.Title
 		}
-		host := lp.Host + ".subspace"
+		host := lp.Host + ".subspace.pub"
 		active := reqHost == host || reqHost == lp.Alias+".subspace"
 		nav = append(nav, navEntry{
 			Label:  label,
@@ -272,10 +271,10 @@ func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Statistics is always in the nav
-	statsActive := reqHost == "statistics.subspace" || reqHost == "stats.subspace"
+	statsActive := reqHost == "statistics.subspace.pub" || reqHost == "stats.subspace.pub"
 	nav = append(nav, navEntry{
 		Label:  "Statistics",
-		URL:    "http://stats.subspace/",
+		URL:    "http://stats.subspace.pub/",
 		Active: statsActive,
 		Icon:   "fa-chart-line",
 		Host:   "stats",
@@ -284,7 +283,7 @@ func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
 
 	// External links (icon-only)
 	nav = append(nav,
-		navEntry{Label: "Documentation", URL: "https://subspace.olrik.dev/", Icon: "fa-book"},
+		navEntry{Label: "Documentation", URL: "https://subspace.pub/", Icon: "fa-book"},
 		navEntry{Label: "GitHub", URL: "https://github.com/davidolrik/subspace", Icon: "si-github"},
 	)
 

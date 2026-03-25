@@ -997,10 +997,10 @@ func TestInternalPagesInterception(t *testing.T) {
 		},
 	}
 
-	// Request to dashboard.subspace should be served internally
-	resp, err := client.Get("http://dashboard.subspace/")
+	// Request to dashboard.subspace.pub should be served internally
+	resp, err := client.Get("http://dashboard.subspace.pub/")
 	if err != nil {
-		t.Fatalf("GET dashboard.subspace failed: %v", err)
+		t.Fatalf("GET dashboard.subspace.pub failed: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -1036,7 +1036,7 @@ func TestInternalPagesLinksAPI(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Get("http://dashboard.subspace/api/links")
+	resp, err := client.Get("http://dashboard.subspace.pub/api/links")
 	if err != nil {
 		t.Fatalf("GET /api/links failed: %v", err)
 	}
@@ -1068,18 +1068,21 @@ func TestInternalPagesDoNotForwardUpstream(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Get("http://dashboard.subspace/")
+	resp, err := client.Get("http://dashboard.subspace.pub/")
 	if err != nil {
 		t.Fatalf("GET failed: %v", err)
 	}
 	resp.Body.Close()
 
 	if backendHit.Load() != 0 {
-		t.Error("request to *.subspace was forwarded to upstream backend")
+		t.Error("request to *.subspace.pub was forwarded to upstream backend")
 	}
 }
 
-func TestCONNECTToSubspaceRedirects(t *testing.T) {
+func TestCONNECTToSubspacePassesThrough(t *testing.T) {
+	// CONNECT to *.subspace.pub should pass through to the external redirect server,
+	// not be intercepted by the proxy. Since there's no real server to connect to,
+	// we expect a dial failure (502), not a 302 redirect.
 	matcher := route.NewMatcher(nil)
 	proxyAddr := startProxy(t, matcher, nil)
 
@@ -1089,7 +1092,7 @@ func TestCONNECTToSubspaceRedirects(t *testing.T) {
 	}
 	defer conn.Close()
 
-	fmt.Fprintf(conn, "CONNECT dashboard.subspace:443 HTTP/1.1\r\nHost: dashboard.subspace:443\r\n\r\n")
+	fmt.Fprintf(conn, "CONNECT dashboard.subspace.pub:443 HTTP/1.1\r\nHost: dashboard.subspace.pub:443\r\n\r\n")
 
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, nil)
@@ -1098,17 +1101,13 @@ func TestCONNECTToSubspaceRedirects(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	if resp.StatusCode != 302 {
-		t.Errorf("CONNECT to *.subspace returned %d, want 302", resp.StatusCode)
-	}
-	loc := resp.Header.Get("Location")
-	if loc != "http://dashboard.subspace/" {
-		t.Errorf("Location = %q, want %q", loc, "http://dashboard.subspace/")
+	if resp.StatusCode == 302 {
+		t.Error("CONNECT to *.subspace.pub should not be intercepted with a redirect")
 	}
 }
 
-func TestCONNECTToSubspaceDKPassesThrough(t *testing.T) {
-	// subspace.dk should NOT be intercepted on CONNECT — it tunnels to the real server
+func TestCONNECTToSubspacePubPassesThrough(t *testing.T) {
+	// subspace.pub (bare domain) should NOT be intercepted on CONNECT — it tunnels to the real server
 	matcher := route.NewMatcher(nil)
 	proxyAddr := startProxy(t, matcher, nil)
 
@@ -1118,7 +1117,7 @@ func TestCONNECTToSubspaceDKPassesThrough(t *testing.T) {
 	}
 	defer conn.Close()
 
-	fmt.Fprintf(conn, "CONNECT subspace.dk:443 HTTP/1.1\r\nHost: subspace.dk:443\r\n\r\n")
+	fmt.Fprintf(conn, "CONNECT subspace.pub:443 HTTP/1.1\r\nHost: subspace.pub:443\r\n\r\n")
 
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, nil)
@@ -1129,7 +1128,7 @@ func TestCONNECTToSubspaceDKPassesThrough(t *testing.T) {
 
 	// Should NOT get a 302 redirect — it should attempt to dial (and fail with DNS or connection error)
 	if resp.StatusCode == 302 {
-		t.Error("CONNECT to subspace.dk should not be intercepted, should tunnel through")
+		t.Error("CONNECT to subspace.pub should not be intercepted, should tunnel through")
 	}
 }
 
@@ -1144,9 +1143,9 @@ func TestStatisticsPage(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Get("http://statistics.subspace/")
+	resp, err := client.Get("http://statistics.subspace.pub/")
 	if err != nil {
-		t.Fatalf("GET statistics.subspace failed: %v", err)
+		t.Fatalf("GET statistics.subspace.pub failed: %v", err)
 	}
 	defer resp.Body.Close()
 

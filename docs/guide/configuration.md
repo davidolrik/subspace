@@ -136,7 +136,7 @@ route ".corp.com" via="corporate"
 
 ## `page`
 
-Defines an internal page served at `{name}.subspace` when browsing through the proxy. Multiple `page` directives create multiple pages, each with its own hostname and menu entry.
+Defines an internal page served at `{name}.subspace.pub` when browsing through the proxy. Multiple `page` directives create multiple pages, each with its own hostname and menu entry.
 
 ```kdl
 page "dev.kdl"
@@ -148,9 +148,9 @@ By default, the hostname is derived from the filename (minus the `.kdl` extensio
 
 | Config                            | URL                                             |
 | --------------------------------- | ----------------------------------------------- |
-| `page "dev.kdl"`                  | `http://dev.subspace/`                          |
-| `page "my-file.kdl" host="tools"` | `http://tools.subspace/`                        |
-| `page "ops.kdl" alias="o"`        | `http://ops.subspace/` and `http://o.subspace/` |
+| `page "dev.kdl"`                  | `http://dev.subspace.pub/`                          |
+| `page "my-file.kdl" host="tools"` | `http://tools.subspace.pub/`                        |
+| `page "ops.kdl" alias="o"`        | `http://ops.subspace.pub/` and `http://o.subspace.pub/` |
 
 The hostnames `stats` and `statistics` are reserved for the built-in statistics page and cannot be used.
 
@@ -221,7 +221,7 @@ list "Monitoring" {
 
 This gives you:
 
-- `http://dev.subspace/` — development links page
-- `http://ops.subspace/` (or `http://o.subspace/`) — operations links page
-- `http://stats.subspace/` — statistics dashboard
-- `http://subspace.dk/` — redirects to `dev.subspace` (first configured page)
+- `http://dev.subspace.pub/` — development links page
+- `http://ops.subspace.pub/` (or `http://o.subspace.pub/`) — operations links page
+- `http://stats.subspace.pub/` — statistics dashboard
+- `https://subspace.pub/` — documentation site

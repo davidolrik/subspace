@@ -1,10 +1,10 @@
 # Internal Pages
 
-Subspace serves internal pages at `*.subspace` hostnames when browsing through the proxy. These pages provide link dashboards for organizing bookmarks and a live statistics view — all without leaving the browser.
+Subspace serves internal pages at `*.subspace.pub` hostnames when browsing through the proxy. These pages provide link dashboards for organizing bookmarks and a live statistics view — all without leaving the browser.
 
 ## Overview
 
-Every page gets its own `*.subspace` hostname and appears in a shared navigation menu at the top. Pages are defined in KDL files and configured via `page` directives in the main config.
+Every page gets its own `*.subspace.pub` hostname and appears in a shared navigation menu at the top. Pages are defined in KDL files and configured via `page` directives in the main config.
 
 ```kdl
 page "dev.kdl"
@@ -13,9 +13,9 @@ page "ops.kdl" alias="o"
 
 This creates:
 
-- `http://dev.subspace/` — links from `dev.kdl`
-- `http://ops.subspace/` (or `http://o.subspace/`) — links from `ops.kdl`
-- `http://stats.subspace/` — built-in statistics (always available)
+- `http://dev.subspace.pub/` — links from `dev.kdl`
+- `http://ops.subspace.pub/` (or `http://o.subspace.pub/`) — links from `ops.kdl`
+- `http://stats.subspace.pub/` — built-in statistics (always available)
 
 All pages share a navigation menu, search, and dark theme. Icons and fonts are embedded in the binary — no external requests are made.
 
@@ -64,9 +64,9 @@ By default, the hostname is derived from the filename (minus the `.kdl` extensio
 
 | Config | URL |
 |---|---|
-| `page "dev.kdl"` | `http://dev.subspace/` |
-| `page "my-file.kdl" host="tools"` | `http://tools.subspace/` |
-| `page "ops.kdl" alias="o"` | `http://ops.subspace/` and `http://o.subspace/` |
+| `page "dev.kdl"` | `http://dev.subspace.pub/` |
+| `page "my-file.kdl" host="tools"` | `http://tools.subspace.pub/` |
+| `page "ops.kdl" alias="o"` | `http://ops.subspace.pub/` and `http://o.subspace.pub/` |
 
 The hostnames `stats` and `statistics` are reserved for the built-in statistics page and cannot be used.
 
@@ -111,7 +111,7 @@ You can also click any result or click outside the popup to close it.
 
 ## Statistics Page
 
-The statistics page is always available at `http://stats.subspace/` (or `http://statistics.subspace/`). It shows:
+The statistics page is always available at `http://stats.subspace.pub/` (or `http://statistics.subspace.pub/`). It shows:
 
 - **Live metrics** — total connections, active connections, and upstream count
 - **Upstream health** — health status, type, address, latency, and traffic stats for each upstream
@@ -123,11 +123,9 @@ All charts support selectable time ranges from 5 minutes to 365 days. Statistics
 
 The statistics page auto-refreshes every 5 seconds.
 
-## Entry Point
+## When Subspace Is Not Running
 
-Navigating to `http://subspace.dk/` redirects to the first configured page, or to the statistics page if no pages are defined.
-
-When subspace is not running, `subspace.dk` resolves to a real web server that redirects to the [troubleshooting guide](/guide/troubleshooting#not-running).
+When subspace is not running, `*.subspace.pub` resolves to the documentation site at `https://subspace.pub/` via DNS. No special redirect server is needed — the wildcard DNS record handles it naturally.
 
 ## Error Pages
 

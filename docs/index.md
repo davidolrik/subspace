@@ -28,7 +28,7 @@ features:
     details: Accepts SOCKS5 clients on the same port as HTTP, auto-detected from the first byte. Works with git, ssh, curl, and any SOCKS5-aware tool.
   - icon: "\U0001F4D1"
     title: Internal Pages
-    details: Built-in link dashboards and live statistics served at *.subspace hostnames. Press / to search across all pages, links, and descriptions.
+    details: Built-in link dashboards and live statistics served at *.subspace.pub hostnames. Press / to search across all pages, links, and descriptions.
   - icon: "\U0001F504"
     title: Hot Reload
     details: Config file changes are detected and applied without restart. Split your config across multiple files with include and glob support.

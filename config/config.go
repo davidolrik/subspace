@@ -26,11 +26,11 @@ type Route struct {
 	Via     string
 }
 
-// Page describes an internal page served on a *.subspace hostname.
+// Page describes an internal page served on a *.subspace.pub hostname.
 type Page struct {
 	File  string // absolute path to the KDL file
-	Host  string // primary hostname (without .subspace suffix)
-	Alias string // optional alias hostname (without .subspace suffix)
+	Host  string // primary hostname (without .subspace.pub suffix)
+	Alias string // optional alias hostname (without .subspace.pub suffix)
 }
 
 // Config is the top-level configuration for subspace.

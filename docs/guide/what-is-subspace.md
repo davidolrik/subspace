@@ -33,7 +33,7 @@ For TLS traffic, Subspace never decrypts the data — it reads just enough of th
 - **Pattern matching** — exact hostnames, domain suffixes, globs, CIDR subnets
 - **Connection pooling** — reuses upstream connections for HTTP requests
 - **HTTP keep-alive** — multiple requests per client connection
-- **Internal pages** — link dashboards and live statistics at `*.subspace` hostnames, with `/` search across all pages and links
+- **Internal pages** — link dashboards and live statistics at `*.subspace.pub` hostnames, with `/` search across all pages and links
 - **Hot reload** — config changes apply without restart
 - **Config includes** — split config across files with glob support
 - **Health checks** — TCP health checks via the status command

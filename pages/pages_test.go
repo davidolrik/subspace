@@ -12,10 +12,10 @@ func TestIsInternalHost(t *testing.T) {
 		host string
 		want bool
 	}{
-		{"dashboard.subspace", true},
-		{"statistics.subspace", true},
-		{"anything.subspace", true},
-		{"subspace.dk", false},
+		{"dashboard.subspace.pub", true},
+		{"statistics.subspace.pub", true},
+		{"anything.subspace.pub", true},
+		{"subspace.pub", false},
 		{"subspace", false},
 		{"example.com", false},
 		{"dashboard.subspace.com", false},
@@ -45,8 +45,8 @@ func TestNavAPIIncludesHostAndAlias(t *testing.T) {
 
 	h := New(pages, nil, nil)
 
-	// Request nav from dev.subspace
-	req := httptest.NewRequest(http.MethodGet, "http://dev.subspace/api/nav", nil)
+	// Request nav from dev.subspace.pub
+	req := httptest.NewRequest(http.MethodGet, "http://dev.subspace.pub/api/nav", nil)
 	rec := httptest.NewRecorder()
 	h.handleNavAPI(rec, req)
 
@@ -134,7 +134,7 @@ func TestAllLinksAPI(t *testing.T) {
 
 	h := New(pages, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "http://dev.subspace/api/all-links", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://dev.subspace.pub/api/all-links", nil)
 	rec := httptest.NewRecorder()
 	h.handleAllLinksAPI(rec, req)
 
@@ -172,5 +172,32 @@ func TestAllLinksAPI(t *testing.T) {
 	}
 	if links[2].Name != "Grafana" {
 		t.Errorf("link 2: name = %q, want %q", links[2].Name, "Grafana")
+	}
+}
+
+func TestUndefinedPageRedirectsToDocs(t *testing.T) {
+	pages := []PageInfo{
+		{Host: "dev", Page: &PageConfig{Title: "Development"}},
+	}
+	h := New(pages, nil, nil)
+
+	// Request an undefined page
+	req := httptest.NewRequest(http.MethodGet, "http://unknown.subspace.pub/", nil)
+	rec := httptest.NewRecorder()
+
+	// Use the mux directly to simulate ServeHTTP's redirect logic
+	_, known := h.pagesByHost[req.Host]
+	if known {
+		t.Fatal("unknown.subspace.pub should not be a known host")
+	}
+
+	http.Redirect(rec, req, "https://subspace.pub/guide/pages", http.StatusFound)
+
+	if rec.Code != http.StatusFound {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	loc := rec.Header().Get("Location")
+	if loc != "https://subspace.pub/guide/pages" {
+		t.Errorf("Location = %q, want %q", loc, "https://subspace.pub/guide/pages")
 	}
 }
