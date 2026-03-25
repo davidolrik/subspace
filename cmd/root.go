@@ -12,22 +12,6 @@ import (
 // Version is set at build time via ldflags.
 var Version = "dev"
 
-var configFile string
-
-var rootCmd = &cobra.Command{
-	Use:   "subspace",
-	Short: "Subspace - transparent proxy with upstream routing",
-	Long: `Subspace is a transparent proxy that supports HTTP, HTTPS, WebSocket, and WSS.
-It routes traffic based on hostnames through configurable upstream proxies
-(HTTP CONNECT, SOCKS5, etc.) without terminating TLS.`,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		printBanner()
-	},
-	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
-	},
-}
-
 func printBanner() {
 	name := style.BoldC(style.White, "sub") + style.BoldC(style.Cyan, "space")
 	ver := style.Colorize(style.Ghost, Version)
@@ -35,12 +19,13 @@ func printBanner() {
 	fmt.Fprintf(os.Stderr, "%s %s - %s\n", name, ver, tagline)
 }
 
+// Execute runs the root command.
 func Execute() {
 	// Subspace manages its own proxy routing via config, so system proxy
 	// env vars must not influence any HTTP clients within the process.
 	clearProxyEnv()
 
-	if err := rootCmd.Execute(); err != nil {
+	if err := NewRootCommand().Execute(); err != nil {
 		os.Exit(1)
 	}
 }
@@ -68,7 +53,24 @@ func ConfigDir() string {
 	return filepath.Join(home, ".config", "subspace")
 }
 
-func init() {
+// NewRootCommand creates the root command with all subcommands registered.
+func NewRootCommand() *cobra.Command {
+	var configFile string
+
+	rootCmd := &cobra.Command{
+		Use:   "subspace",
+		Short: "Subspace - transparent proxy with upstream routing",
+		Long: `Subspace is a transparent proxy that supports HTTP, HTTPS, WebSocket, and WSS.
+It routes traffic based on hostnames through configurable upstream proxies
+(HTTP CONNECT, SOCKS5, etc.) without terminating TLS.`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			printBanner()
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			cmd.Help()
+		},
+	}
+
 	defaultConfig := filepath.Join(ConfigDir(), "config.kdl")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", defaultConfig, "config file path")
 
@@ -81,6 +83,13 @@ func init() {
 
 	rootCmd.SetHelpTemplate(helpTemplate)
 	rootCmd.SetUsageTemplate(usageTemplate)
+
+	rootCmd.AddCommand(newServeCommand(&configFile))
+	rootCmd.AddCommand(newLogsCommand(&configFile))
+	rootCmd.AddCommand(newStatusCommand(&configFile))
+	rootCmd.AddCommand(newResolveCommand(&configFile))
+
+	return rootCmd
 }
 
 var helpTemplate = `

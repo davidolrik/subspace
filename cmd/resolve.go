@@ -10,75 +10,77 @@ import (
 	"go.olrik.dev/subspace/route"
 )
 
-var resolveCmd = &cobra.Command{
-	Use:   "resolve <url>",
-	Short: "Show which route applies to a given URL",
-	Long:  `Resolves a URL against the configured routes and shows which upstream proxy (if any) would handle the traffic.`,
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.ParseFile(configFile)
-		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
+func newResolveCommand(configFile *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "resolve <url>",
+		Short: "Show which route applies to a given URL",
+		Long:  `Resolves a URL against the configured routes and shows which upstream proxy (if any) would handle the traffic.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.ParseFile(*configFile)
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
 
-		rawURL := args[0]
-		hostname, err := extractHostname(rawURL)
-		if err != nil {
-			return err
-		}
+			rawURL := args[0]
+			hostname, err := extractHostname(rawURL)
+			if err != nil {
+				return err
+			}
 
-		rules := make([]route.Rule, len(cfg.Routes))
-		for i, r := range cfg.Routes {
-			rules[i] = route.Rule{Pattern: r.Pattern, Upstream: r.Via}
-		}
-		matcher := route.NewMatcher(rules)
+			rules := make([]route.Rule, len(cfg.Routes))
+			for i, r := range cfg.Routes {
+				rules[i] = route.Rule{Pattern: r.Pattern, Upstream: r.Via}
+			}
+			matcher := route.NewMatcher(rules)
 
-		matched := matcher.Resolve(hostname)
+			matched := matcher.Resolve(hostname)
 
-		lbl := func(s string) string { return style.Colorize(style.Cyan, s) }
+			lbl := func(s string) string { return style.Colorize(style.Cyan, s) }
 
-		fmt.Println()
-		fmt.Printf("%s %s\n", lbl("url      "), style.Colorize(style.Steel, rawURL))
-		fmt.Printf("%s %s\n", lbl("hostname "), style.Colorize(style.Green, hostname))
-
-		if matched == nil {
-			fmt.Printf("%s %s\n", lbl("route    "), style.Colorize(style.Smoke, "no matching route"))
-			fmt.Printf("%s %s\n", lbl("action   "), style.Colorize(style.Green, "direct connection"))
 			fmt.Println()
-			return nil
-		}
+			fmt.Printf("%s %s\n", lbl("url      "), style.Colorize(style.Steel, rawURL))
+			fmt.Printf("%s %s\n", lbl("hostname "), style.Colorize(style.Green, hostname))
 
-		fmt.Printf("%s %s %s %s\n",
-			lbl("route    "),
-			style.Colorize(style.Steel, matched.Pattern),
-			style.Colorize(style.Smoke, "→"),
-			style.Colorize(style.UpstreamColor(matched.Upstream), matched.Upstream),
-		)
+			if matched == nil {
+				fmt.Printf("%s %s\n", lbl("route    "), style.Colorize(style.Smoke, "no matching route"))
+				fmt.Printf("%s %s\n", lbl("action   "), style.Colorize(style.Green, "direct connection"))
+				fmt.Println()
+				return nil
+			}
 
-		u, ok := cfg.Upstreams[matched.Upstream]
-		if !ok {
-			fmt.Printf("%s %s %s\n",
+			fmt.Printf("%s %s %s %s\n",
+				lbl("route    "),
+				style.Colorize(style.Steel, matched.Pattern),
+				style.Colorize(style.Smoke, "→"),
+				style.Colorize(style.UpstreamColor(matched.Upstream), matched.Upstream),
+			)
+
+			u, ok := cfg.Upstreams[matched.Upstream]
+			if !ok {
+				fmt.Printf("%s %s %s\n",
+					lbl("upstream "),
+					style.Colorize(style.UpstreamColor(matched.Upstream), matched.Upstream),
+					style.BoldC(style.Red, "(not found in config!)"),
+				)
+				fmt.Println()
+				return nil
+			}
+
+			fmt.Printf("%s %s %s %s\n",
 				lbl("upstream "),
 				style.Colorize(style.UpstreamColor(matched.Upstream), matched.Upstream),
-				style.BoldC(style.Red, "(not found in config!)"),
+				style.Colorize(style.Smoke, u.Type),
+				style.Colorize(style.Green, u.Address),
 			)
+			if u.Username != "" {
+				fmt.Printf("%s %s\n", lbl("auth     "), style.Colorize(style.Green, u.Username))
+			}
 			fmt.Println()
+
 			return nil
-		}
-
-		fmt.Printf("%s %s %s %s\n",
-			lbl("upstream "),
-			style.Colorize(style.UpstreamColor(matched.Upstream), matched.Upstream),
-			style.Colorize(style.Smoke, u.Type),
-			style.Colorize(style.Green, u.Address),
-		)
-		if u.Username != "" {
-			fmt.Printf("%s %s\n", lbl("auth     "), style.Colorize(style.Green, u.Username))
-		}
-		fmt.Println()
-
-		return nil
-	},
+		},
+	}
 }
 
 func extractHostname(rawURL string) (string, error) {
@@ -95,8 +97,4 @@ func extractHostname(rawURL string) (string, error) {
 	}
 
 	return "", fmt.Errorf("cannot extract hostname from %q", rawURL)
-}
-
-func init() {
-	rootCmd.AddCommand(resolveCmd)
 }

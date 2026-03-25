@@ -16,45 +16,51 @@ import (
 	"go.olrik.dev/subspace/stats"
 )
 
-var statusJSON bool
+func newStatusCommand(configFile *string) *cobra.Command {
+	var jsonOutput bool
 
-var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show health and status of upstream proxies",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.ParseFile(configFile)
-		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show health and status of upstream proxies",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.ParseFile(*configFile)
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
 
-		client := &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", cfg.ControlSocket)
+			client := &http.Client{
+				Transport: &http.Transport{
+					DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+						return net.Dial("unix", cfg.ControlSocket)
+					},
 				},
-			},
-		}
+			}
 
-		resp, err := client.Get("http://subspace/status")
-		if err != nil {
-			return fmt.Errorf("connecting to control socket %s: %w\n(is subspace serve running?)", cfg.ControlSocket, err)
-		}
-		defer resp.Body.Close()
+			resp, err := client.Get("http://subspace/status")
+			if err != nil {
+				return fmt.Errorf("connecting to control socket %s: %w\n(is subspace serve running?)", cfg.ControlSocket, err)
+			}
+			defer resp.Body.Close()
 
-		var status control.StatusResponse
-		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-			return fmt.Errorf("decoding status: %w", err)
-		}
+			var status control.StatusResponse
+			if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+				return fmt.Errorf("decoding status: %w", err)
+			}
 
-		if statusJSON {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(status)
-		}
+			if jsonOutput {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(status)
+			}
 
-		printStatusOutput(status)
-		return nil
-	},
+			printStatusOutput(status)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&jsonOutput, "json", "J", false, "output raw JSON")
+
+	return cmd
 }
 
 func printStatusOutput(status control.StatusResponse) {
@@ -168,9 +174,4 @@ func formatBytes(b int64) string {
 	default:
 		return fmt.Sprintf("%d B", b)
 	}
-}
-
-func init() {
-	statusCmd.Flags().BoolVarP(&statusJSON, "json", "J", false, "output raw JSON")
-	rootCmd.AddCommand(statusCmd)
 }

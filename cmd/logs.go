@@ -13,69 +13,70 @@ import (
 	"golang.org/x/term"
 )
 
-var (
-	logsLines  int
-	logsLevel  string
-	logsFollow bool
-)
+func newLogsCommand(configFile *string) *cobra.Command {
+	var (
+		lines  int
+		level  string
+		follow bool
+	)
 
-var logsCmd = &cobra.Command{
-	Use:   "logs",
-	Short: "Stream log output from a running subspace server",
-	Long: `Connects to the control socket of a running subspace server and streams log lines.
+	cmd := &cobra.Command{
+		Use:   "logs",
+		Short: "Stream log output from a running subspace server",
+		Long: `Connects to the control socket of a running subspace server and streams log lines.
 Shows the last N lines first, then streams new lines as they arrive.
 
 Levels: debug, info, warn, error`,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.ParseFile(configFile)
-		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.ParseFile(*configFile)
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
 
-		client := &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", cfg.ControlSocket)
+			client := &http.Client{
+				Transport: &http.Transport{
+					DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+						return net.Dial("unix", cfg.ControlSocket)
+					},
 				},
-			},
-		}
+			}
 
-		followStr := "true"
-		if !logsFollow {
-			followStr = "false"
-		}
-		colorStr := "false"
-		if term.IsTerminal(int(os.Stdout.Fd())) {
-			colorStr = "true"
-		}
-		url := fmt.Sprintf("http://subspace/logs?n=%d&level=%s&follow=%s&color=%s", logsLines, logsLevel, followStr, colorStr)
-		resp, err := client.Get(url)
-		if err != nil {
-			return fmt.Errorf("connecting to control socket %s: %w\n(is subspace serve running?)", cfg.ControlSocket, err)
-		}
-		defer resp.Body.Close()
+			followStr := "true"
+			if !follow {
+				followStr = "false"
+			}
+			colorStr := "false"
+			if term.IsTerminal(int(os.Stdout.Fd())) {
+				colorStr = "true"
+			}
+			url := fmt.Sprintf("http://subspace/logs?n=%d&level=%s&follow=%s&color=%s", lines, level, followStr, colorStr)
+			resp, err := client.Get(url)
+			if err != nil {
+				return fmt.Errorf("connecting to control socket %s: %w\n(is subspace serve running?)", cfg.ControlSocket, err)
+			}
+			defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("server returned %d", resp.StatusCode)
-		}
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("server returned %d", resp.StatusCode)
+			}
 
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			fmt.Println(scanner.Text())
-		}
+			scanner := bufio.NewScanner(resp.Body)
+			for scanner.Scan() {
+				fmt.Println(scanner.Text())
+			}
 
-		if err := scanner.Err(); err != nil {
-			return fmt.Errorf("reading logs: %w", err)
-		}
+			if err := scanner.Err(); err != nil {
+				return fmt.Errorf("reading logs: %w", err)
+			}
 
-		return nil
-	},
-}
+			return nil
+		},
+	}
 
-func init() {
-	logsCmd.Flags().IntVarP(&logsLines, "lines", "N", 10, "number of historical log lines to show")
-	logsCmd.Flags().StringVarP(&logsLevel, "level", "L", "info", "minimum log level (debug, info, warn, error)")
-	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "F", false, "follow live log output after showing history")
-	rootCmd.AddCommand(logsCmd)
+	cmd.Flags().IntVarP(&lines, "lines", "N", 10, "number of historical log lines to show")
+	cmd.Flags().StringVarP(&level, "level", "L", "info", "minimum log level (debug, info, warn, error)")
+	cmd.Flags().BoolVarP(&follow, "follow", "F", false, "follow live log output after showing history")
+
+	return cmd
 }

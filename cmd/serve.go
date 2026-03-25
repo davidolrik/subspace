@@ -21,98 +21,100 @@ import (
 	"go.olrik.dev/subspace/upstream"
 )
 
-var serveCmd = &cobra.Command{
-	Use:              "serve",
-	Short:            "Start the proxy server",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.ParseFile(configFile)
-		if err != nil {
-			return fmt.Errorf("loading config: %w", err)
-		}
+func newServeCommand(configFile *string) *cobra.Command {
+	return &cobra.Command{
+		Use:              "serve",
+		Short:            "Start the proxy server",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.ParseFile(*configFile)
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
 
-		// Set up log buffer and handler so all slog output is captured
-		logBuf := control.NewLogBuffer(1000)
-		logHandler := control.NewLogHandler(logBuf, nil)
-		// Tee to stderr (colored handler) and the buffer
-		stderrHandler := style.NewLogHandler(os.Stderr, nil)
-		slog.SetDefault(slog.New(newTeeHandler(stderrHandler, logHandler)))
+			// Set up log buffer and handler so all slog output is captured
+			logBuf := control.NewLogBuffer(1000)
+			logHandler := control.NewLogHandler(logBuf, nil)
+			// Tee to stderr (colored handler) and the buffer
+			stderrHandler := style.NewLogHandler(os.Stderr, nil)
+			slog.SetDefault(slog.New(newTeeHandler(stderrHandler, logHandler)))
 
-		// Build initial routing state
-		matcher, dialers, err := buildRouting(cfg)
-		if err != nil {
-			return err
-		}
+			// Build initial routing state
+			matcher, dialers, err := buildRouting(cfg)
+			if err != nil {
+				return err
+			}
 
-		// Start proxy listener
-		ln, err := net.Listen("tcp", cfg.Listen)
-		if err != nil {
-			return fmt.Errorf("listen on %s: %w", cfg.Listen, err)
-		}
+			// Start proxy listener
+			ln, err := net.Listen("tcp", cfg.Listen)
+			if err != nil {
+				return fmt.Errorf("listen on %s: %w", cfg.Listen, err)
+			}
 
-		pool := upstream.NewPool(upstream.PoolConfig{})
-		srv := proxy.NewServer(ln, matcher, dialers, pool)
+			pool := upstream.NewPool(upstream.PoolConfig{})
+			srv := proxy.NewServer(ln, matcher, dialers, pool)
 
-		// Open the statistics database
-		statsDBPath := filepath.Join(filepath.Dir(configFile), "stats.db")
-		statsStore, err := stats.OpenStore(statsDBPath)
-		if err != nil {
-			return fmt.Errorf("opening stats database: %w", err)
-		}
-		defer statsStore.Close()
+			// Open the statistics database
+			statsDBPath := filepath.Join(filepath.Dir(*configFile), "stats.db")
+			statsStore, err := stats.OpenStore(statsDBPath)
+			if err != nil {
+				return fmt.Errorf("opening stats database: %w", err)
+			}
+			defer statsStore.Close()
 
-		// Start the periodic stats recorder
-		recorder := stats.NewRecorder(srv.Stats, statsStore, stats.DefaultRecorderConfig())
-		go recorder.Run()
-		defer recorder.Stop()
+			// Start the periodic stats recorder
+			recorder := stats.NewRecorder(srv.Stats, statsStore, stats.DefaultRecorderConfig())
+			go recorder.Run()
+			defer recorder.Stop()
 
-		// Set up internal pages (link pages, statistics, error pages)
-		pageInfos, err := loadPages(cfg)
-		if err != nil {
-			return err
-		}
-		pagesHandler := pages.New(pageInfos, srv.Stats, statsStore)
-		srv.Pages = pagesHandler
+			// Set up internal pages (link pages, statistics, error pages)
+			pageInfos, err := loadPages(cfg)
+			if err != nil {
+				return err
+			}
+			pagesHandler := pages.New(pageInfos, srv.Stats, statsStore)
+			srv.Pages = pagesHandler
 
-		// Ensure the control socket directory exists
-		if err := os.MkdirAll(filepath.Dir(cfg.ControlSocket), 0700); err != nil {
-			return fmt.Errorf("creating control socket directory: %w", err)
-		}
+			// Ensure the control socket directory exists
+			if err := os.MkdirAll(filepath.Dir(cfg.ControlSocket), 0700); err != nil {
+				return fmt.Errorf("creating control socket directory: %w", err)
+			}
 
-		// Start control socket (with access to proxy stats and upstream health)
-		upstreamInfo := buildUpstreamInfo(cfg)
-		ctrlSrv, err := control.NewServer(cfg.ControlSocket, logBuf, srv.Stats, upstreamInfo, pool)
-		if err != nil {
-			return fmt.Errorf("control socket: %w", err)
-		}
-		defer ctrlSrv.Close()
-		go ctrlSrv.Serve()
+			// Start control socket (with access to proxy stats and upstream health)
+			upstreamInfo := buildUpstreamInfo(cfg)
+			ctrlSrv, err := control.NewServer(cfg.ControlSocket, logBuf, srv.Stats, upstreamInfo, pool)
+			if err != nil {
+				return fmt.Errorf("control socket: %w", err)
+			}
+			defer ctrlSrv.Close()
+			go ctrlSrv.Serve()
 
-		// Give the statistics page access to upstream health data
-		pagesHandler.SetStatusProvider(func() any { return ctrlSrv.Status() })
+			// Give the statistics page access to upstream health data
+			pagesHandler.SetStatusProvider(func() any { return ctrlSrv.Status() })
 
-		slog.Info("subspace listening",
-			"version", Version,
-			"addr", cfg.Listen,
-			"control", cfg.ControlSocket,
-			"upstreams", len(cfg.Upstreams),
-			"routes", len(cfg.Routes),
-		)
+			slog.Info("subspace listening",
+				"version", Version,
+				"addr", cfg.Listen,
+				"control", cfg.ControlSocket,
+				"upstreams", len(cfg.Upstreams),
+				"routes", len(cfg.Routes),
+			)
 
-		// Watch config files for changes (main config + included files)
-		go watchConfig(cfg, srv, ctrlSrv, pagesHandler)
+			// Watch config files for changes (main config + included files)
+			go watchConfig(cfg, srv, ctrlSrv, pagesHandler)
 
-		// Graceful shutdown
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			<-sigCh
-			slog.Info("shutting down")
-			srv.Close()
-		}()
+			// Graceful shutdown
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			go func() {
+				<-sigCh
+				slog.Info("shutting down")
+				srv.Close()
+			}()
 
-		return srv.Serve()
-	},
+			return srv.Serve()
+		},
+	}
 }
 
 // buildRouting creates a route matcher and dialer map from the config.
@@ -310,8 +312,4 @@ func loadPages(cfg *config.Config) ([]pages.PageInfo, error) {
 		})
 	}
 	return infos, nil
-}
-
-func init() {
-	rootCmd.AddCommand(serveCmd)
 }
