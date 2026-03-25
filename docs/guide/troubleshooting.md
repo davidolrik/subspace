@@ -83,7 +83,7 @@ Or use a PAC file / browser extension for more granular control.
 
 #### Upstream proxy unreachable
 
-```test
+```text
 dial failed target=proxy.corp.com:3128 via=corporate error=dial tcp: connection refused
 ```
 
