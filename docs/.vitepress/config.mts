@@ -39,6 +39,7 @@ export default withMermaid(
             { text: "Quick Start", link: "/guide/quick-start" },
             { text: "Configuration", link: "/guide/configuration" },
             { text: "Routing", link: "/guide/routing" },
+            { text: "Internal Pages", link: "/guide/pages" },
             { text: "Commands", link: "/guide/commands" },
             { text: "Troubleshooting", link: "/guide/troubleshooting" },
           ],

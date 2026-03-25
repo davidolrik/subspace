@@ -144,9 +144,7 @@ page "ops.kdl"
 page "my-page.kdl" host="internal" alias="int"
 ```
 
-### Hostname
-
-By default, the hostname is derived from the filename (minus the `.kdl` extension). Override it with `host=`:
+By default, the hostname is derived from the filename (minus the `.kdl` extension). Override it with `host=`, and add a second hostname with `alias=`.
 
 | Config                            | URL                                             |
 | --------------------------------- | ----------------------------------------------- |
@@ -156,49 +154,7 @@ By default, the hostname is derived from the filename (minus the `.kdl` extensio
 
 The hostnames `stats` and `statistics` are reserved for the built-in statistics page and cannot be used.
 
-### Page file format
-
-Each page file is a KDL document with optional `title` and `footer`, and one or more `list` sections:
-
-```kdl
-title "Development Tools"
-footer "Acme Corp — Internal Use Only"
-
-list "Repositories" {
-    link "GitHub" url="https://github.com/org" icon="si-github" description="Source code"
-    link "GitLab" url="https://gitlab.corp.com" icon="si-gitlab"
-}
-
-list "Monitoring" {
-    link "Grafana" url="https://grafana.example.com" icon="si-grafana" description="Dashboards"
-    link "PagerDuty" url="https://pagerduty.com" icon="fa-bell"
-}
-```
-
-### Link properties
-
-| Property      | Required | Description                                                                                                              |
-| ------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `url`         | Yes      | The link URL                                                                                                             |
-| `icon`        | No       | Icon name — `si-*` for [Simple Icons](https://simpleicons.org), `fa-*` for [Font Awesome](https://fontawesome.com/icons) |
-| `description` | No       | Short description shown below the link name                                                                              |
-
-### Built-in pages
-
-- **Statistics** — always available at `statistics.subspace` (or `stats.subspace`). Shows live metrics (connections, active, upstream health), and historical charts (connections over time, traffic by upstream, protocol breakdown). Statistics are persisted to a SQLite database at `~/.config/subspace/stats.db` and retained for one year with automatic downsampling (5s → 1m after 1 hour, 1m → 1h after 7 days).
-- **Entry point** — navigating to `http://subspace.dk/` redirects to the first configured page, or to statistics if no pages are defined. When subspace is not running, `subspace.dk` resolves to a real web server that redirects to the [troubleshooting guide](/guide/troubleshooting#not-running).
-- **Error pages** — DNS failures and connection errors show styled error pages instead of bare HTTP 502 responses.
-
-All configured pages and the statistics page appear in a shared navigation menu. Icons are embedded in the binary — no external requests are made when viewing pages.
-
-### Search
-
-Press `/` on any internal page to open the search popup. It searches across:
-
-- **Page titles** and **hostnames** (including aliases)
-- **All links** defined across all pages (name and description)
-
-Page and navigation matches appear first, followed by link matches. Prefix matches rank higher than substring matches. Use arrow keys to navigate, Enter to go to the selected result, and Escape to close.
+Each page is configured in its own KDL file with links, sections, icons, and optional descriptions. See [Internal Pages](/guide/pages) for the full page file format, search, statistics, and other features.
 
 ## Hot Reload
 
