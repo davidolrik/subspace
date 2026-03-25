@@ -88,6 +88,7 @@ It routes traffic based on hostnames through configurable upstream proxies
 	rootCmd.AddCommand(newLogsCommand(&configFile))
 	rootCmd.AddCommand(newStatusCommand(&configFile))
 	rootCmd.AddCommand(newResolveCommand(&configFile))
+	rootCmd.AddCommand(newVersionCommand())
 
 	return rootCmd
 }
