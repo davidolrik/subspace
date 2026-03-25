@@ -179,6 +179,7 @@
             <span class="sub">sub</span><span class="space">space</span>
             <span><span class="title-dash">-</span> <span class="title">Statistics</span></span>
         </h1>
+        <span class="search-hint" @click="show()">Press <kbd>/</kbd> to search</span>
         <nav>
             <template x-for="item in nav" :key="item.url">
                 <a :href="item.url" :class="{ active: item.active }" :title="item.label">

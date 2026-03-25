@@ -17,6 +17,7 @@
                 <span><span class="title-dash">-</span> <span class="title" x-text="title"></span></span>
             </template>
         </h1>
+        <span class="search-hint" @click="show()">Press <kbd>/</kbd> to search</span>
         <nav>
             <template x-for="item in nav" :key="item.url">
                 <a :href="item.url" :class="{ active: item.active }" :title="item.label">

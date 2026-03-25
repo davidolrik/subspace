@@ -72,6 +72,21 @@ header .title {
     font-weight: 400;
 }
 
+.search-hint {
+    color: var(--border);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.search-hint kbd {
+    font-size: 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.05rem 0.35rem;
+    font-family: inherit;
+}
+
 main {
     padding: 1rem 2rem 2rem;
 }
