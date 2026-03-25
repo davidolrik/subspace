@@ -35,12 +35,25 @@ type PageInfo struct {
 	Page  *PageConfig // parsed page data
 }
 
+// searchLink is a single link returned by the /api/all-links endpoint,
+// annotated with the page and section it belongs to.
+type searchLink struct {
+	Name        string `json:"name"`
+	URL         string `json:"url"`
+	Icon        string `json:"icon,omitempty"`
+	Description string `json:"description,omitempty"`
+	Page        string `json:"page"`
+	Section     string `json:"section"`
+}
+
 // navEntry is a single menu item returned by the /api/nav endpoint.
 type navEntry struct {
 	Label  string `json:"label"`
 	URL    string `json:"url"`
 	Active bool   `json:"active"`
 	Icon   string `json:"icon,omitempty"`
+	Host   string `json:"host,omitempty"`
+	Alias  string `json:"alias,omitempty"`
 }
 
 // Handler serves internal pages for *.subspace hostnames.
@@ -84,6 +97,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		for _, host := range hosts {
 			hostMap[host] = idx
 			mux.HandleFunc(host+"/api/links", h.handleLinksAPI)
+			mux.HandleFunc(host+"/api/all-links", h.handleAllLinksAPI)
 			mux.HandleFunc(host+"/api/nav", h.handleNavAPI)
 			mux.Handle(host+"/static/", http.StripPrefix("/static/", fileServer))
 			mux.HandleFunc(host+"/", h.handleDashboard)
@@ -106,6 +120,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		mux.HandleFunc(host+"/api/timeseries", h.handleTimeseriesAPI)
 		mux.HandleFunc(host+"/api/snapshot", h.handleSnapshotAPI)
 		mux.HandleFunc(host+"/api/status", h.handleStatusAPI)
+		mux.HandleFunc(host+"/api/all-links", h.handleAllLinksAPI)
 		mux.HandleFunc(host+"/api/nav", h.handleNavAPI)
 		mux.Handle(host+"/static/", http.StripPrefix("/static/", fileServer))
 		mux.HandleFunc(host+"/", h.handleStatistics)
@@ -251,6 +266,8 @@ func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
 			Label:  label,
 			URL:    "http://" + host + "/",
 			Active: active,
+			Host:   lp.Host,
+			Alias:  lp.Alias,
 		})
 	}
 
@@ -261,6 +278,8 @@ func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
 		URL:    "http://stats.subspace/",
 		Active: statsActive,
 		Icon:   "fa-chart-line",
+		Host:   "stats",
+		Alias:  "statistics",
 	})
 
 	// External links (icon-only)
@@ -271,4 +290,36 @@ func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(nav)
+}
+
+func (h *Handler) handleAllLinksAPI(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	pages := h.pageList
+	h.mu.RUnlock()
+
+	var links []searchLink
+	for _, lp := range pages {
+		if lp.Page == nil {
+			continue
+		}
+		pageLabel := lp.Host
+		if lp.Page.Title != "" {
+			pageLabel = lp.Page.Title
+		}
+		for _, section := range lp.Page.Sections {
+			for _, link := range section.Links {
+				links = append(links, searchLink{
+					Name:        link.Name,
+					URL:         link.URL,
+					Icon:        link.Icon,
+					Description: link.Description,
+					Page:        pageLabel,
+					Section:     section.Name,
+				})
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(links)
 }

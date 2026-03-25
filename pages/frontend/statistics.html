@@ -173,7 +173,7 @@
         }
     </style>
 </head>
-<body x-data="statistics" x-init="init()">
+<body x-data="{...statistics(), ...search()}" x-init="init(); initSearch()">
     <header>
         <h1>
             <span class="sub">sub</span><span class="space">space</span>
@@ -269,6 +269,50 @@
             </div>
         </div>
     </main>
+    <!-- Search popup -->
+    <template x-if="open">
+        <div class="search-backdrop" @click.self="hide()">
+            <div class="search-dialog" @keydown="onKeydown($event)">
+                <div class="search-input-wrap">
+                    <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                    <input
+                        x-ref="searchInput"
+                        x-model="query"
+                        @input="onInput()"
+                        type="text"
+                        placeholder="Search pages..."
+                        autocomplete="off"
+                        spellcheck="false">
+                    <kbd>esc</kbd>
+                </div>
+                <div class="search-results" x-ref="searchResults">
+                    <template x-for="(item, idx) in filteredResults()" :key="item.type + ':' + item.url">
+                        <a :href="item.url"
+                           class="search-result"
+                           :class="{ selected: idx === selectedIndex }"
+                           @mouseenter="selectedIndex = idx"
+                           @click.prevent="navigate(item.url)">
+                            <i :class="iconClass(item.icon)"
+                               class="search-result-icon"></i>
+                            <div class="search-result-text">
+                                <div class="search-result-label" x-text="item.label"></div>
+                                <div class="search-result-meta" x-text="item.meta"></div>
+                                <template x-if="item.description">
+                                    <div class="search-result-desc" x-text="item.description"></div>
+                                </template>
+                            </div>
+                            <span class="search-result-enter">&crarr;</span>
+                        </a>
+                    </template>
+                    <div class="search-empty" x-show="filteredResults().length === 0">
+                        No results
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <script src="/static/search.js"></script>
     <script src="/static/chart.min.js"></script>
     <script src="/static/alpine.min.js" defer></script>
     <script>
