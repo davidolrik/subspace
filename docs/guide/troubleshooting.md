@@ -1,8 +1,53 @@
 # Troubleshooting
 
+## Page not defined {#page-not-defined}
+
+<script setup>
+import { ref, onMounted } from 'vue'
+
+const host = ref('')
+
+onMounted(() => {
+  const params = new URLSearchParams(window.location.search)
+  host.value = params.get('host') || ''
+})
+</script>
+
+<div v-if="host" class="custom-block tip">
+  <p>The requested host <code>{{ host }}</code> is not defined as a page in your subspace config.</p>
+</div>
+
+<p v-if="host">You were redirected here because you visited a <code>*.subspace.pub</code> hostname that has no page configured in your subspace config.</p>
+
+<p v-else>If you visited a <code>*.subspace.pub</code> URL and were redirected here, it means that hostname has no page configured in your subspace config.</p>
+
+To create a page, add a `page` directive to your config file (`~/.config/subspace/config.kdl`):
+
+```kdl
+page "example.kdl"
+```
+
+Then create the page file (e.g. `~/.config/subspace/example.kdl`):
+
+```kdl
+title "My Page"
+
+list "Links" {
+    link "Example" url="https://example.com"
+}
+```
+
+The hostname is derived from the filename — `example.kdl` becomes `http://example.subspace.pub/`. You can override it with `host=` and add an alias:
+
+```kdl
+page "example.kdl" host="tools" alias="t"
+```
+
+See [Internal Pages](/guide/pages) for the full page file format and [Configuration](/guide/configuration#page) for all `page` directive options.
+
 ## Subspace is not running {#not-running}
 
-If you've been redirected here from `subspace.dk`, it means subspace is not currently proxying your traffic. This page helps you diagnose and fix the issue.
+If you tried to visit an [internal subspace page](/guide/pages) and ended up here, it means subspace is not running — the request reached the external redirect server instead of being intercepted by the local daemon.
 
 ### Check if subspace is running
 
