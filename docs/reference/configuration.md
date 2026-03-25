@@ -12,11 +12,11 @@ The config directory respects `$XDG_CONFIG_HOME`. If set, the default path becom
 
 ### `listen`
 
-**Required.** The address to listen on.
+**Required.** The address to listen on. HTTP, HTTPS, and SOCKS5 connections are all accepted on the same port — the protocol is auto-detected from the first byte of each connection.
 
 ```kdl
-listen ":8118"
 listen "127.0.0.1:8118"
+listen ":8118"
 listen "0.0.0.0:3128"
 ```
 

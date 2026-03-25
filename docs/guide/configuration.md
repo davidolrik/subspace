@@ -7,14 +7,16 @@ Subspace uses [KDL](https://kdl.dev) as its configuration language. The default 
 The address to listen on. Required.
 
 ```kdl
+listen "127.0.0.1:8118"
+```
+
+Listen on all interfaces (use with caution):
+
+```kdl
 listen ":8118"
 ```
 
-Bind to a specific interface:
-
-```kdl
-listen "127.0.0.1:8118"
-```
+Subspace accepts HTTP, HTTPS, and SOCKS5 connections on the same port. The protocol is auto-detected from the first byte of each connection — no separate listeners or configuration needed.
 
 ## `control_socket`
 
@@ -56,12 +58,12 @@ upstream "tunnel" {
 
 ### Properties
 
-| Property | Required | Description |
-|---|---|---|
-| `type` | Yes | `"http"` or `"socks5"` |
-| `address` | Yes | `host:port` of the upstream proxy |
-| `username` | No | Authentication username |
-| `password` | No | Authentication password |
+| Property   | Required | Description                       |
+| ---------- | -------- | --------------------------------- |
+| `type`     | Yes      | `"http"` or `"socks5"`            |
+| `address`  | Yes      | `host:port` of the upstream proxy |
+| `username` | No       | Authentication username           |
+| `password` | No       | Authentication password           |
 
 ## `route`
 
@@ -95,7 +97,7 @@ Glob patterns are supported via standard shell glob syntax (`*`, `?`, `[...]`). 
 
 ### Example: Split Config
 
-```
+```text
 ~/.config/subspace/
 ├── config.kdl           # main config
 ├── dashboard.kdl        # link page
@@ -108,14 +110,16 @@ Glob patterns are supported via standard shell glob syntax (`*`, `?`, `[...]`). 
 ```
 
 `config.kdl`:
+
 ```kdl
-listen ":8118"
+listen "127.0.0.1:8118"
 include "upstreams/*.kdl"
 include "routes/*.kdl"
 page "dashboard.kdl" alias="dash"
 ```
 
 `upstreams/corporate.kdl`:
+
 ```kdl
 upstream "corporate" {
   type "http"
@@ -124,6 +128,7 @@ upstream "corporate" {
 ```
 
 `routes/corporate.kdl`:
+
 ```kdl
 route ".corp.internal" via="corporate"
 route ".corp.com" via="corporate"
@@ -143,11 +148,11 @@ page "my-page.kdl" host="internal" alias="int"
 
 By default, the hostname is derived from the filename (minus the `.kdl` extension). Override it with `host=`:
 
-| Config | URL |
-|---|---|
-| `page "dev.kdl"` | `http://dev.subspace/` |
-| `page "my-file.kdl" host="tools"` | `http://tools.subspace/` |
-| `page "ops.kdl" alias="o"` | `http://ops.subspace/` and `http://o.subspace/` |
+| Config                            | URL                                             |
+| --------------------------------- | ----------------------------------------------- |
+| `page "dev.kdl"`                  | `http://dev.subspace/`                          |
+| `page "my-file.kdl" host="tools"` | `http://tools.subspace/`                        |
+| `page "ops.kdl" alias="o"`        | `http://ops.subspace/` and `http://o.subspace/` |
 
 The hostnames `stats` and `statistics` are reserved for the built-in statistics page and cannot be used.
 
@@ -172,11 +177,11 @@ list "Monitoring" {
 
 ### Link properties
 
-| Property | Required | Description |
-|---|---|---|
-| `url` | Yes | The link URL |
-| `icon` | No | Icon name — `si-*` for [Simple Icons](https://simpleicons.org), `fa-*` for [Font Awesome](https://fontawesome.com/icons) |
-| `description` | No | Short description shown below the link name |
+| Property      | Required | Description                                                                                                              |
+| ------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `url`         | Yes      | The link URL                                                                                                             |
+| `icon`        | No       | Icon name — `si-*` for [Simple Icons](https://simpleicons.org), `fa-*` for [Font Awesome](https://fontawesome.com/icons) |
+| `description` | No       | Short description shown below the link name                                                                              |
 
 ### Built-in pages
 
@@ -185,6 +190,15 @@ list "Monitoring" {
 - **Error pages** — DNS failures and connection errors show styled error pages instead of bare HTTP 502 responses.
 
 All configured pages and the statistics page appear in a shared navigation menu. Icons are embedded in the binary — no external requests are made when viewing pages.
+
+### Search
+
+Press `/` on any internal page to open the search popup. It searches across:
+
+- **Page titles** and **hostnames** (including aliases)
+- **All links** defined across all pages (name and description)
+
+Page and navigation matches appear first, followed by link matches. Prefix matches rank higher than substring matches. Use arrow keys to navigate, Enter to go to the selected result, and Escape to close.
 
 ## Hot Reload
 
@@ -198,7 +212,7 @@ Settings that require a restart to take effect: `listen` and `control_socket`. A
 
 ## Complete Example
 
-```
+```text
 ~/.config/subspace/
 ├── config.kdl
 ├── dev.kdl
@@ -210,8 +224,9 @@ Settings that require a restart to take effect: `listen` and `control_socket`. A
 ```
 
 `config.kdl`:
+
 ```kdl
-listen ":8118"
+listen "127.0.0.1:8118"
 
 include "upstreams/*.kdl"
 include "routes/*.kdl"
@@ -222,6 +237,7 @@ page "ops.kdl" alias="o"
 ```
 
 `dev.kdl`:
+
 ```kdl
 title "Development"
 
@@ -236,6 +252,7 @@ list "Docs" {
 ```
 
 `ops.kdl`:
+
 ```kdl
 title "Operations"
 footer "On-call: #ops-oncall"
@@ -247,6 +264,7 @@ list "Monitoring" {
 ```
 
 This gives you:
+
 - `http://dev.subspace/` — development links page
 - `http://ops.subspace/` (or `http://o.subspace/`) — operations links page
 - `http://stats.subspace/` — statistics dashboard

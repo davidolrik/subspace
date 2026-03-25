@@ -1,4 +1,4 @@
-listen ":8118"
+listen "127.0.0.1:8118"
 
 // upstream "corporate" {
 //   type "http"

@@ -2,8 +2,8 @@
 
 ## Global Flags
 
-| Flag | Description | Default |
-|---|---|---|
+| Flag       | Description         | Default                         |
+| ---------- | ------------------- | ------------------------------- |
 | `--config` | Path to config file | `~/.config/subspace/config.kdl` |
 
 ## `subspace serve`
@@ -27,6 +27,7 @@ subspace status -J
 ```
 
 For each upstream, shows:
+
 - **Health** — TCP connectivity check (OK / FAIL)
 - **Type and address** — proxy type and endpoint
 - **Latency** — health check round-trip time
@@ -34,8 +35,8 @@ For each upstream, shows:
 
 Also shows total and active connection counts, and connection pool statistics.
 
-| Flag | Description | Default |
-|---|---|---|
+| Flag         | Description     | Default |
+| ------------ | --------------- | ------- |
 | `-J, --json` | Output raw JSON | `false` |
 
 The built-in `direct` upstream is always listed at the bottom with its traffic stats.
@@ -53,6 +54,7 @@ subspace resolve example.com
 Accepts a full URL, a `host:port`, or a bare hostname.
 
 Shows:
+
 - The extracted hostname
 - The matching route pattern (if any)
 - The selected upstream with type and address
@@ -69,8 +71,16 @@ subspace logs -L error           # only errors
 subspace logs -L debug -F        # all levels, follow live
 ```
 
-| Flag | Description | Default |
-|---|---|---|
-| `-N, --lines` | Number of historical lines to show | `10` |
-| `-L, --level` | Minimum log level: `debug`, `info`, `warn`, `error` | `info` |
-| `-F, --follow` | Stream live output after showing history | `false` |
+| Flag           | Description                                         | Default |
+| -------------- | --------------------------------------------------- | ------- |
+| `-N, --lines`  | Number of historical lines to show                  | `10`    |
+| `-L, --level`  | Minimum log level: `debug`, `info`, `warn`, `error` | `info`  |
+| `-F, --follow` | Stream live output after showing history            | `false` |
+
+## `subspace version`
+
+Prints the version and exits.
+
+```sh
+subspace version
+```

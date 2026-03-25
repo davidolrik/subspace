@@ -55,7 +55,7 @@ go build -o subspace .
 Create a config file at `~/.config/subspace/config.kdl`:
 
 ```kdl
-listen ":8118"
+listen "127.0.0.1:8118"
 
 upstream "corporate" {
   type "http"
@@ -102,7 +102,7 @@ Subspace uses [KDL](https://kdl.dev) for configuration. The default config path 
 The address to listen on.
 
 ```kdl
-listen ":8118"
+listen "127.0.0.1:8118"
 ```
 
 ### `control_socket`

@@ -11,7 +11,7 @@ mkdir -p ~/.config/subspace
 Create `~/.config/subspace/config.kdl`:
 
 ```kdl
-listen ":8118"
+listen "127.0.0.1:8118"
 
 upstream "corporate" {
   type "http"
@@ -30,6 +30,7 @@ route "specific.host.com" via="tunnel"
 ```
 
 This config:
+
 - Listens on port 8118
 - Defines two upstreams: an HTTP CONNECT proxy and a SOCKS5 proxy
 - Routes `.corp.internal` subdomains through the corporate proxy
@@ -44,7 +45,7 @@ subspace serve
 
 You should see:
 
-```
+```text
 INF subspace listening version=dev addr=:8118 upstreams=2 routes=2
 INF watching config for changes files=1
 ```
