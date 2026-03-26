@@ -306,7 +306,7 @@ func loadPages(cfg *config.Config) ([]pages.PageInfo, error) {
 			return nil, fmt.Errorf("loading page %q: %w", pg.File, err)
 		}
 		infos = append(infos, pages.PageInfo{
-			Host:  pg.Host,
+			Name:  pg.Name,
 			Alias: pg.Alias,
 			Page:  pageCfg,
 		})

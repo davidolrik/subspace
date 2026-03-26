@@ -31,7 +31,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 
 	hostname, _, _ := net.SplitHostPort(targetAddr)
 
-	// Serve internal pages for *.subspace.pub hostnames
+	// Serve internal pages for pages.subspace.pub and stats.subspace.pub
 	if s.Pages != nil && pages.IsInternalHost(hostname) {
 		s.Pages.ServeHTTP(conn, req)
 		return false

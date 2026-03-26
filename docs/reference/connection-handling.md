@@ -95,4 +95,4 @@ Subspace tracks per-connection statistics:
 | Pool hits / misses | Global | Connection reuse rate |
 | Idle connections | Per upstream | Currently pooled connections |
 
-Statistics are available via `subspace status`, the `/status` control socket endpoint, or the built-in statistics page at `statistics.subspace.pub`. Historical data is persisted to a SQLite database and retained for one year with automatic downsampling.
+Statistics are available via `subspace status`, the `/status` control socket endpoint, or the built-in statistics page at `stats.subspace.pub`. Historical data is persisted to a SQLite database and retained for one year with automatic downsampling.

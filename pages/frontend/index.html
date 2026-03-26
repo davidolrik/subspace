@@ -4,10 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Subspace Dashboard</title>
-    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/style.css">
-    <link rel="stylesheet" href="/static/fonts/fontawesome.min.css">
-    <link rel="stylesheet" href="/static/fonts/simple-icons.min.css">
+    <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
+    <link rel="stylesheet" href="static/style.css">
+    <link rel="stylesheet" href="static/fonts/fontawesome.min.css">
+    <link rel="stylesheet" href="static/fonts/simple-icons.min.css">
 </head>
 <body x-data="{...dashboard(), ...search()}" x-init="loadLinks(); initSearch()">
     <header>
@@ -106,8 +106,8 @@
         </div>
     </template>
 
-    <script src="/static/search.js"></script>
-    <script src="/static/alpine.min.js" defer></script>
+    <script src="static/search.js"></script>
+    <script src="static/alpine.min.js" defer></script>
     <script>
         document.addEventListener('alpine:init', () => {
             Alpine.data('dashboard', () => ({
@@ -118,8 +118,8 @@
                 async loadLinks() {
                     try {
                         const [linksResp, navResp] = await Promise.all([
-                            fetch('/api/links').then(r => r.json()),
-                            fetch('/api/nav').then(r => r.json()),
+                            fetch('api/links').then(r => r.json()),
+                            fetch('api/nav').then(r => r.json()),
                         ]);
                         this.title = linksResp.Title || '';
                         this.footer = linksResp.Footer || '';

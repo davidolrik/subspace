@@ -15,7 +15,7 @@ import (
 	"go.olrik.dev/subspace/upstream"
 )
 
-// InternalPages serves requests for internal *.subspace.pub hostnames.
+// InternalPages serves requests for pages.subspace.pub and stats.subspace.pub.
 type InternalPages interface {
 	ServeHTTP(conn net.Conn, req *http.Request)
 }

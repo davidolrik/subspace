@@ -186,22 +186,22 @@ page "dev.kdl"
 	if len(cfg.Pages) != 1 {
 		t.Fatalf("got %d links pages, want 1", len(cfg.Pages))
 	}
-	if cfg.Pages[0].Host != "dev" {
-		t.Errorf("Host = %q, want %q", cfg.Pages[0].Host, "dev")
+	if cfg.Pages[0].Name != "dev" {
+		t.Errorf("Host = %q, want %q", cfg.Pages[0].Name, "dev")
 	}
 }
 
-func TestParseConfigPageExplicitHost(t *testing.T) {
+func TestParseConfigPageExplicitName(t *testing.T) {
 	input := `
 listen ":8080"
-page "my-file.kdl" host="internal"
+page "my-file.kdl" name="internal"
 `
 	cfg, err := Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-	if cfg.Pages[0].Host != "internal" {
-		t.Errorf("Host = %q, want %q", cfg.Pages[0].Host, "internal")
+	if cfg.Pages[0].Name != "internal" {
+		t.Errorf("Host = %q, want %q", cfg.Pages[0].Name, "internal")
 	}
 }
 
@@ -215,8 +215,8 @@ page "dashboard.kdl" alias="dash"
 		t.Fatalf("Parse failed: %v", err)
 	}
 	lp := cfg.Pages[0]
-	if lp.Host != "dashboard" {
-		t.Errorf("Host = %q, want %q", lp.Host, "dashboard")
+	if lp.Name != "dashboard" {
+		t.Errorf("Host = %q, want %q", lp.Name, "dashboard")
 	}
 	if lp.Alias != "dash" {
 		t.Errorf("Alias = %q, want %q", lp.Alias, "dash")
@@ -228,7 +228,7 @@ func TestParseConfigMultipleLinks(t *testing.T) {
 listen ":8080"
 page "dev.kdl"
 page "ops.kdl"
-page "tools.kdl" host="internal" alias="int"
+page "tools.kdl" name="internal" alias="int"
 `
 	cfg, err := Parse([]byte(input))
 	if err != nil {
@@ -237,13 +237,13 @@ page "tools.kdl" host="internal" alias="int"
 	if len(cfg.Pages) != 3 {
 		t.Fatalf("got %d links pages, want 3", len(cfg.Pages))
 	}
-	if cfg.Pages[0].Host != "dev" {
-		t.Errorf("[0].Host = %q, want %q", cfg.Pages[0].Host, "dev")
+	if cfg.Pages[0].Name != "dev" {
+		t.Errorf("[0].Name = %q, want %q", cfg.Pages[0].Name, "dev")
 	}
-	if cfg.Pages[1].Host != "ops" {
-		t.Errorf("[1].Host = %q, want %q", cfg.Pages[1].Host, "ops")
+	if cfg.Pages[1].Name != "ops" {
+		t.Errorf("[1].Name = %q, want %q", cfg.Pages[1].Name, "ops")
 	}
-	if cfg.Pages[2].Host != "internal" || cfg.Pages[2].Alias != "int" {
+	if cfg.Pages[2].Name != "internal" || cfg.Pages[2].Alias != "int" {
 		t.Errorf("[2] = %+v", cfg.Pages[2])
 	}
 }
@@ -263,7 +263,7 @@ func TestParseConfigPageReservedHost(t *testing.T) {
 	for _, reserved := range []string{"stats", "statistics"} {
 		input := `
 listen ":8080"
-page "foo.kdl" host="` + reserved + `"
+page "foo.kdl" name="` + reserved + `"
 `
 		_, err := Parse([]byte(input))
 		if err == nil {

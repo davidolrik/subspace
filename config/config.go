@@ -26,11 +26,11 @@ type Route struct {
 	Via     string
 }
 
-// Page describes an internal page served on a *.subspace.pub hostname.
+// Page describes an internal page served at pages.subspace.pub/{name}.
 type Page struct {
 	File  string // absolute path to the KDL file
-	Host  string // primary hostname (without .subspace.pub suffix)
-	Alias string // optional alias hostname (without .subspace.pub suffix)
+	Name  string // primary page name (path segment)
+	Alias string // optional alias page name
 }
 
 // Config is the top-level configuration for subspace.
@@ -280,16 +280,18 @@ func parsePage(node *document.Node, baseDir string) (Page, error) {
 
 	filePath := node.Arguments[0].ValueString()
 
-	// Derive hostname from filename by default
-	host := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	// Derive page name from filename by default
+	name := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
 
-	// Optional host= override
-	if hostVal, ok := node.Properties.Get("host"); ok && hostVal != nil {
-		host = hostVal.ValueString()
+	// Optional name= override (also accepts host= for backwards compatibility)
+	if nameVal, ok := node.Properties.Get("name"); ok && nameVal != nil {
+		name = nameVal.ValueString()
+	} else if hostVal, ok := node.Properties.Get("host"); ok && hostVal != nil {
+		name = hostVal.ValueString()
 	}
 
-	if reservedHosts[host] {
-		return Page{}, fmt.Errorf("page host %q is reserved for the statistics page", host)
+	if reservedHosts[name] {
+		return Page{}, fmt.Errorf("page name %q is reserved for the statistics page", name)
 	}
 
 	// Optional alias=
@@ -308,7 +310,7 @@ func parsePage(node *document.Node, baseDir string) (Page, error) {
 
 	return Page{
 		File:  filePath,
-		Host:  host,
+		Name:  name,
 		Alias: alias,
 	}, nil
 }

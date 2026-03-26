@@ -136,23 +136,23 @@ route ".corp.com" via="corporate"
 
 ## `page`
 
-Defines an internal page served at `{name}.subspace.pub` when browsing through the proxy. Multiple `page` directives create multiple pages, each with its own hostname and menu entry.
+Defines an internal page served at `pages.subspace.pub/{name}/` when browsing through the proxy. Multiple `page` directives create multiple pages, each with its own path and menu entry.
 
 ```kdl
 page "dev.kdl"
 page "ops.kdl"
-page "my-page.kdl" host="internal" alias="int"
+page "my-page.kdl" name="internal" alias="int"
 ```
 
-By default, the hostname is derived from the filename (minus the `.kdl` extension). Override it with `host=`, and add a second hostname with `alias=`.
+By default, the page name is derived from the filename (minus the `.kdl` extension). Override it with `name=`, and add an alias with `alias=`.
 
-| Config                            | URL                                             |
-| --------------------------------- | ----------------------------------------------- |
-| `page "dev.kdl"`                  | `http://dev.subspace.pub/`                          |
-| `page "my-file.kdl" host="tools"` | `http://tools.subspace.pub/`                        |
-| `page "ops.kdl" alias="o"`        | `http://ops.subspace.pub/` and `http://o.subspace.pub/` |
+| Config                            | URL                                                              |
+| --------------------------------- | ---------------------------------------------------------------- |
+| `page "dev.kdl"`                  | `http://pages.subspace.pub/dev/`                                 |
+| `page "my-file.kdl" name="tools"` | `http://pages.subspace.pub/tools/`                              |
+| `page "ops.kdl" alias="o"`        | `http://pages.subspace.pub/ops/` and `http://p.subspace.pub/o/` |
 
-The hostnames `stats` and `statistics` are reserved for the built-in statistics page and cannot be used.
+The names `stats` and `statistics` are reserved for the built-in statistics page and cannot be used. `p.subspace.pub` is a shorthand for `pages.subspace.pub`.
 
 Each page is configured in its own KDL file with links, sections, icons, and optional descriptions. See [Internal Pages](/guide/pages) for the full page file format, search, statistics, and other features.
 
@@ -221,7 +221,7 @@ list "Monitoring" {
 
 This gives you:
 
-- `http://dev.subspace.pub/` — development links page
-- `http://ops.subspace.pub/` (or `http://o.subspace.pub/`) — operations links page
+- `http://pages.subspace.pub/dev/` — development links page
+- `http://pages.subspace.pub/ops/` (or `http://p.subspace.pub/o/`) — operations links page
 - `http://stats.subspace.pub/` — statistics dashboard
 - `https://subspace.pub/` — documentation site

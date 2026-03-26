@@ -12,13 +12,13 @@ func TestIsInternalHost(t *testing.T) {
 		host string
 		want bool
 	}{
-		{"dashboard.subspace.pub", true},
+		{"pages.subspace.pub", true},
+		{"p.subspace.pub", true},
+		{"stats.subspace.pub", true},
 		{"statistics.subspace.pub", true},
-		{"anything.subspace.pub", true},
 		{"subspace.pub", false},
-		{"subspace", false},
+		{"dashboard.subspace.pub", false},
 		{"example.com", false},
-		{"dashboard.subspace.com", false},
 		{"", false},
 	}
 
@@ -33,20 +33,20 @@ func TestIsInternalHost(t *testing.T) {
 func TestNavAPIIncludesHostAndAlias(t *testing.T) {
 	pages := []PageInfo{
 		{
-			Host:  "dev",
+			Name:  "dev",
 			Alias: "d",
 			Page:  &PageConfig{Title: "Development"},
 		},
 		{
-			Host: "ops",
+			Name: "ops",
 			Page: &PageConfig{Title: "Operations"},
 		},
 	}
 
 	h := New(pages, nil, nil)
 
-	// Request nav from dev.subspace.pub
-	req := httptest.NewRequest(http.MethodGet, "http://dev.subspace.pub/api/nav", nil)
+	// Request nav from pages.subspace.pub/dev/
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/nav", nil)
 	rec := httptest.NewRecorder()
 	h.handleNavAPI(rec, req)
 
@@ -66,8 +66,8 @@ func TestNavAPIIncludesHostAndAlias(t *testing.T) {
 
 	// First entry (dev) should have host and alias
 	dev := nav[0]
-	if dev.Host != "dev" {
-		t.Errorf("dev entry: host = %q, want %q", dev.Host, "dev")
+	if dev.Name != "dev" {
+		t.Errorf("dev entry: name = %q, want %q", dev.Name, "dev")
 	}
 	if dev.Alias != "d" {
 		t.Errorf("dev entry: alias = %q, want %q", dev.Alias, "d")
@@ -75,11 +75,14 @@ func TestNavAPIIncludesHostAndAlias(t *testing.T) {
 	if dev.Label != "Development" {
 		t.Errorf("dev entry: label = %q, want %q", dev.Label, "Development")
 	}
+	if !dev.Active {
+		t.Error("dev entry: should be active for request to /dev/")
+	}
 
 	// Second entry (ops) should have host but no alias
 	ops := nav[1]
-	if ops.Host != "ops" {
-		t.Errorf("ops entry: host = %q, want %q", ops.Host, "ops")
+	if ops.Name != "ops" {
+		t.Errorf("ops entry: name = %q, want %q", ops.Name, "ops")
 	}
 	if ops.Alias != "" {
 		t.Errorf("ops entry: alias = %q, want empty", ops.Alias)
@@ -90,8 +93,8 @@ func TestNavAPIIncludesHostAndAlias(t *testing.T) {
 	if stats.Label != "Statistics" {
 		t.Errorf("stats entry: label = %q, want %q", stats.Label, "Statistics")
 	}
-	if stats.Host != "stats" {
-		t.Errorf("stats entry: host = %q, want %q", stats.Host, "stats")
+	if stats.Name != "stats" {
+		t.Errorf("stats entry: name = %q, want %q", stats.Name, "stats")
 	}
 	if stats.Alias != "statistics" {
 		t.Errorf("stats entry: alias = %q, want %q", stats.Alias, "statistics")
@@ -101,7 +104,7 @@ func TestNavAPIIncludesHostAndAlias(t *testing.T) {
 func TestAllLinksAPI(t *testing.T) {
 	pages := []PageInfo{
 		{
-			Host:  "dev",
+			Name:  "dev",
 			Alias: "d",
 			Page: &PageConfig{
 				Title: "Development",
@@ -117,7 +120,7 @@ func TestAllLinksAPI(t *testing.T) {
 			},
 		},
 		{
-			Host: "ops",
+			Name: "ops",
 			Page: &PageConfig{
 				Title: "Operations",
 				Sections: []ListSection{
@@ -134,7 +137,7 @@ func TestAllLinksAPI(t *testing.T) {
 
 	h := New(pages, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "http://dev.subspace.pub/api/all-links", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/all-links", nil)
 	rec := httptest.NewRecorder()
 	h.handleAllLinksAPI(rec, req)
 
@@ -151,7 +154,6 @@ func TestAllLinksAPI(t *testing.T) {
 		t.Fatalf("expected 3 links, got %d", len(links))
 	}
 
-	// First two links belong to dev page
 	if links[0].Page != "Development" {
 		t.Errorf("link 0: page = %q, want %q", links[0].Page, "Development")
 	}
@@ -166,7 +168,6 @@ func TestAllLinksAPI(t *testing.T) {
 		t.Errorf("link 1: description = %q, want %q", links[1].Description, "Build pipelines")
 	}
 
-	// Third link belongs to ops page
 	if links[2].Page != "Operations" {
 		t.Errorf("link 2: page = %q, want %q", links[2].Page, "Operations")
 	}
@@ -177,27 +178,56 @@ func TestAllLinksAPI(t *testing.T) {
 
 func TestUndefinedPageRedirectsToDocs(t *testing.T) {
 	pages := []PageInfo{
-		{Host: "dev", Page: &PageConfig{Title: "Development"}},
+		{Name: "dev", Page: &PageConfig{Title: "Development"}},
 	}
 	h := New(pages, nil, nil)
 
-	// Request an undefined page
-	req := httptest.NewRequest(http.MethodGet, "http://unknown.subspace.pub/", nil)
+	// Request an undefined page path
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/unknown/", nil)
 	rec := httptest.NewRecorder()
-
-	// Use the mux directly to simulate ServeHTTP's redirect logic
-	_, known := h.pagesByHost[req.Host]
-	if known {
-		t.Fatal("unknown.subspace.pub should not be a known host")
-	}
-
-	http.Redirect(rec, req, "https://subspace.pub/guide/pages", http.StatusFound)
+	h.mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusFound {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusFound)
 	}
 	loc := rec.Header().Get("Location")
-	if loc != "https://subspace.pub/guide/pages" {
-		t.Errorf("Location = %q, want %q", loc, "https://subspace.pub/guide/pages")
+	if loc == "" {
+		t.Fatal("expected Location header")
 	}
+	if !contains(loc, "troubleshooting") || !contains(loc, "page-not-defined") {
+		t.Errorf("Location = %q, want troubleshooting redirect", loc)
+	}
+}
+
+func TestRootRedirectsToFirstPage(t *testing.T) {
+	pages := []PageInfo{
+		{Name: "dev", Page: &PageConfig{Title: "Development"}},
+		{Name: "ops", Page: &PageConfig{Title: "Operations"}},
+	}
+	h := New(pages, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/", nil)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	loc := rec.Header().Get("Location")
+	if loc != "/dev/" {
+		t.Errorf("Location = %q, want %q", loc, "/dev/")
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
+}
+
+func containsAt(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

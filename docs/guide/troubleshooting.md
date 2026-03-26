@@ -14,12 +14,12 @@ onMounted(() => {
 </script>
 
 <div v-if="host" class="custom-block tip">
-  <p>The requested host <code>{{ host }}</code> is not defined as a page in your subspace config.</p>
+  <p>The requested page <code>{{ host }}</code> is not defined in your subspace config.</p>
 </div>
 
-<p v-if="host">You were redirected here because you visited a <code>*.subspace.pub</code> hostname that has no page configured in your subspace config.</p>
+<p v-if="host">You were redirected here because you visited a page on <code>pages.subspace.pub</code> that has no page configured in your subspace config.</p>
 
-<p v-else>If you visited a <code>*.subspace.pub</code> URL and were redirected here, it means that hostname has no page configured in your subspace config.</p>
+<p v-else>If you visited a URL on <code>pages.subspace.pub</code> and were redirected here, it means that page name is not configured in your subspace config.</p>
 
 To create a page, add a `page` directive to your config file (`~/.config/subspace/config.kdl`):
 
@@ -37,10 +37,10 @@ list "Links" {
 }
 ```
 
-The hostname is derived from the filename — `example.kdl` becomes `http://example.subspace.pub/`. You can override it with `host=` and add an alias:
+The page name is derived from the filename — `example.kdl` becomes `http://pages.subspace.pub/example/`. You can override it with `name=` and add an alias:
 
 ```kdl
-page "example.kdl" host="tools" alias="t"
+page "example.kdl" name="tools" alias="t"
 ```
 
 See [Internal Pages](/guide/pages) for the full page file format and [Configuration](/guide/configuration#page) for all `page` directive options.

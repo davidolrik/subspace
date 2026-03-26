@@ -16,7 +16,7 @@ A transparent proxy that routes traffic through upstream proxies based on hostna
 - **Config includes** — split config across multiple files with glob support
 - **Live log streaming** — stream colored logs from a running server with level filtering
 - **Health checks** — TCP health checks for all upstreams via the status command
-- **Internal pages** — link dashboards and statistics served at `*.subspace.pub` hostnames
+- **Internal pages** — link dashboards at `pages.subspace.pub` and statistics at `stats.subspace.pub`
 - **Statistics** — live metrics, upstream health, and historical charts with persistent SQLite storage
 - **Styled error pages** — DNS failures and connection errors show helpful error pages instead of bare 502s
 
@@ -175,15 +175,15 @@ New files added to an already-included directory are picked up automatically on 
 
 ### `page`
 
-Defines an internal page served at `{name}.subspace.pub`. The hostname is derived from the filename by default, or set explicitly with `host=`. An optional `alias=` adds a second hostname.
+Defines an internal page served at `pages.subspace.pub/{name}/`. The page name is derived from the filename by default, or set explicitly with `name=`. An optional `alias=` adds a second path. `p.subspace.pub` is a shorthand for `pages.subspace.pub`.
 
 ```kdl
 page "dev.kdl"
 page "ops.kdl"
-page "my-page.kdl" host="internal" alias="int"
+page "my-page.kdl" name="internal" alias="int"
 ```
 
-This creates pages at `dev.subspace.pub`, `ops.subspace.pub`, and `internal.subspace.pub` (also `int.subspace.pub`). Each page is configured in its own KDL file:
+This creates pages at `pages.subspace.pub/dev/`, `pages.subspace.pub/ops/`, and `pages.subspace.pub/internal/` (also `p.subspace.pub/int/`). Each page is configured in its own KDL file:
 
 ```kdl
 title "Development"
@@ -201,11 +201,11 @@ All configured pages and the statistics page appear in a shared navigation menu.
 
 ### Built-in Pages
 
-- **Statistics** — always available at `statistics.subspace.pub` (or `stats.subspace.pub`). Shows live metrics (connections, active, upstream health), and historical charts (connections over time, traffic by upstream, protocol breakdown). Statistics are persisted to a SQLite database and retained for one year with automatic downsampling.
-- **Fallback** — when subspace is not running, `*.subspace.pub` resolves to the documentation site at `https://subspace.pub/` via DNS.
+- **Statistics** — always available at `stats.subspace.pub` (or `statistics.subspace.pub`). Shows live metrics (connections, active, upstream health), and historical charts (connections over time, traffic by upstream, protocol breakdown). Statistics are persisted to a SQLite database and retained for one year with automatic downsampling.
+- **Fallback** — when subspace is not running, an external redirect server sends visitors to the documentation site at `https://subspace.pub/`.
 - **Error pages** — DNS failures and connection errors show styled error pages instead of bare HTTP 502 responses.
 
-The hostnames `stats` and `statistics` are reserved and cannot be used for pages.
+The names `stats` and `statistics` are reserved and cannot be used for pages.
 
 ### Hot Reload
 
@@ -257,6 +257,14 @@ subspace logs -L debug -F        # all levels, follow live
 | `-N, --lines`  | Number of historical lines                      | `10`    |
 | `-L, --level`  | Minimum level: `debug`, `info`, `warn`, `error` | `info`  |
 | `-F, --follow` | Stream live output after history                | `false` |
+
+### `subspace version`
+
+Prints the version and exits.
+
+```sh
+subspace version
+```
 
 ## How It Works
 

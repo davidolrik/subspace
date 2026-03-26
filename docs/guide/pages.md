@@ -1,10 +1,10 @@
 # Internal Pages
 
-Subspace serves internal pages at `*.subspace.pub` hostnames when browsing through the proxy. These pages provide link dashboards for organizing bookmarks and a live statistics view — all without leaving the browser.
+Subspace serves internal pages at `pages.subspace.pub` (alias `p.subspace.pub`) when browsing through the proxy. These pages provide link dashboards for organizing bookmarks and a live statistics view — all without leaving the browser.
 
 ## Overview
 
-Every page gets its own `*.subspace.pub` hostname and appears in a shared navigation menu at the top. Pages are defined in KDL files and configured via `page` directives in the main config.
+All link pages are served under `pages.subspace.pub/{name}/`, with each page getting its own path. Statistics is available at `stats.subspace.pub`. Pages are defined in KDL files and configured via `page` directives in the main config.
 
 ```kdl
 page "dev.kdl"
@@ -13,9 +13,10 @@ page "ops.kdl" alias="o"
 
 This creates:
 
-- `http://dev.subspace.pub/` — links from `dev.kdl`
-- `http://ops.subspace.pub/` (or `http://o.subspace.pub/`) — links from `ops.kdl`
+- `http://pages.subspace.pub/dev/` — links from `dev.kdl`
+- `http://pages.subspace.pub/ops/` (or `http://p.subspace.pub/o/`) — links from `ops.kdl`
 - `http://stats.subspace.pub/` — built-in statistics (always available)
+- `http://pages.subspace.pub/` — redirects to the first configured page
 
 All pages share a navigation menu, search, and dark theme. Icons and fonts are embedded in the binary — no external requests are made.
 
@@ -58,17 +59,17 @@ list "Critical" color="#ff375f" {
 }
 ```
 
-## Hostnames and Aliases
+## Page Names and Aliases
 
-By default, the hostname is derived from the filename (minus the `.kdl` extension). Override it with `host=`, and add a second hostname with `alias=`:
+By default, the page name is derived from the filename (minus the `.kdl` extension). Override it with `name=`, and add an alias with `alias=`:
 
 | Config | URL |
 |---|---|
-| `page "dev.kdl"` | `http://dev.subspace.pub/` |
-| `page "my-file.kdl" host="tools"` | `http://tools.subspace.pub/` |
-| `page "ops.kdl" alias="o"` | `http://ops.subspace.pub/` and `http://o.subspace.pub/` |
+| `page "dev.kdl"` | `http://pages.subspace.pub/dev/` |
+| `page "my-file.kdl" name="tools"` | `http://pages.subspace.pub/tools/` |
+| `page "ops.kdl" alias="o"` | `http://pages.subspace.pub/ops/` and `http://p.subspace.pub/o/` |
 
-The hostnames `stats` and `statistics` are reserved for the built-in statistics page and cannot be used.
+The names `stats` and `statistics` are reserved for the built-in statistics page and cannot be used.
 
 ## Navigation
 
@@ -85,7 +86,7 @@ Press `/` on any internal page to open the search popup. Search works across all
 The search matches against:
 
 - **Page titles** — the `title` from each page's KDL file
-- **Page hostnames** — the primary hostname and alias
+- **Page names** — the primary name and alias
 - **Link names** — the name of every link across all pages
 - **Link descriptions** — the `description` property of links
 
@@ -125,7 +126,7 @@ The statistics page auto-refreshes every 5 seconds.
 
 ## When Subspace Is Not Running
 
-When subspace is not running, `*.subspace.pub` resolves to the documentation site at `https://subspace.pub/` via DNS. No special redirect server is needed — the wildcard DNS record handles it naturally.
+When subspace is not running, requests to `pages.subspace.pub` and `stats.subspace.pub` are handled by an external redirect server that redirects to the documentation site at `https://subspace.pub/`. The redirect server also handles HTTPS → HTTP redirection so the daemon can intercept plain HTTP requests when it is running.
 
 ## Error Pages
 

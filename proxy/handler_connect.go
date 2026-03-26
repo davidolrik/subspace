@@ -21,8 +21,8 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 
 	host, _, _ := net.SplitHostPort(targetAddr)
 
-	// TLS connections to *.subspace.pub pass through to the external
-	// redirect server which handles HTTPS → HTTP redirection.
+	// TLS connections to pages.subspace.pub / stats.subspace.pub pass
+	// through to the external redirect server for HTTPS → HTTP redirection.
 
 	route := s.dialerFor(host)
 

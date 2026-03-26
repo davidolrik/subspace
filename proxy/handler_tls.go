@@ -159,9 +159,9 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 		return
 	}
 
-	// Internal pages are HTTP-only, but TLS connections to *.subspace.pub
-	// are passed through to the external redirect server which redirects
-	// HTTPS → HTTP so the daemon can intercept the plain HTTP request.
+	// Internal pages are HTTP-only. TLS connections to pages.subspace.pub
+	// and stats.subspace.pub pass through to the external redirect server
+	// which redirects HTTPS → HTTP so the daemon can intercept the request.
 
 	targetAddr := sni + ":" + listenPort
 	route := s.dialerFor(sni)

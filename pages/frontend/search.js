@@ -45,7 +45,7 @@ document.addEventListener('alpine:init', () => {
                 pages = [];
                 for (const item of this.nav) {
                     const score = this.matchScore(
-                        [item.label, item.host, item.alias], q
+                        [item.label, item.name, item.alias], q
                     );
                     if (score < Infinity) {
                         pages.push({
@@ -143,10 +143,10 @@ document.addEventListener('alpine:init', () => {
         },
 
         navMeta(item) {
-            if (!item.host) return item.url;
-            const parts = [item.host + '.subspace.pub'];
+            if (!item.name) return item.url;
+            const parts = ['pages.subspace.pub/' + item.name];
             if (item.alias) {
-                parts.push(item.alias + '.subspace.pub');
+                parts.push('p.subspace.pub/' + item.alias);
             }
             return parts.join(' / ');
         },
@@ -167,7 +167,7 @@ document.addEventListener('alpine:init', () => {
                 }
             });
             try {
-                const resp = await fetch('/api/all-links');
+                const resp = await fetch('api/all-links');
                 this.allLinks = await resp.json() || [];
             } catch (e) {
                 console.error('Failed to load links for search:', e);

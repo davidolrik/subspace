@@ -46,7 +46,7 @@ subspace serve
 You should see:
 
 ```text
-INF subspace listening version=dev addr=:8118 upstreams=2 routes=2
+INF subspace listening version=dev addr=127.0.0.1:8118 upstreams=2 routes=2
 INF watching config for changes files=1
 ```
 

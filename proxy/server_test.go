@@ -980,7 +980,7 @@ func TestInternalPagesInterception(t *testing.T) {
 
 	// Set up the pages handler with test links
 	linkPages := []pages.PageInfo{{
-		Host: "dashboard",
+		Name: "dashboard",
 		Page: &pages.PageConfig{
 			Sections: []pages.ListSection{
 				{Name: "Test", Links: []pages.Link{
@@ -997,10 +997,10 @@ func TestInternalPagesInterception(t *testing.T) {
 		},
 	}
 
-	// Request to dashboard.subspace.pub should be served internally
-	resp, err := client.Get("http://dashboard.subspace.pub/")
+	// Request to pages.subspace.pub/dashboard/ should be served internally
+	resp, err := client.Get("http://pages.subspace.pub/dashboard/")
 	if err != nil {
-		t.Fatalf("GET dashboard.subspace.pub failed: %v", err)
+		t.Fatalf("GET pages.subspace.pub/dashboard/ failed: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -1019,7 +1019,7 @@ func TestInternalPagesLinksAPI(t *testing.T) {
 	srv, proxyAddr := startProxyServer(t, matcher, nil)
 
 	linkPages := []pages.PageInfo{{
-		Host: "dashboard",
+		Name: "dashboard",
 		Page: &pages.PageConfig{
 			Sections: []pages.ListSection{
 				{Name: "Dev", Links: []pages.Link{
@@ -1036,7 +1036,7 @@ func TestInternalPagesLinksAPI(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Get("http://dashboard.subspace.pub/api/links")
+	resp, err := client.Get("http://pages.subspace.pub/dashboard/api/links")
 	if err != nil {
 		t.Fatalf("GET /api/links failed: %v", err)
 	}
@@ -1068,21 +1068,21 @@ func TestInternalPagesDoNotForwardUpstream(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Get("http://dashboard.subspace.pub/")
+	resp, err := client.Get("http://pages.subspace.pub/dashboard/")
 	if err != nil {
 		t.Fatalf("GET failed: %v", err)
 	}
 	resp.Body.Close()
 
 	if backendHit.Load() != 0 {
-		t.Error("request to *.subspace.pub was forwarded to upstream backend")
+		t.Error("request to pages.subspace.pub was forwarded to upstream backend")
 	}
 }
 
 func TestCONNECTToSubspacePassesThrough(t *testing.T) {
-	// CONNECT to *.subspace.pub should pass through to the external redirect server,
-	// not be intercepted by the proxy. Since there's no real server to connect to,
-	// we expect a dial failure (502), not a 302 redirect.
+	// CONNECT to pages.subspace.pub should pass through to the external
+	// redirect server. Since there's no real server to connect to,
+	// we expect a dial failure, not a redirect.
 	matcher := route.NewMatcher(nil)
 	proxyAddr := startProxy(t, matcher, nil)
 
@@ -1092,7 +1092,7 @@ func TestCONNECTToSubspacePassesThrough(t *testing.T) {
 	}
 	defer conn.Close()
 
-	fmt.Fprintf(conn, "CONNECT dashboard.subspace.pub:443 HTTP/1.1\r\nHost: dashboard.subspace.pub:443\r\n\r\n")
+	fmt.Fprintf(conn, "CONNECT pages.subspace.pub:443 HTTP/1.1\r\nHost: pages.subspace.pub:443\r\n\r\n")
 
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, nil)
@@ -1102,7 +1102,7 @@ func TestCONNECTToSubspacePassesThrough(t *testing.T) {
 	resp.Body.Close()
 
 	if resp.StatusCode == 302 {
-		t.Error("CONNECT to *.subspace.pub should not be intercepted with a redirect")
+		t.Error("CONNECT to pages.subspace.pub should not be intercepted with a redirect")
 	}
 }
 
