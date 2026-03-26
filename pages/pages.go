@@ -19,8 +19,8 @@ import (
 const (
 	PagesHost      = "pages.subspace.pub"
 	PagesHostAlias = "p.subspace.pub"
-	StatsHost      = "stats.subspace.pub"
-	StatsHostAlias = "statistics.subspace.pub"
+	StatsHost      = "statistics.subspace.pub"
+	StatsHostAlias = "stats.subspace.pub"
 )
 
 // IsInternalHost returns true if the hostname serves internal pages.
@@ -170,6 +170,10 @@ func (h *Handler) ServeHTTP(conn net.Conn, req *http.Request) {
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
+
+	// Prevent browsers from caching internal page responses so they
+	// don't replay stale redirects from the external fallback server.
+	rec.Header().Set("Cache-Control", "no-store")
 
 	resp := rec.Result()
 	defer resp.Body.Close()

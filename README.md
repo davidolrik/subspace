@@ -205,7 +205,7 @@ All configured pages and the statistics page appear in a shared navigation menu.
 - **Fallback** — when subspace is not running, an external redirect server sends visitors to the documentation site at `https://subspace.pub/`.
 - **Error pages** — DNS failures and connection errors show styled error pages instead of bare HTTP 502 responses.
 
-The names `stats` and `statistics` are reserved and cannot be used for pages.
+The statistics page is always available at `stats.subspace.pub` regardless of page configuration. `p.subspace.pub` is a shorthand for `pages.subspace.pub`.
 
 ### Hot Reload
 

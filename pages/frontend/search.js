@@ -144,11 +144,8 @@ document.addEventListener('alpine:init', () => {
 
         navMeta(item) {
             if (!item.name) return item.url;
-            const parts = ['pages.subspace.pub/' + item.name];
-            if (item.alias) {
-                parts.push('p.subspace.pub/' + item.alias);
-            }
-            return parts.join(' / ');
+            // Strip protocol to show just the host+path
+            return item.url.replace(/^https?:\/\//, '').replace(/\/$/, '');
         },
 
         iconClass(icon) {

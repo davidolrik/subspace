@@ -43,11 +43,6 @@ type Config struct {
 	IncludedFiles []string // absolute paths of all files parsed (main + includes)
 }
 
-var reservedHosts = map[string]bool{
-	"stats":      true,
-	"statistics": true,
-}
-
 var validUpstreamTypes = map[string]bool{
 	"http":   true,
 	"socks5": true,
@@ -290,17 +285,10 @@ func parsePage(node *document.Node, baseDir string) (Page, error) {
 		name = hostVal.ValueString()
 	}
 
-	if reservedHosts[name] {
-		return Page{}, fmt.Errorf("page name %q is reserved for the statistics page", name)
-	}
-
 	// Optional alias=
 	var alias string
 	if aliasVal, ok := node.Properties.Get("alias"); ok && aliasVal != nil {
 		alias = aliasVal.ValueString()
-		if reservedHosts[alias] {
-			return Page{}, fmt.Errorf("page alias %q is reserved for the statistics page", alias)
-		}
 	}
 
 	// Resolve file path

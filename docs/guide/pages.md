@@ -69,7 +69,7 @@ By default, the page name is derived from the filename (minus the `.kdl` extensi
 | `page "my-file.kdl" name="tools"` | `http://pages.subspace.pub/tools/` |
 | `page "ops.kdl" alias="o"` | `http://pages.subspace.pub/ops/` and `http://p.subspace.pub/o/` |
 
-The names `stats` and `statistics` are reserved for the built-in statistics page and cannot be used.
+If a page is named `stats` or `statistics`, it will be accessible at `pages.subspace.pub/stats/` alongside the statistics page at `stats.subspace.pub`.
 
 ## Navigation
 

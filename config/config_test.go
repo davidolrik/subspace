@@ -259,40 +259,7 @@ func TestParseConfigPageNoPages(t *testing.T) {
 	}
 }
 
-func TestParseConfigPageReservedHost(t *testing.T) {
-	for _, reserved := range []string{"stats", "statistics"} {
-		input := `
-listen ":8080"
-page "foo.kdl" name="` + reserved + `"
-`
-		_, err := Parse([]byte(input))
-		if err == nil {
-			t.Errorf("expected error for reserved host %q", reserved)
-		}
-	}
-}
 
-func TestParseConfigPageReservedAlias(t *testing.T) {
-	input := `
-listen ":8080"
-page "foo.kdl" alias="stats"
-`
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for reserved alias")
-	}
-}
-
-func TestParseConfigPageReservedDerivedHost(t *testing.T) {
-	input := `
-listen ":8080"
-page "stats.kdl"
-`
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for reserved derived hostname")
-	}
-}
 
 func TestParseFilePageResolvesPath(t *testing.T) {
 	dir := t.TempDir()
