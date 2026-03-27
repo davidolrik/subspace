@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="/static/fonts/fontawesome.min.css">
     <link rel="stylesheet" href="/static/fonts/simple-icons.min.css">
     <link rel="stylesheet" href="/static/fonts/materialdesignicons.min.css">
+    <link rel="stylesheet" href="/static/fonts/nerdfonts.min.css">
     <style>
         .stats-grid {
             display: grid;
@@ -652,6 +653,7 @@
                     if (icon.startsWith('si-')) return 'si ' + icon;
                     if (icon.startsWith('fa-')) return 'fa-solid ' + icon;
                     if (icon.startsWith('mdi-')) return 'mdi ' + icon;
+                    if (icon.startsWith('nf-')) return 'nf ' + icon;
                     return icon;
                 },
 

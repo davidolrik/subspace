@@ -43,11 +43,11 @@ Links are displayed in a responsive grid of cards, one card per section. Each li
 
 ### Link properties
 
-| Property | Required | Description |
-|---|---|---|
-| `url` | Yes | The link URL |
-| `icon` | No | Icon name — `si-*` for [Simple Icons](https://simpleicons.org), `fa-*` for [Font Awesome](https://fontawesome.com/icons), `mdi-*` for [Material Design Icons](https://pictogrammers.com/library/mdi/) |
-| `description` | No | Short description shown below the link name |
+| Property      | Required | Description                                                                                                                                                                                                                                                |
+| ------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`         | Yes      | The link URL                                                                                                                                                                                                                                               |
+| `icon`        | No       | Icon name — `si-*` for [Simple Icons](https://simpleicons.org), `fa-*` for [Font Awesome](https://fontawesome.com/icons), `mdi-*` for [Material Design Icons](https://pictogrammers.com/library/mdi/), `nf-*` for [Nerd Fonts](https://www.nerdfonts.com/) |
+| `description` | No       | Short description shown below the link name                                                                                                                                                                                                                |
 
 ### Section colors and icons
 
@@ -59,17 +59,17 @@ list "Critical" color="#ff375f" icon="fa-fire" {
 }
 ```
 
-The section icon uses the same color as the section, with a subtle glow. If no color is set, the icon uses a muted default color. Icons use the same `si-*`, `fa-*`, and `mdi-*` naming as link icons.
+The section icon uses the same color as the section, with a subtle glow. If no color is set, the icon uses a muted default color. Icons use the same `si-*`, `fa-*`, `mdi-*`, and `nf-*` naming as link icons.
 
 ## Page Names and Aliases
 
 By default, the page name is derived from the filename (minus the `.kdl` extension). Override it with `name=`, and add an alias with `alias=`:
 
-| Config | URL |
-|---|---|
-| `page "dev.kdl"` | `http://pages.subspace.pub/dev/` |
-| `page "my-file.kdl" name="tools"` | `http://pages.subspace.pub/tools/` |
-| `page "ops.kdl" alias="o"` | `http://pages.subspace.pub/ops/` and `http://p.subspace.pub/o/` |
+| Config                            | URL                                                             |
+| --------------------------------- | --------------------------------------------------------------- |
+| `page "dev.kdl"`                  | `http://pages.subspace.pub/dev/`                                |
+| `page "my-file.kdl" name="tools"` | `http://pages.subspace.pub/tools/`                              |
+| `page "ops.kdl" alias="o"`        | `http://pages.subspace.pub/ops/` and `http://p.subspace.pub/o/` |
 
 If a page is named `stats` or `statistics`, it will be accessible at `pages.subspace.pub/stats/` alongside the statistics page at `stats.subspace.pub`.
 
@@ -103,12 +103,12 @@ Within each group, prefix matches rank higher than substring matches. For exampl
 
 ### Keyboard shortcuts
 
-| Key | Action |
-|---|---|
-| `/` | Open search |
-| `Escape` | Close search |
-| `Arrow Up` / `Arrow Down` | Navigate results |
-| `Enter` | Go to selected result |
+| Key                       | Action                |
+| ------------------------- | --------------------- |
+| `/`                       | Open search           |
+| `Escape`                  | Close search          |
+| `Arrow Up` / `Arrow Down` | Navigate results      |
+| `Enter`                   | Go to selected result |
 
 You can also click any result or click outside the popup to close it.
 
