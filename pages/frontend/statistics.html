@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="/static/fonts/fontawesome.min.css">
     <link rel="stylesheet" href="/static/fonts/simple-icons.min.css">
+    <link rel="stylesheet" href="/static/fonts/materialdesignicons.min.css">
     <style>
         .stats-grid {
             display: grid;
@@ -650,6 +651,7 @@
                 iconClass(icon) {
                     if (icon.startsWith('si-')) return 'si ' + icon;
                     if (icon.startsWith('fa-')) return 'fa-solid ' + icon;
+                    if (icon.startsWith('mdi-')) return 'mdi ' + icon;
                     return icon;
                 },
 

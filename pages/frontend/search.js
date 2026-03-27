@@ -152,6 +152,7 @@ document.addEventListener('alpine:init', () => {
             if (!icon) return 'fa-solid fa-link';
             if (icon.startsWith('si-')) return 'si ' + icon;
             if (icon.startsWith('fa-')) return 'fa-solid ' + icon;
+            if (icon.startsWith('mdi-')) return 'mdi ' + icon;
             return icon;
         },
 

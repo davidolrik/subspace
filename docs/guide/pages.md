@@ -46,7 +46,7 @@ Links are displayed in a responsive grid of cards, one card per section. Each li
 | Property | Required | Description |
 |---|---|---|
 | `url` | Yes | The link URL |
-| `icon` | No | Icon name — `si-*` for [Simple Icons](https://simpleicons.org), `fa-*` for [Font Awesome](https://fontawesome.com/icons) |
+| `icon` | No | Icon name — `si-*` for [Simple Icons](https://simpleicons.org), `fa-*` for [Font Awesome](https://fontawesome.com/icons), `mdi-*` for [Material Design Icons](https://pictogrammers.com/library/mdi/) |
 | `description` | No | Short description shown below the link name |
 
 ### Section colors and icons
@@ -59,7 +59,7 @@ list "Critical" color="#ff375f" icon="fa-fire" {
 }
 ```
 
-The section icon uses the same color as the section, with a subtle glow. If no color is set, the icon uses a muted default color. Icons use the same `si-*` and `fa-*` naming as link icons.
+The section icon uses the same color as the section, with a subtle glow. If no color is set, the icon uses a muted default color. Icons use the same `si-*`, `fa-*`, and `mdi-*` naming as link icons.
 
 ## Page Names and Aliases
 
