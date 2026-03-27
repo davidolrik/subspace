@@ -199,6 +199,39 @@ list "Ops" {
 	}
 }
 
+func TestParsePageListIcon(t *testing.T) {
+	input := []byte(`
+list "Dev" icon="fa-code" {
+	link "GitHub" url="https://github.com"
+}
+
+list "Ops" icon="si-grafana" color="#00ff88" {
+	link "Grafana" url="https://grafana.example.com"
+}
+
+list "Docs" {
+	link "Wiki" url="https://wiki.example.com"
+}
+`)
+	cfg, err := ParsePage(input)
+	if err != nil {
+		t.Fatalf("ParsePage() error: %v", err)
+	}
+
+	if cfg.Sections[0].Icon != "fa-code" {
+		t.Errorf("sections[0].Icon = %q, want %q", cfg.Sections[0].Icon, "fa-code")
+	}
+	if cfg.Sections[1].Icon != "si-grafana" {
+		t.Errorf("sections[1].Icon = %q, want %q", cfg.Sections[1].Icon, "si-grafana")
+	}
+	if cfg.Sections[1].Color != "#00ff88" {
+		t.Errorf("sections[1].Color = %q, want %q", cfg.Sections[1].Color, "#00ff88")
+	}
+	if cfg.Sections[2].Icon != "" {
+		t.Errorf("sections[2].Icon = %q, want empty", cfg.Sections[2].Icon)
+	}
+}
+
 func TestParsePageUnknownTopLevel(t *testing.T) {
 	input := []byte(`
 something "foo"

@@ -20,6 +20,7 @@ type PageConfig struct {
 type ListSection struct {
 	Name  string `json:"Name"`
 	Color string `json:"Color,omitempty"`
+	Icon  string `json:"Icon,omitempty"`
 	Links []Link `json:"Links"`
 }
 
@@ -86,6 +87,9 @@ func parseListSection(node *document.Node) (ListSection, error) {
 
 	if colorVal, ok := node.Properties.Get("color"); ok && colorVal != nil {
 		s.Color = colorVal.ValueString()
+	}
+	if iconVal, ok := node.Properties.Get("icon"); ok && iconVal != nil {
+		s.Icon = iconVal.ValueString()
 	}
 
 	for _, child := range node.Children {

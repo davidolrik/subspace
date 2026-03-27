@@ -49,15 +49,17 @@ Links are displayed in a responsive grid of cards, one card per section. Each li
 | `icon` | No | Icon name — `si-*` for [Simple Icons](https://simpleicons.org), `fa-*` for [Font Awesome](https://fontawesome.com/icons) |
 | `description` | No | Short description shown below the link name |
 
-### Section colors
+### Section colors and icons
 
-Sections can have an accent color that tints the card border and background:
+Sections can have an accent color that tints the card border and background, and an icon displayed in the top-right corner of the card:
 
 ```kdl
-list "Critical" color="#ff375f" {
-    link "Incidents" url="https://incidents.example.com" icon="fa-fire"
+list "Critical" color="#ff375f" icon="fa-fire" {
+    link "Incidents" url="https://incidents.example.com" icon="fa-triangle-exclamation"
 }
 ```
+
+The section icon uses the same color as the section, with a subtle glow. If no color is set, the icon uses a muted default color. Icons use the same `si-*` and `fa-*` naming as link icons.
 
 ## Page Names and Aliases
 
