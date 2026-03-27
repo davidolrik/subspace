@@ -206,7 +206,7 @@ footer {
     padding: 2rem;
     text-align: center;
     font-size: 0.8rem;
-    color: var(--text-muted);
+    color: var(--border);
 }
 
 /* Search popup */
