@@ -40,27 +40,51 @@ Changing the control socket path requires a restart.
 
 ### `upstream`
 
-Defines a named upstream proxy.
+Defines a named upstream proxy. Supported types: `http`, `socks5`, `wireguard`.
+
+#### HTTP CONNECT
+
+Tunnels through an HTTP proxy using the CONNECT method. Supports Proxy-Authorization with Basic auth when credentials are provided.
 
 ```kdl
 upstream "<name>" {
-  type "<http|socks5|wireguard>"
+  type "http"
   address "<host:port>"
   username "<string>"   // optional
   password "<string>"   // optional
 }
 ```
 
-**HTTP CONNECT and SOCKS5 properties:**
+| Property   | Required | Description                  |
+| ---------- | -------- | ---------------------------- |
+| `type`     | Yes      | `"http"`                     |
+| `address`  | Yes      | Proxy endpoint (`host:port`) |
+| `username` | No       | Authentication username      |
+| `password` | No       | Authentication password      |
 
-| Property | Required | Values | Description |
-|---|---|---|---|
-| `type` | Yes | `"http"`, `"socks5"` | Proxy protocol |
-| `address` | Yes | `host:port` | Upstream proxy endpoint |
-| `username` | No | string | Authentication username |
-| `password` | No | string | Authentication password |
+#### SOCKS5
 
-**WireGuard properties:**
+Tunnels through a SOCKS5 proxy. Supports username/password authentication when credentials are provided.
+
+```kdl
+upstream "<name>" {
+  type "socks5"
+  address "<host:port>"
+  username "<string>"   // optional
+  password "<string>"   // optional
+}
+```
+
+| Property   | Required | Description                  |
+| ---------- | -------- | ---------------------------- |
+| `type`     | Yes      | `"socks5"`                   |
+| `address`  | Yes      | Proxy endpoint (`host:port`) |
+| `username` | No       | Authentication username      |
+| `password` | No       | Authentication password      |
+
+#### WireGuard
+
+Creates a userspace WireGuard tunnel using [wireguard-go](https://git.zx2c4.com/wireguard-go/about/) and gVisor's netstack. Runs entirely in-process — no root privileges or kernel module required. Health checks are not performed for WireGuard upstreams (the protocol has its own keepalive mechanism).
 
 ```kdl
 upstream "<name>" {
@@ -73,20 +97,14 @@ upstream "<name>" {
 }
 ```
 
-| Property | Required | Values | Description |
-|---|---|---|---|
-| `type` | Yes | `"wireguard"` | Tunnel protocol |
-| `endpoint` | Yes | `host:port` | WireGuard peer endpoint |
-| `private-key` | Yes | base64 | Local private key |
-| `public-key` | Yes | base64 | Peer public key |
-| `address` | Yes | `ip/prefix` | Local tunnel address (e.g. `10.0.0.2/32`) |
-| `dns` | No | IP address | DNS server for resolution via the tunnel |
-
-**HTTP type** uses the HTTP CONNECT method to establish tunnels. Supports Proxy-Authorization with Basic auth when credentials are provided.
-
-**SOCKS5 type** uses the SOCKS5 protocol. Supports username/password authentication when credentials are provided.
-
-**WireGuard type** creates a userspace WireGuard tunnel using [wireguard-go](https://git.zx2c4.com/wireguard-go/about/) and gVisor's netstack. Runs entirely in-process with no root privileges or kernel module required. All traffic routed through this upstream is sent through the encrypted WireGuard tunnel. Health checks are not performed for WireGuard upstreams (the protocol has its own keepalive mechanism).
+| Property      | Required | Description                                         |
+| ------------- | -------- | --------------------------------------------------- |
+| `type`        | Yes      | `"wireguard"`                                       |
+| `endpoint`    | Yes      | Peer endpoint (`host:port`)                         |
+| `private-key` | Yes      | Base64-encoded local private key                    |
+| `public-key`  | Yes      | Base64-encoded peer public key                      |
+| `address`     | Yes      | Local tunnel address with CIDR (e.g. `10.0.0.2/32`) |
+| `dns`         | No       | DNS server for resolution via the tunnel            |
 
 ### `route`
 
@@ -108,21 +126,21 @@ Includes other KDL config files.
 include "<path-or-glob>"
 ```
 
-| Behavior | Description |
-|---|---|
-| Path resolution | Relative to the file containing the include |
-| Glob support | `*`, `?`, `[...]` via `filepath.Glob` |
-| Ordering | Glob matches processed alphabetically |
-| Nesting | Included files can include other files |
-| Circular detection | Detected and rejected with an error |
-| Missing glob | Silently ignored (empty expansion) |
-| Missing exact path | Error |
+| Behavior           | Description                                 |
+| ------------------ | ------------------------------------------- |
+| Path resolution    | Relative to the file containing the include |
+| Glob support       | `*`, `?`, `[...]` via `filepath.Glob`       |
+| Ordering           | Glob matches processed alphabetically       |
+| Nesting            | Included files can include other files      |
+| Circular detection | Detected and rejected with an error         |
+| Missing glob       | Silently ignored (empty expansion)          |
+| Missing exact path | Error                                       |
 
 ## Validation
 
 Config validation runs after all includes are resolved:
 
-- All `upstream` blocks must have a valid `type` and required properties (`address` for http/socks5; `endpoint`, `private-key`, `public-key`, `address` for wireguard)
+- All `upstream` blocks must have a valid `type` and the required properties for that type
 - All `route` rules must reference an existing upstream or `"direct"`
 - Circular includes are rejected
 - Unknown node types produce an error

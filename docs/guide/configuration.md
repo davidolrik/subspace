@@ -28,7 +28,7 @@ control_socket "/tmp/subspace.sock"
 
 ## `upstream`
 
-Defines a named upstream proxy. Each upstream has a type, address, and optional authentication.
+Defines a named upstream proxy.
 
 ### HTTP CONNECT
 
@@ -43,6 +43,13 @@ upstream "corporate" {
 }
 ```
 
+| Property   | Required | Description                       |
+| ---------- | -------- | --------------------------------- |
+| `type`     | Yes      | `"http"`                          |
+| `address`  | Yes      | `host:port` of the proxy          |
+| `username` | No       | Authentication username           |
+| `password` | No       | Authentication password           |
+
 ### SOCKS5
 
 Tunnels through a SOCKS5 proxy.
@@ -56,9 +63,16 @@ upstream "tunnel" {
 }
 ```
 
+| Property   | Required | Description                       |
+| ---------- | -------- | --------------------------------- |
+| `type`     | Yes      | `"socks5"`                        |
+| `address`  | Yes      | `host:port` of the proxy          |
+| `username` | No       | Authentication username           |
+| `password` | No       | Authentication password           |
+
 ### WireGuard
 
-Routes traffic through a userspace WireGuard tunnel. Runs entirely in-process — no root privileges, kernel module, or external tools required.
+Routes traffic through a userspace WireGuard tunnel. Runs entirely in-process — no root privileges, kernel module, or external tools required. Generate keys with `wg genkey` and `wg pubkey` from [wireguard-tools](https://www.wireguard.com/install/).
 
 ```kdl
 upstream "home" {
@@ -70,21 +84,6 @@ upstream "home" {
   dns "1.1.1.1"  // optional
 }
 ```
-
-Generate keys with `wg genkey` and `wg pubkey` from [wireguard-tools](https://www.wireguard.com/install/).
-
-### Properties
-
-**HTTP CONNECT and SOCKS5:**
-
-| Property   | Required | Description                       |
-| ---------- | -------- | --------------------------------- |
-| `type`     | Yes      | `"http"` or `"socks5"`            |
-| `address`  | Yes      | `host:port` of the upstream proxy |
-| `username` | No       | Authentication username           |
-| `password` | No       | Authentication password           |
-
-**WireGuard:**
 
 | Property      | Required | Description                              |
 | ------------- | -------- | ---------------------------------------- |

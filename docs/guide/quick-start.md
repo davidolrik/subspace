@@ -32,7 +32,7 @@ route "specific.host.com" via="tunnel"
 This config:
 
 - Listens on port 8118
-- Defines two upstreams: an HTTP CONNECT proxy and a SOCKS5 proxy
+- Defines two upstreams: an HTTP CONNECT proxy and a SOCKS5 proxy (WireGuard is also supported)
 - Routes `.corp.internal` subdomains through the corporate proxy
 - Routes `specific.host.com` through the SOCKS5 tunnel
 - Everything else connects directly

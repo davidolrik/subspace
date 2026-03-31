@@ -116,20 +116,21 @@ control_socket "/tmp/subspace.sock"
 
 ### `upstream`
 
-Defines a named upstream proxy. Supported types are `http` (HTTP CONNECT), `socks5`, and `wireguard`.
+Defines a named upstream proxy. Supported types: `http` (HTTP CONNECT), `socks5`, and `wireguard`.
 
 ```kdl
-upstream "myproxy" {
-  type "socks5"
-  address "127.0.0.1:1080"
+upstream "corporate" {
+  type "http"
+  address "proxy.corp.com:3128"
   username "user"    // optional
   password "secret"  // optional
 }
-```
 
-WireGuard upstreams create a userspace tunnel (no root or kernel module required):
+upstream "tunnel" {
+  type "socks5"
+  address "127.0.0.1:1080"
+}
 
-```kdl
 upstream "home" {
   type "wireguard"
   endpoint "vpn.example.com:51820"
