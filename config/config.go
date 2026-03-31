@@ -18,6 +18,12 @@ type Upstream struct {
 	Address  string
 	Username string
 	Password string
+
+	// WireGuard-specific fields
+	Endpoint   string
+	PrivateKey string
+	PublicKey  string
+	DNS        string
 }
 
 // Route maps a hostname pattern to an upstream proxy.
@@ -46,8 +52,9 @@ type Config struct {
 }
 
 var validUpstreamTypes = map[string]bool{
-	"http":   true,
-	"socks5": true,
+	"http":      true,
+	"socks5":    true,
+	"wireguard": true,
 }
 
 // ParseFile parses a config file, resolving include directives relative
@@ -266,6 +273,14 @@ func parseUpstream(node *document.Node) (Upstream, error) {
 			u.Username = val
 		case "password":
 			u.Password = val
+		case "endpoint":
+			u.Endpoint = val
+		case "private-key":
+			u.PrivateKey = val
+		case "public-key":
+			u.PublicKey = val
+		case "dns":
+			u.DNS = val
 		default:
 			return u, fmt.Errorf("unknown upstream property: %q", child.Name.ValueString())
 		}
@@ -275,10 +290,27 @@ func parseUpstream(node *document.Node) (Upstream, error) {
 		return u, fmt.Errorf("missing required property: type")
 	}
 	if !validUpstreamTypes[u.Type] {
-		return u, fmt.Errorf("invalid upstream type %q (must be http or socks5)", u.Type)
+		return u, fmt.Errorf("invalid upstream type %q (must be http, socks5, or wireguard)", u.Type)
 	}
-	if u.Address == "" {
-		return u, fmt.Errorf("missing required property: address")
+
+	switch u.Type {
+	case "wireguard":
+		if u.Endpoint == "" {
+			return u, fmt.Errorf("missing required property: endpoint")
+		}
+		if u.PrivateKey == "" {
+			return u, fmt.Errorf("missing required property: private-key")
+		}
+		if u.PublicKey == "" {
+			return u, fmt.Errorf("missing required property: public-key")
+		}
+		if u.Address == "" {
+			return u, fmt.Errorf("missing required property: address")
+		}
+	default:
+		if u.Address == "" {
+			return u, fmt.Errorf("missing required property: address")
+		}
 	}
 
 	return u, nil

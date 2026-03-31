@@ -674,6 +674,106 @@ include "routes.kdl"
 	}
 }
 
+func TestParseConfigWireGuardUpstream(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "home" {
+	type "wireguard"
+	endpoint "vpn.example.com:51820"
+	private-key "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
+	public-key "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
+	address "10.0.0.2/32"
+	dns "1.1.1.1"
+}
+
+route ".home.lan" via="home"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	home, ok := cfg.Upstreams["home"]
+	if !ok {
+		t.Fatal("missing upstream 'home'")
+	}
+	if home.Type != "wireguard" {
+		t.Errorf("Type = %q, want %q", home.Type, "wireguard")
+	}
+	if home.Endpoint != "vpn.example.com:51820" {
+		t.Errorf("Endpoint = %q, want %q", home.Endpoint, "vpn.example.com:51820")
+	}
+	if home.PrivateKey != "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=" {
+		t.Errorf("PrivateKey = %q", home.PrivateKey)
+	}
+	if home.PublicKey != "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=" {
+		t.Errorf("PublicKey = %q", home.PublicKey)
+	}
+	if home.Address != "10.0.0.2/32" {
+		t.Errorf("Address = %q, want %q", home.Address, "10.0.0.2/32")
+	}
+	if home.DNS != "1.1.1.1" {
+		t.Errorf("DNS = %q, want %q", home.DNS, "1.1.1.1")
+	}
+}
+
+func TestParseConfigWireGuardMissingEndpoint(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "bad" {
+	type "wireguard"
+	private-key "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
+	public-key "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
+	address "10.0.0.2/32"
+}
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for wireguard upstream missing endpoint")
+	}
+}
+
+func TestParseConfigWireGuardMissingKeys(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "bad" {
+	type "wireguard"
+	endpoint "vpn:51820"
+	address "10.0.0.2/32"
+}
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for wireguard upstream missing keys")
+	}
+}
+
+func TestParseConfigWireGuardDNSOptional(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "home" {
+	type "wireguard"
+	endpoint "vpn:51820"
+	private-key "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
+	public-key "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
+	address "10.0.0.2/32"
+}
+
+route ".home.lan" via="home"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.Upstreams["home"].DNS != "" {
+		t.Errorf("DNS = %q, want empty", cfg.Upstreams["home"].DNS)
+	}
+}
+
 func TestParseConfigValidatesUpstreamType(t *testing.T) {
 	input := `
 listen ":8080"

@@ -56,7 +56,26 @@ upstream "tunnel" {
 }
 ```
 
+### WireGuard
+
+Routes traffic through a userspace WireGuard tunnel. Runs entirely in-process — no root privileges, kernel module, or external tools required.
+
+```kdl
+upstream "home" {
+  type "wireguard"
+  endpoint "vpn.example.com:51820"
+  private-key "base64-encoded-private-key"
+  public-key "base64-encoded-peer-public-key"
+  address "10.0.0.2/32"
+  dns "1.1.1.1"  // optional
+}
+```
+
+Generate keys with `wg genkey` and `wg pubkey` from [wireguard-tools](https://www.wireguard.com/install/).
+
 ### Properties
+
+**HTTP CONNECT and SOCKS5:**
 
 | Property   | Required | Description                       |
 | ---------- | -------- | --------------------------------- |
@@ -64,6 +83,17 @@ upstream "tunnel" {
 | `address`  | Yes      | `host:port` of the upstream proxy |
 | `username` | No       | Authentication username           |
 | `password` | No       | Authentication password           |
+
+**WireGuard:**
+
+| Property      | Required | Description                              |
+| ------------- | -------- | ---------------------------------------- |
+| `type`        | Yes      | `"wireguard"`                            |
+| `endpoint`    | Yes      | `host:port` of the WireGuard peer        |
+| `private-key` | Yes      | Base64-encoded private key               |
+| `public-key`  | Yes      | Base64-encoded peer public key           |
+| `address`     | Yes      | Local tunnel address with CIDR           |
+| `dns`         | No       | DNS server for resolution via the tunnel |
 
 ## `route`
 

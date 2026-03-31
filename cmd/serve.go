@@ -52,6 +52,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 				return fmt.Errorf("listen on %s: %w", cfg.Listen, err)
 			}
 
+			defer closeDialers(dialers)
 			pool := upstream.NewPool(upstream.PoolConfig{})
 			srv := proxy.NewServer(ln, matcher, dialers, pool)
 
@@ -107,7 +108,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			)
 
 			// Watch config files for changes (main config + included files)
-			go watchConfig(cfg, srv, ctrlSrv, pagesHandler, monitor)
+			go watchConfig(cfg, srv, ctrlSrv, pagesHandler, monitor, dialers)
 
 			// Graceful shutdown
 			sigCh := make(chan os.Signal, 1)
@@ -149,15 +150,36 @@ func buildDialer(u config.Upstream) (upstream.Dialer, error) {
 		return upstream.NewHTTPConnectDialer(u.Address, u.Username, u.Password), nil
 	case "socks5":
 		return upstream.NewSOCKS5Dialer(u.Address, u.Username, u.Password)
+	case "wireguard":
+		return upstream.NewWireGuardDialer(upstream.WireGuardConfig{
+			PrivateKey: u.PrivateKey,
+			PublicKey:  u.PublicKey,
+			Endpoint:   u.Endpoint,
+			Address:    u.Address,
+			DNS:        u.DNS,
+		})
 	default:
 		return nil, fmt.Errorf("unknown upstream type %q", u.Type)
 	}
 }
 
+// closeDialers closes any dialers that implement io.Closer (e.g. WireGuard).
+func closeDialers(dialers map[string]upstream.Dialer) {
+	for _, d := range dialers {
+		if c, ok := d.(interface{ Close() error }); ok {
+			c.Close()
+		}
+	}
+}
+
 // buildMonitorTargets extracts upstream addresses from config for the health monitor.
+// WireGuard upstreams are excluded because they use UDP and cannot be TCP health-checked.
 func buildMonitorTargets(cfg *config.Config) map[string]upstream.MonitorTarget {
 	targets := make(map[string]upstream.MonitorTarget, len(cfg.Upstreams))
 	for name, u := range cfg.Upstreams {
+		if u.Type == "wireguard" {
+			continue
+		}
 		targets[name] = upstream.MonitorTarget{Type: u.Type, Address: u.Address}
 	}
 	return targets
@@ -165,7 +187,7 @@ func buildMonitorTargets(cfg *config.Config) map[string]upstream.MonitorTarget {
 
 // watchConfig watches the main config file and all included files for changes,
 // reloading the proxy server's routing when any of them are modified.
-func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor) {
+func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor, currentDialers map[string]upstream.Dialer) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		slog.Error("config watcher setup failed", "error", err)
@@ -212,11 +234,12 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 				continue
 			}
 
-			newCfg, newMonitor := reloadConfig(currentCfg, srv, ctrlSrv, pagesHandler, currentMonitor)
+			newCfg, newMonitor, newDialers := reloadConfig(currentCfg, srv, ctrlSrv, pagesHandler, currentMonitor, currentDialers)
 			if newCfg == nil {
 				continue
 			}
 			currentMonitor = newMonitor
+			currentDialers = newDialers
 
 			// Update watched file set — includes may have changed
 			newFiles := make(map[string]bool)
@@ -257,14 +280,14 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 // reloadConfig re-parses the config from the main file (which resolves
 // includes), validates it, and applies it. Returns the new config on
 // success, or nil if the reload failed.
-func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor) (*config.Config, *upstream.Monitor) {
+func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor, currentDialers map[string]upstream.Dialer) (*config.Config, *upstream.Monitor, map[string]upstream.Dialer) {
 	// The main config file is always the first in IncludedFiles
 	mainFile := currentCfg.IncludedFiles[0]
 
 	newCfg, err := config.ParseFile(mainFile)
 	if err != nil {
 		slog.Warn("config reload: invalid config, keeping current", "error", err)
-		return nil, currentMonitor
+		return nil, currentMonitor, currentDialers
 	}
 
 	// Warn about settings that require a restart
@@ -280,7 +303,7 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	matcher, dialers, err := buildRouting(newCfg)
 	if err != nil {
 		slog.Warn("config reload: failed to build routing, keeping current", "error", err)
-		return nil, currentMonitor
+		return nil, currentMonitor, currentDialers
 	}
 
 	// Replace the health monitor with one for the new upstream set
@@ -291,6 +314,9 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	srv.Reload(matcher, dialers)
 	srv.SetMonitor(newMonitor)
 	ctrlSrv.SetMonitor(newMonitor)
+
+	// Close old dialers that hold resources (e.g. WireGuard tunnels)
+	closeDialers(currentDialers)
 
 	// Reload link pages
 	if pagesHandler != nil {
@@ -307,7 +333,7 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 		"routes", len(newCfg.Routes),
 	)
 
-	return newCfg, newMonitor
+	return newCfg, newMonitor, dialers
 }
 
 // loadPages parses all configured link page files into PageInfo structs.

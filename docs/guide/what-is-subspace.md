@@ -29,7 +29,7 @@ For TLS traffic, Subspace never decrypts the data — it reads just enough of th
 
 - **HTTP, HTTPS, WebSocket, WSS** — all protocols handled transparently
 - **SOCKS5 inbound** — accepts SOCKS5 clients on the same port, auto-detected alongside HTTP
-- **HTTP CONNECT and SOCKS5** upstreams with optional authentication
+- **HTTP CONNECT, SOCKS5, and WireGuard** upstreams
 - **Pattern matching** — exact hostnames, domain suffixes, globs, CIDR subnets
 - **Connection pooling** — reuses upstream connections for HTTP requests
 - **HTTP keep-alive** — multiple requests per client connection

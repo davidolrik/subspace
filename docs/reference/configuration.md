@@ -44,12 +44,14 @@ Defines a named upstream proxy.
 
 ```kdl
 upstream "<name>" {
-  type "<http|socks5>"
+  type "<http|socks5|wireguard>"
   address "<host:port>"
   username "<string>"   // optional
   password "<string>"   // optional
 }
 ```
+
+**HTTP CONNECT and SOCKS5 properties:**
 
 | Property | Required | Values | Description |
 |---|---|---|---|
@@ -58,9 +60,33 @@ upstream "<name>" {
 | `username` | No | string | Authentication username |
 | `password` | No | string | Authentication password |
 
+**WireGuard properties:**
+
+```kdl
+upstream "<name>" {
+  type "wireguard"
+  endpoint "<host:port>"
+  private-key "<base64>"
+  public-key "<base64>"
+  address "<ip/cidr>"
+  dns "<ip>"            // optional
+}
+```
+
+| Property | Required | Values | Description |
+|---|---|---|---|
+| `type` | Yes | `"wireguard"` | Tunnel protocol |
+| `endpoint` | Yes | `host:port` | WireGuard peer endpoint |
+| `private-key` | Yes | base64 | Local private key |
+| `public-key` | Yes | base64 | Peer public key |
+| `address` | Yes | `ip/prefix` | Local tunnel address (e.g. `10.0.0.2/32`) |
+| `dns` | No | IP address | DNS server for resolution via the tunnel |
+
 **HTTP type** uses the HTTP CONNECT method to establish tunnels. Supports Proxy-Authorization with Basic auth when credentials are provided.
 
 **SOCKS5 type** uses the SOCKS5 protocol. Supports username/password authentication when credentials are provided.
+
+**WireGuard type** creates a userspace WireGuard tunnel using [wireguard-go](https://git.zx2c4.com/wireguard-go/about/) and gVisor's netstack. Runs entirely in-process with no root privileges or kernel module required. All traffic routed through this upstream is sent through the encrypted WireGuard tunnel. Health checks are not performed for WireGuard upstreams (the protocol has its own keepalive mechanism).
 
 ### `route`
 
@@ -96,7 +122,7 @@ include "<path-or-glob>"
 
 Config validation runs after all includes are resolved:
 
-- All `upstream` blocks must have a valid `type` and `address`
+- All `upstream` blocks must have a valid `type` and required properties (`address` for http/socks5; `endpoint`, `private-key`, `public-key`, `address` for wireguard)
 - All `route` rules must reference an existing upstream or `"direct"`
 - Circular includes are rejected
 - Unknown node types produce an error

@@ -9,7 +9,8 @@ A transparent proxy that routes traffic through upstream proxies based on hostna
 - **No TLS termination** — extracts SNI from the ClientHello for routing, then tunnels raw bytes
 - **HTTP CONNECT** — works as an explicit proxy for clients that support it
 - **Flexible routing** — exact hostnames, domain suffixes, glob patterns, and CIDR subnets
-- **Upstream proxy support** — HTTP CONNECT and SOCKS5 upstreams with optional authentication
+- **Upstream proxy support** — HTTP CONNECT, SOCKS5, and WireGuard upstreams
+
 - **Connection pooling** — reuses upstream connections across HTTP requests
 - **HTTP keep-alive** — serves multiple requests per client connection
 - **Hot reload** — config changes (including included files) are detected and applied without restart
@@ -115,7 +116,7 @@ control_socket "/tmp/subspace.sock"
 
 ### `upstream`
 
-Defines a named upstream proxy. Supported types are `http` (HTTP CONNECT) and `socks5`.
+Defines a named upstream proxy. Supported types are `http` (HTTP CONNECT), `socks5`, and `wireguard`.
 
 ```kdl
 upstream "myproxy" {
@@ -123,6 +124,19 @@ upstream "myproxy" {
   address "127.0.0.1:1080"
   username "user"    // optional
   password "secret"  // optional
+}
+```
+
+WireGuard upstreams create a userspace tunnel (no root or kernel module required):
+
+```kdl
+upstream "home" {
+  type "wireguard"
+  endpoint "vpn.example.com:51820"
+  private-key "base64-encoded-private-key"
+  public-key "base64-encoded-peer-public-key"
+  address "10.0.0.2/32"
+  dns "1.1.1.1"  // optional
 }
 ```
 
