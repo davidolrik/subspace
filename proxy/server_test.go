@@ -1159,6 +1159,194 @@ func TestStatisticsPage(t *testing.T) {
 	}
 }
 
+// --- fallback tests ---
+
+func TestProxyHTTPFallbackOnDialFailure(t *testing.T) {
+	// Backend reachable directly
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "fallback worked")
+	}))
+	t.Cleanup(backend.Close)
+
+	// Primary upstream points to a dead address
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: "127.0.0.1", Upstream: "dead", Fallback: "direct"},
+	})
+	deadDialer := upstream.NewHTTPConnectDialer("127.0.0.1:1", "", "")
+	dialers := map[string]upstream.Dialer{"dead": deadDialer}
+
+	proxyAddr := startProxy(t, matcher, dialers)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("GET through proxy failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "fallback worked" {
+		t.Errorf("got body %q, want %q", body, "fallback worked")
+	}
+}
+
+func TestProxyHTTPFallbackOnUnhealthy(t *testing.T) {
+	// Backend reachable directly
+	var requestCount atomic.Int64
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		fmt.Fprintf(w, "via fallback")
+	}))
+	t.Cleanup(backend.Close)
+
+	// Primary is marked unhealthy via monitor, fallback is direct
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: "127.0.0.1", Upstream: "dead", Fallback: "direct"},
+	})
+	deadDialer := upstream.NewHTTPConnectDialer("127.0.0.1:1", "", "")
+	dialers := map[string]upstream.Dialer{"dead": deadDialer}
+
+	// Create a monitor that knows "dead" is unhealthy (no listener)
+	monitor := upstream.NewMonitor(
+		map[string]upstream.MonitorTarget{"dead": {Type: "http", Address: "127.0.0.1:1"}},
+		50*time.Millisecond,
+		50*time.Millisecond,
+	)
+	monitor.Start()
+	t.Cleanup(monitor.Stop)
+
+	// Wait for monitor to detect unhealthy state
+	time.Sleep(100 * time.Millisecond)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewServer(ln, matcher, dialers, nil)
+	srv.SetMonitor(monitor)
+	t.Cleanup(func() { srv.Close() })
+	go srv.Serve()
+
+	proxyAddr := ln.Addr().String()
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+		},
+	}
+
+	start := time.Now()
+	resp, err := client.Get(backend.URL)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("GET through proxy failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "via fallback" {
+		t.Errorf("got body %q, want %q", body, "via fallback")
+	}
+
+	// Should be fast since we skip the unhealthy upstream
+	if elapsed > 2*time.Second {
+		t.Errorf("request took %v, expected it to be fast (skipping dead upstream)", elapsed)
+	}
+}
+
+func TestProxyHTTPNoFallbackUnhealthy(t *testing.T) {
+	// No fallback, upstream is unhealthy → should get error page
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: "127.0.0.1", Upstream: "dead"},
+	})
+	deadDialer := upstream.NewHTTPConnectDialer("127.0.0.1:1", "", "")
+	dialers := map[string]upstream.Dialer{"dead": deadDialer}
+
+	monitor := upstream.NewMonitor(
+		map[string]upstream.MonitorTarget{"dead": {Type: "http", Address: "127.0.0.1:1"}},
+		50*time.Millisecond,
+		50*time.Millisecond,
+	)
+	monitor.Start()
+	t.Cleanup(monitor.Stop)
+	time.Sleep(100 * time.Millisecond)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewServer(ln, matcher, dialers, nil)
+	srv.SetMonitor(monitor)
+	t.Cleanup(func() { srv.Close() })
+	go srv.Serve()
+
+	proxyAddr := ln.Addr().String()
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+		},
+	}
+
+	resp, err := client.Get("http://127.0.0.1:9999/test")
+	if err != nil {
+		t.Fatalf("GET through proxy failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 502 {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !containsStr(string(body), "dead") {
+		t.Errorf("error page should mention upstream name 'dead', got: %s", body)
+	}
+}
+
+func TestProxyCONNECTFallbackOnDialFailure(t *testing.T) {
+	// TLS backend reachable directly
+	backend := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "connect fallback worked")
+	}))
+	t.Cleanup(backend.Close)
+
+	backendURL, _ := url.Parse(backend.URL)
+
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: backendURL.Hostname(), Upstream: "dead", Fallback: "direct"},
+	})
+	deadDialer := upstream.NewHTTPConnectDialer("127.0.0.1:1", "", "")
+	dialers := map[string]upstream.Dialer{"dead": deadDialer}
+
+	proxyAddr := startProxy(t, matcher, dialers)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+			TLSClientConfig: &tls.Config{
+				RootCAs: certPool(t, backend),
+			},
+		},
+	}
+
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("HTTPS through CONNECT proxy failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "connect fallback worked" {
+		t.Errorf("got body %q, want %q", body, "connect fallback worked")
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && searchStr(s, substr)
 }

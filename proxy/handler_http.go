@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -37,7 +38,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 		return false
 	}
 
-	route := s.dialerFor(hostname)
+	route := s.routeFor(hostname)
 
 	// WebSocket upgrade takes over the connection
 	if isWebSocketUpgrade(req) {
@@ -51,20 +52,25 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 
 	// Try the connection pool first, fall back to dialing fresh
 	var upstreamConn net.Conn
+	usedUpstream := route.upstream
 	if s.Pool != nil {
 		upstreamConn = s.Pool.Get(route.upstream, targetAddr)
 	}
 	if upstreamConn == nil {
 		var err error
-		upstreamConn, err = route.dialer.DialContext(s.ctx, "tcp", targetAddr)
+		upstreamConn, usedUpstream, err = s.dialWithFallback(route, "tcp", targetAddr)
 		if err != nil {
 			if isDNSError(err) {
 				slog.Error("DNS lookup failed", "host", hostname, "error", err)
 				s.Stats.IncError("dns_failed")
 				conn.Write(pages.ErrorPage(502, "Host Not Found", hostname))
+			} else if errors.Is(err, errUpstreamUnhealthy) {
+				slog.Error("upstream unavailable", "host", hostname, "via", usedUpstream)
+				s.Stats.IncError("dial_failed")
+				conn.Write(pages.ErrorPage(502, "Upstream Unavailable", "Upstream '"+usedUpstream+"' is not reachable"))
 			} else {
-				slog.Error("HTTP dial failed", "target", targetAddr, "via", route.upstream, "error", err)
-				s.Stats.IncUpstream(route.upstream, false)
+				slog.Error("HTTP dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
+				s.Stats.IncUpstream(usedUpstream, false)
 				s.Stats.IncError("dial_failed")
 				conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
 			}
@@ -72,7 +78,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 		}
 	}
 
-	s.Stats.IncUpstream(route.upstream, true)
+	s.Stats.IncUpstream(usedUpstream, true)
 
 	// Forward the request to the upstream
 	cw := &countingWriter{w: upstreamConn}
@@ -109,11 +115,11 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 		return false
 	}
 
-	s.Stats.AddUpstreamBytes(route.upstream, crw.n, cw.n)
+	s.Stats.AddUpstreamBytes(usedUpstream, crw.n, cw.n)
 
 	// Return connection to pool if reusable, otherwise close
 	if s.Pool != nil && !resp.Close && br.Buffered() == 0 {
-		s.Pool.Put(route.upstream, targetAddr, upstreamConn)
+		s.Pool.Put(usedUpstream, targetAddr, upstreamConn)
 	} else {
 		upstreamConn.Close()
 	}
@@ -126,22 +132,26 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr string, route resolvedRoute) {
 	slog.Debug("WebSocket", "host", req.Host, "target", targetAddr, "via", route.upstream)
 
-	upstreamConn, err := route.dialer.DialContext(s.ctx, "tcp", targetAddr)
+	upstreamConn, usedUpstream, err := s.dialWithFallback(route, "tcp", targetAddr)
 	if err != nil {
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", req.Host, "error", err)
 			s.Stats.IncError("dns_failed")
 			conn.Write(pages.ErrorPage(502, "Host Not Found", req.Host))
+		} else if errors.Is(err, errUpstreamUnhealthy) {
+			slog.Error("upstream unavailable", "host", req.Host, "via", usedUpstream)
+			s.Stats.IncError("dial_failed")
+			conn.Write(pages.ErrorPage(502, "Upstream Unavailable", "Upstream '"+usedUpstream+"' is not reachable"))
 		} else {
-			slog.Error("WebSocket dial failed", "target", targetAddr, "via", route.upstream, "error", err)
-			s.Stats.IncUpstream(route.upstream, false)
+			slog.Error("WebSocket dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
+			s.Stats.IncUpstream(usedUpstream, false)
 			s.Stats.IncError("dial_failed")
 			conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
 		}
 		return
 	}
 
-	s.Stats.IncUpstream(route.upstream, true)
+	s.Stats.IncUpstream(usedUpstream, true)
 
 	// Forward the original upgrade request to the upstream
 	if err := req.Write(upstreamConn); err != nil {
@@ -153,7 +163,7 @@ func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr s
 
 	rawConn, buffered := conn.Unwrap()
 	result := Relay(rawConn, upstreamConn, buffered)
-	s.Stats.AddUpstreamBytes(route.upstream, result.BytesIn, result.BytesOut)
+	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
 }
 
 // countingWriter wraps an io.Writer and counts the bytes written.

@@ -209,6 +209,73 @@ func TestMatcherMixedPatternTypes(t *testing.T) {
 	}
 }
 
+func TestResolveReturnsFallback(t *testing.T) {
+	m := NewMatcher([]Rule{
+		{Pattern: ".example.com", Upstream: "primary", Fallback: "backup"},
+	})
+
+	result := m.Resolve("foo.example.com")
+	if result == nil {
+		t.Fatal("Resolve returned nil, want a match")
+	}
+	if result.Fallback != "backup" {
+		t.Errorf("Fallback = %q, want %q", result.Fallback, "backup")
+	}
+}
+
+func TestResolveNoFallback(t *testing.T) {
+	m := NewMatcher([]Rule{
+		{Pattern: ".example.com", Upstream: "primary"},
+	})
+
+	result := m.Resolve("foo.example.com")
+	if result == nil {
+		t.Fatal("Resolve returned nil, want a match")
+	}
+	if result.Fallback != "" {
+		t.Errorf("Fallback = %q, want empty", result.Fallback)
+	}
+}
+
+func TestResolveAll(t *testing.T) {
+	m := NewMatcher([]Rule{
+		{Pattern: ".example.com", Upstream: "broad", Fallback: "direct", File: "routes.kdl"},
+		{Pattern: "api.example.com", Upstream: "specific", File: "api.kdl"},
+		{Pattern: "unrelated.com", Upstream: "other"},
+	})
+
+	results := m.ResolveAll("api.example.com")
+	if len(results) != 2 {
+		t.Fatalf("got %d matches, want 2", len(results))
+	}
+	if results[0].Upstream != "broad" {
+		t.Errorf("[0].Upstream = %q, want %q", results[0].Upstream, "broad")
+	}
+	if results[0].Fallback != "direct" {
+		t.Errorf("[0].Fallback = %q, want %q", results[0].Fallback, "direct")
+	}
+	if results[0].File != "routes.kdl" {
+		t.Errorf("[0].File = %q, want %q", results[0].File, "routes.kdl")
+	}
+	if results[1].Upstream != "specific" {
+		t.Errorf("[1].Upstream = %q, want %q", results[1].Upstream, "specific")
+	}
+	if results[1].File != "api.kdl" {
+		t.Errorf("[1].File = %q, want %q", results[1].File, "api.kdl")
+	}
+}
+
+func TestResolveAllNoMatch(t *testing.T) {
+	m := NewMatcher([]Rule{
+		{Pattern: ".example.com", Upstream: "test"},
+	})
+
+	results := m.ResolveAll("other.com")
+	if len(results) != 0 {
+		t.Errorf("got %d matches, want 0", len(results))
+	}
+}
+
 func TestResolveStripsPort(t *testing.T) {
 	m := NewMatcher([]Rule{
 		{Pattern: "example.com", Upstream: "tunnel"},

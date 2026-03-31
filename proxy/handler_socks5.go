@@ -89,33 +89,33 @@ func (s *Server) handleSOCKS5(conn *PeekConn) {
 	targetAddr := net.JoinHostPort(hostname, strconv.Itoa(int(port)))
 
 	// --- Route and dial ---
-	route := s.dialerFor(hostname)
+	route := s.routeFor(hostname)
 
 	slog.Debug("SOCKS5", "target", targetAddr, "via", route.upstream)
 
-	upstream, err := route.dialer.DialContext(s.ctx, "tcp", targetAddr)
+	upstreamConn, usedUpstream, err := s.dialWithFallback(route, "tcp", targetAddr)
 	if err != nil {
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", hostname, "error", err)
 			s.Stats.IncError("dns_failed")
 		} else {
-			slog.Error("SOCKS5 dial failed", "target", targetAddr, "via", route.upstream, "error", err)
-			s.Stats.IncUpstream(route.upstream, false)
+			slog.Error("SOCKS5 dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
+			s.Stats.IncUpstream(usedUpstream, false)
 			s.Stats.IncError("dial_failed")
 		}
 		s.socks5Reply(conn, socks5StatusFailure, "0.0.0.0", 0)
 		return
 	}
 
-	s.Stats.IncUpstream(route.upstream, true)
+	s.Stats.IncUpstream(usedUpstream, true)
 
 	// Send success reply
 	s.socks5Reply(conn, socks5StatusOK, "0.0.0.0", 0)
 
 	// Relay traffic
 	rawConn, buffered := conn.Unwrap()
-	result := Relay(rawConn, upstream, buffered)
-	s.Stats.AddUpstreamBytes(route.upstream, result.BytesIn, result.BytesOut)
+	result := Relay(rawConn, upstreamConn, buffered)
+	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
 }
 
 // socks5ReadAddr reads the target address based on the address type byte.

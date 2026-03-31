@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"go.olrik.dev/subspace/stats"
+	"go.olrik.dev/subspace/upstream"
 )
 
 func testEntry(level slog.Level, msg string) LogEntry {
@@ -280,6 +281,16 @@ func TestControlServerNotFound(t *testing.T) {
 
 // --- status endpoint tests ---
 
+func startTestMonitor(t *testing.T, targets map[string]upstream.MonitorTarget) *upstream.Monitor {
+	t.Helper()
+	m := upstream.NewMonitor(targets, 50*time.Millisecond, 50*time.Millisecond)
+	m.Start()
+	t.Cleanup(m.Stop)
+	// Wait for first check cycle
+	time.Sleep(100 * time.Millisecond)
+	return m
+}
+
 func TestStatusEndpointHealthy(t *testing.T) {
 	// Start a TCP listener to act as a healthy upstream
 	healthyLn, err := net.Listen("tcp", "127.0.0.1:0")
@@ -298,12 +309,12 @@ func TestStatusEndpointHealthy(t *testing.T) {
 	}()
 
 	collector := stats.New()
-	upstreams := map[string]UpstreamInfo{
+	monitor := startTestMonitor(t, map[string]upstream.MonitorTarget{
 		"test-proxy": {Type: "http", Address: healthyLn.Addr().String()},
-	}
+	})
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, upstreams, nil)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, monitor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,14 +346,13 @@ func TestStatusEndpointHealthy(t *testing.T) {
 }
 
 func TestStatusEndpointUnhealthy(t *testing.T) {
-	// Use a port that's guaranteed to be closed
-	upstreams := map[string]UpstreamInfo{
-		"dead-proxy": {Type: "socks5", Address: "127.0.0.1:1"},
-	}
-
 	collector := stats.New()
+	monitor := startTestMonitor(t, map[string]upstream.MonitorTarget{
+		"dead-proxy": {Type: "socks5", Address: "127.0.0.1:1"},
+	})
+
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, upstreams, nil)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, monitor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,12 +385,12 @@ func TestStatusEndpointJSON(t *testing.T) {
 	collector.IncProtocol("HTTP")
 	collector.IncUpstream("my-upstream", true)
 
-	upstreams := map[string]UpstreamInfo{
+	monitor := startTestMonitor(t, map[string]upstream.MonitorTarget{
 		"my-upstream": {Type: "http", Address: "127.0.0.1:1"},
-	}
+	})
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, upstreams, nil)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, monitor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

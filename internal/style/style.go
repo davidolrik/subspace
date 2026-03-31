@@ -142,7 +142,7 @@ var upstreamColors = []string{
 // UpstreamColor returns a deterministic color for an upstream name.
 func UpstreamColor(name string) string {
 	if name == "direct" {
-		return Ghost
+		return Green
 	}
 	var h uint32
 	for _, c := range name {

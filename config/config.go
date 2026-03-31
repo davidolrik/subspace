@@ -22,8 +22,10 @@ type Upstream struct {
 
 // Route maps a hostname pattern to an upstream proxy.
 type Route struct {
-	Pattern string
-	Via     string
+	Pattern  string
+	Via      string
+	Fallback string
+	File     string // absolute path to the config file containing this route
 }
 
 // Page describes an internal page served at pages.subspace.pub/{name}.
@@ -108,10 +110,14 @@ func (p *parser) parseFile(absPath string) error {
 		return fmt.Errorf("reading %s: %w", absPath, err)
 	}
 
-	return p.parseData(data, filepath.Dir(absPath))
+	return p.parseData(data, filepath.Dir(absPath), absPath)
 }
 
-func (p *parser) parseData(data []byte, baseDir string) error {
+func (p *parser) parseData(data []byte, baseDir string, filePath ...string) error {
+	var currentFile string
+	if len(filePath) > 0 {
+		currentFile = filePath[0]
+	}
 	doc, err := kdl.Parse(bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("parsing KDL: %w", err)
@@ -157,6 +163,7 @@ func (p *parser) parseData(data []byte, baseDir string) error {
 			if err != nil {
 				return err
 			}
+			r.File = currentFile
 			p.cfg.Routes = append(p.cfg.Routes, r)
 
 		case "include":
@@ -217,11 +224,20 @@ func (p *parser) finalize() (*Config, error) {
 	// Validate route references. "direct" is a built-in that bypasses
 	// all upstreams, so it doesn't need to exist in the Upstreams map.
 	for _, r := range cfg.Routes {
-		if r.Via == "direct" {
-			continue
+		if r.Via != "direct" {
+			if _, ok := cfg.Upstreams[r.Via]; !ok {
+				return nil, fmt.Errorf("route %q references unknown upstream %q", r.Pattern, r.Via)
+			}
 		}
-		if _, ok := cfg.Upstreams[r.Via]; !ok {
-			return nil, fmt.Errorf("route %q references unknown upstream %q", r.Pattern, r.Via)
+		if r.Fallback != "" {
+			if r.Fallback == r.Via {
+				return nil, fmt.Errorf("route %q: fallback must differ from via (%q)", r.Pattern, r.Via)
+			}
+			if r.Fallback != "direct" {
+				if _, ok := cfg.Upstreams[r.Fallback]; !ok {
+					return nil, fmt.Errorf("route %q references unknown fallback upstream %q", r.Pattern, r.Fallback)
+				}
+			}
 		}
 	}
 
@@ -319,9 +335,15 @@ func parseRoute(node *document.Node) (Route, error) {
 		return Route{}, fmt.Errorf("route %q requires via property", pattern)
 	}
 
+	var fallback string
+	if fbVal, ok := node.Properties.Get("fallback"); ok && fbVal != nil {
+		fallback = fbVal.ValueString()
+	}
+
 	return Route{
-		Pattern: pattern,
-		Via:     via,
+		Pattern:  pattern,
+		Via:      via,
+		Fallback: fallback,
 	}, nil
 }
 

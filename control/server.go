@@ -30,13 +30,13 @@ type Server struct {
 	mux       *http.ServeMux
 	sockPath  string
 
-	mu        sync.RWMutex
-	upstreams map[string]UpstreamInfo
+	mu      sync.RWMutex
+	monitor *upstream.Monitor
 }
 
 // NewServer creates a control server listening on the given Unix socket path.
-// The upstreams and pool parameters are optional (pass nil to omit).
-func NewServer(sockPath string, buf *LogBuffer, collector *stats.Collector, upstreams map[string]UpstreamInfo, pool PoolStatsSource) (*Server, error) {
+// The monitor and pool parameters are optional (pass nil to omit).
+func NewServer(sockPath string, buf *LogBuffer, collector *stats.Collector, monitor *upstream.Monitor, pool PoolStatsSource) (*Server, error) {
 	// Remove stale socket file
 	os.Remove(sockPath)
 
@@ -52,7 +52,7 @@ func NewServer(sockPath string, buf *LogBuffer, collector *stats.Collector, upst
 		pool:      pool,
 		mux:       http.NewServeMux(),
 		sockPath:  sockPath,
-		upstreams: upstreams,
+		monitor:   monitor,
 	}
 
 	s.mux.HandleFunc("/logs", s.handleLogs)
@@ -62,10 +62,10 @@ func NewServer(sockPath string, buf *LogBuffer, collector *stats.Collector, upst
 	return s, nil
 }
 
-// SetUpstreams updates the upstream info used by the /status endpoint.
-func (s *Server) SetUpstreams(upstreams map[string]UpstreamInfo) {
+// SetMonitor updates the health monitor used by the /status endpoint.
+func (s *Server) SetMonitor(monitor *upstream.Monitor) {
 	s.mu.Lock()
-	s.upstreams = upstreams
+	s.monitor = monitor
 	s.mu.Unlock()
 }
 
@@ -176,68 +176,40 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(snap)
 }
 
-// Status runs health checks against all upstreams and returns a
-// StatusResponse. This is used by both the control socket /status
-// endpoint and the internal statistics page.
+// Status returns the current health and statistics for all upstreams.
+// Health data comes from the shared monitor's cached results.
 func (s *Server) Status() StatusResponse {
 	s.mu.RLock()
-	upstreams := s.upstreams
+	monitor := s.monitor
 	s.mu.RUnlock()
 
-	// Run health checks concurrently
-	type healthResult struct {
-		name    string
-		healthy bool
-		latency time.Duration
-	}
-
-	results := make(chan healthResult, len(upstreams))
-	for name, info := range upstreams {
-		go func(name string, info UpstreamInfo) {
-			start := time.Now()
-			conn, err := net.DialTimeout("tcp", info.Address, 3*time.Second)
-			latency := time.Since(start)
-			if err != nil {
-				results <- healthResult{name: name, healthy: false, latency: latency}
-				return
-			}
-			conn.Close()
-			results <- healthResult{name: name, healthy: true, latency: latency}
-		}(name, info)
-	}
-
-	healthMap := make(map[string]healthResult, len(upstreams))
-	for range upstreams {
-		hr := <-results
-		healthMap[hr.name] = hr
-	}
-
-	// Build response
 	var snap stats.Snapshot
 	if s.collector != nil {
 		snap = s.collector.Snapshot()
 	}
 
 	resp := StatusResponse{
-		Upstreams: make(map[string]UpstreamStatus, len(upstreams)),
+		Upstreams: make(map[string]UpstreamStatus),
 		Connections: ConnectionStatus{
 			Total:  snap.Connections,
 			Active: snap.Active,
 		},
 	}
 
-	for name, info := range upstreams {
-		hr := healthMap[name]
-		us := UpstreamStatus{
-			Type:    info.Type,
-			Address: info.Address,
-			Healthy: hr.healthy,
-			Latency: hr.latency.Round(time.Millisecond).String(),
+	// Add monitored upstreams with cached health data
+	if monitor != nil {
+		for name, ms := range monitor.Status() {
+			us := UpstreamStatus{
+				Type:    ms.Type,
+				Address: ms.Address,
+				Healthy: ms.Healthy,
+				Latency: ms.Latency.Round(time.Millisecond).String(),
+			}
+			if ustats, ok := snap.Upstreams[name]; ok {
+				us.Stats = &ustats
+			}
+			resp.Upstreams[name] = us
 		}
-		if ustats, ok := snap.Upstreams[name]; ok {
-			us.Stats = &ustats
-		}
-		resp.Upstreams[name] = us
 	}
 
 	// Include the built-in "direct" upstream with its stats (no health check)

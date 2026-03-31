@@ -10,6 +10,8 @@ import (
 type Rule struct {
 	Pattern  string
 	Upstream string
+	Fallback string
+	File     string // source config file (for diagnostics)
 }
 
 type patternKind int
@@ -24,6 +26,8 @@ const (
 type compiledRule struct {
 	pattern  string
 	upstream string
+	fallback string
+	file     string
 	kind     patternKind
 	cidr     *net.IPNet
 }
@@ -46,43 +50,38 @@ func NewMatcher(rules []Rule) *Matcher {
 func compileRule(r Rule) compiledRule {
 	pattern := strings.ToLower(r.Pattern)
 
+	base := compiledRule{
+		pattern:  pattern,
+		upstream: r.Upstream,
+		fallback: r.Fallback,
+		file:     r.File,
+	}
+
 	// CIDR: contains "/" and parses as a network
 	if strings.Contains(pattern, "/") {
 		_, cidr, err := net.ParseCIDR(pattern)
 		if err == nil {
-			return compiledRule{
-				pattern:  pattern,
-				upstream: r.Upstream,
-				kind:     kindCIDR,
-				cidr:     cidr,
-			}
+			base.kind = kindCIDR
+			base.cidr = cidr
+			return base
 		}
 	}
 
 	// Glob: contains * or ?
 	if strings.ContainsAny(pattern, "*?") {
-		return compiledRule{
-			pattern:  pattern,
-			upstream: r.Upstream,
-			kind:     kindGlob,
-		}
+		base.kind = kindGlob
+		return base
 	}
 
 	// Domain suffix: starts with "."
 	if strings.HasPrefix(pattern, ".") {
-		return compiledRule{
-			pattern:  pattern,
-			upstream: r.Upstream,
-			kind:     kindDomain,
-		}
+		base.kind = kindDomain
+		return base
 	}
 
 	// Exact match
-	return compiledRule{
-		pattern:  pattern,
-		upstream: r.Upstream,
-		kind:     kindExact,
-	}
+	base.kind = kindExact
+	return base
 }
 
 // Match returns the upstream name for the given hostname. If no rule matches,
@@ -109,13 +108,33 @@ func (m *Matcher) Resolve(hostname string) *Rule {
 	var result *Rule
 	for i := range m.rules {
 		if m.rules[i].match(host) {
-			result = &Rule{
-				Pattern:  m.rules[i].pattern,
-				Upstream: m.rules[i].upstream,
-			}
+			result = ruleFromCompiled(&m.rules[i])
 		}
 	}
 	return result
+}
+
+// ResolveAll returns all matching rules for the given hostname, in order.
+// The last element is the active (winning) rule.
+func (m *Matcher) ResolveAll(hostname string) []Rule {
+	host := stripPort(hostname)
+
+	var results []Rule
+	for i := range m.rules {
+		if m.rules[i].match(host) {
+			results = append(results, *ruleFromCompiled(&m.rules[i]))
+		}
+	}
+	return results
+}
+
+func ruleFromCompiled(cr *compiledRule) *Rule {
+	return &Rule{
+		Pattern:  cr.pattern,
+		Upstream: cr.upstream,
+		Fallback: cr.fallback,
+		File:     cr.file,
+	}
 }
 
 func (r *compiledRule) match(host string) bool {

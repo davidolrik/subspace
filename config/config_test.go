@@ -540,6 +540,140 @@ include "some/file.kdl"
 	}
 }
 
+func TestParseConfigRouteFallback(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "primary" {
+	type "http"
+	address "proxy1:3128"
+}
+
+upstream "backup" {
+	type "http"
+	address "proxy2:3128"
+}
+
+route ".example.com" via="primary" fallback="backup"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(cfg.Routes) != 1 {
+		t.Fatalf("got %d routes, want 1", len(cfg.Routes))
+	}
+	if cfg.Routes[0].Fallback != "backup" {
+		t.Errorf("Fallback = %q, want %q", cfg.Routes[0].Fallback, "backup")
+	}
+}
+
+func TestParseConfigRouteFallbackOptional(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "corp" {
+	type "http"
+	address "proxy:3128"
+}
+
+route ".example.com" via="corp"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.Routes[0].Fallback != "" {
+		t.Errorf("Fallback = %q, want empty", cfg.Routes[0].Fallback)
+	}
+}
+
+func TestParseConfigRouteFallbackDirect(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "corp" {
+	type "http"
+	address "proxy:3128"
+}
+
+route ".example.com" via="corp" fallback="direct"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.Routes[0].Fallback != "direct" {
+		t.Errorf("Fallback = %q, want %q", cfg.Routes[0].Fallback, "direct")
+	}
+}
+
+func TestParseConfigRouteFallbackValidation(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "corp" {
+	type "http"
+	address "proxy:3128"
+}
+
+route ".example.com" via="corp" fallback="nonexistent"
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for route referencing nonexistent fallback upstream")
+	}
+}
+
+func TestParseConfigRouteFallbackSameAsVia(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "corp" {
+	type "http"
+	address "proxy:3128"
+}
+
+route ".example.com" via="corp" fallback="corp"
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error when fallback equals via")
+	}
+}
+
+func TestParseFileRouteTracksSourceFile(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "routes.kdl"), `
+route ".example.com" via="direct"
+`)
+	writeFile(t, filepath.Join(dir, "main.kdl"), `
+listen ":8080"
+route "specific.com" via="direct"
+include "routes.kdl"
+`)
+
+	cfg, err := ParseFile(filepath.Join(dir, "main.kdl"))
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	if len(cfg.Routes) != 2 {
+		t.Fatalf("got %d routes, want 2", len(cfg.Routes))
+	}
+
+	mainFile := filepath.Join(dir, "main.kdl")
+	routesFile := filepath.Join(dir, "routes.kdl")
+
+	if cfg.Routes[0].File != mainFile {
+		t.Errorf("Routes[0].File = %q, want %q", cfg.Routes[0].File, mainFile)
+	}
+	if cfg.Routes[1].File != routesFile {
+		t.Errorf("Routes[1].File = %q, want %q", cfg.Routes[1].File, routesFile)
+	}
+}
+
 func TestParseConfigValidatesUpstreamType(t *testing.T) {
 	input := `
 listen ":8080"

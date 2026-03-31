@@ -5,12 +5,6 @@ import (
 	"go.olrik.dev/subspace/upstream"
 )
 
-// UpstreamInfo describes an upstream proxy for health checking.
-type UpstreamInfo struct {
-	Type    string `json:"type"`
-	Address string `json:"address"`
-}
-
 // StatusResponse is the JSON response from the /status endpoint.
 type StatusResponse struct {
 	Upstreams   map[string]UpstreamStatus `json:"upstreams"`

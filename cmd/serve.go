@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
@@ -54,6 +55,12 @@ func newServeCommand(configFile *string) *cobra.Command {
 			pool := upstream.NewPool(upstream.PoolConfig{})
 			srv := proxy.NewServer(ln, matcher, dialers, pool)
 
+			// Start health monitor for upstream proxies
+			monitor := upstream.NewMonitor(buildMonitorTargets(cfg), 10*time.Second, 3*time.Second)
+			monitor.Start()
+			defer monitor.Stop()
+			srv.SetMonitor(monitor)
+
 			// Open the statistics database
 			statsDBPath := filepath.Join(filepath.Dir(*configFile), "stats.db")
 			statsStore, err := stats.OpenStore(statsDBPath)
@@ -81,8 +88,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			}
 
 			// Start control socket (with access to proxy stats and upstream health)
-			upstreamInfo := buildUpstreamInfo(cfg)
-			ctrlSrv, err := control.NewServer(cfg.ControlSocket, logBuf, srv.Stats, upstreamInfo, pool)
+			ctrlSrv, err := control.NewServer(cfg.ControlSocket, logBuf, srv.Stats, monitor, pool)
 			if err != nil {
 				return fmt.Errorf("control socket: %w", err)
 			}
@@ -101,7 +107,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			)
 
 			// Watch config files for changes (main config + included files)
-			go watchConfig(cfg, srv, ctrlSrv, pagesHandler)
+			go watchConfig(cfg, srv, ctrlSrv, pagesHandler, monitor)
 
 			// Graceful shutdown
 			sigCh := make(chan os.Signal, 1)
@@ -130,7 +136,7 @@ func buildRouting(cfg *config.Config) (*route.Matcher, map[string]upstream.Diale
 
 	rules := make([]route.Rule, len(cfg.Routes))
 	for i, r := range cfg.Routes {
-		rules[i] = route.Rule{Pattern: r.Pattern, Upstream: r.Via}
+		rules[i] = route.Rule{Pattern: r.Pattern, Upstream: r.Via, Fallback: r.Fallback, File: r.File}
 	}
 	matcher := route.NewMatcher(rules)
 
@@ -148,18 +154,18 @@ func buildDialer(u config.Upstream) (upstream.Dialer, error) {
 	}
 }
 
-// buildUpstreamInfo extracts upstream metadata from config for the status endpoint.
-func buildUpstreamInfo(cfg *config.Config) map[string]control.UpstreamInfo {
-	info := make(map[string]control.UpstreamInfo, len(cfg.Upstreams))
+// buildMonitorTargets extracts upstream addresses from config for the health monitor.
+func buildMonitorTargets(cfg *config.Config) map[string]upstream.MonitorTarget {
+	targets := make(map[string]upstream.MonitorTarget, len(cfg.Upstreams))
 	for name, u := range cfg.Upstreams {
-		info[name] = control.UpstreamInfo{Type: u.Type, Address: u.Address}
+		targets[name] = upstream.MonitorTarget{Type: u.Type, Address: u.Address}
 	}
-	return info
+	return targets
 }
 
 // watchConfig watches the main config file and all included files for changes,
 // reloading the proxy server's routing when any of them are modified.
-func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler) {
+func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		slog.Error("config watcher setup failed", "error", err)
@@ -206,10 +212,11 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 				continue
 			}
 
-			newCfg := reloadConfig(currentCfg, srv, ctrlSrv, pagesHandler)
+			newCfg, newMonitor := reloadConfig(currentCfg, srv, ctrlSrv, pagesHandler, currentMonitor)
 			if newCfg == nil {
 				continue
 			}
+			currentMonitor = newMonitor
 
 			// Update watched file set — includes may have changed
 			newFiles := make(map[string]bool)
@@ -250,14 +257,14 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 // reloadConfig re-parses the config from the main file (which resolves
 // includes), validates it, and applies it. Returns the new config on
 // success, or nil if the reload failed.
-func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler) *config.Config {
+func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor) (*config.Config, *upstream.Monitor) {
 	// The main config file is always the first in IncludedFiles
 	mainFile := currentCfg.IncludedFiles[0]
 
 	newCfg, err := config.ParseFile(mainFile)
 	if err != nil {
 		slog.Warn("config reload: invalid config, keeping current", "error", err)
-		return nil
+		return nil, currentMonitor
 	}
 
 	// Warn about settings that require a restart
@@ -273,11 +280,17 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	matcher, dialers, err := buildRouting(newCfg)
 	if err != nil {
 		slog.Warn("config reload: failed to build routing, keeping current", "error", err)
-		return nil
+		return nil, currentMonitor
 	}
 
+	// Replace the health monitor with one for the new upstream set
+	currentMonitor.Stop()
+	newMonitor := upstream.NewMonitor(buildMonitorTargets(newCfg), 10*time.Second, 3*time.Second)
+	newMonitor.Start()
+
 	srv.Reload(matcher, dialers)
-	ctrlSrv.SetUpstreams(buildUpstreamInfo(newCfg))
+	srv.SetMonitor(newMonitor)
+	ctrlSrv.SetMonitor(newMonitor)
 
 	// Reload link pages
 	if pagesHandler != nil {
@@ -294,7 +307,7 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 		"routes", len(newCfg.Routes),
 	)
 
-	return newCfg
+	return newCfg, newMonitor
 }
 
 // loadPages parses all configured link page files into PageInfo structs.

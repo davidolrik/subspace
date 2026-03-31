@@ -164,26 +164,26 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 	// which redirects HTTPS → HTTP so the daemon can intercept the request.
 
 	targetAddr := sni + ":" + listenPort
-	route := s.dialerFor(sni)
+	route := s.routeFor(sni)
 
 	slog.Debug("TLS", "sni", sni, "target", targetAddr, "via", route.upstream)
 
-	upstream, err := route.dialer.DialContext(s.ctx, "tcp", targetAddr)
+	upstreamConn, usedUpstream, err := s.dialWithFallback(route, "tcp", targetAddr)
 	if err != nil {
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "sni", sni, "error", err)
 			s.Stats.IncError("dns_failed")
 		} else {
-			slog.Error("TLS dial failed", "sni", sni, "target", targetAddr, "via", route.upstream, "error", err)
-			s.Stats.IncUpstream(route.upstream, false)
+			slog.Error("TLS dial failed", "sni", sni, "target", targetAddr, "via", usedUpstream, "error", err)
+			s.Stats.IncUpstream(usedUpstream, false)
 			s.Stats.IncError("dial_failed")
 		}
 		conn.Close()
 		return
 	}
 
-	s.Stats.IncUpstream(route.upstream, true)
+	s.Stats.IncUpstream(usedUpstream, true)
 	rawConn, buffered := conn.Unwrap()
-	result := Relay(rawConn, upstream, buffered)
-	s.Stats.AddUpstreamBytes(route.upstream, result.BytesIn, result.BytesOut)
+	result := Relay(rawConn, upstreamConn, buffered)
+	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
 }
