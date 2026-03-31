@@ -163,6 +163,25 @@ document.addEventListener('alpine:init', () => {
                 if (e.key === '/') {
                     e.preventDefault();
                     this.show();
+                    return;
+                }
+                // Quick navigation: 1-9 for pages, 0 for statistics
+                if (e.key >= '0' && e.key <= '9') {
+                    const pages = this.nav.filter(
+                        item => item.name && item.name !== 'stats'
+                    );
+                    if (e.key === '0') {
+                        const stats = this.nav.find(
+                            item => item.name === 'stats'
+                        );
+                        if (stats) window.location.href = stats.url;
+                    } else {
+                        const idx = parseInt(e.key, 10) - 1;
+                        if (idx < pages.length) {
+                            window.location.href = pages[idx].url;
+                        }
+                    }
+                    return;
                 }
             });
             try {
