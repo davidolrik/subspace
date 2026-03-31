@@ -347,9 +347,22 @@
                 usePointStyle: true,
                 callbacks: {
                     labelColor: function(ctx) {
+                        const bg = ctx.dataset.backgroundColor;
+                        const border = ctx.dataset.borderColor;
+                        // Use the element's background color; fall back to
+                        // borderColor only for line/area charts where
+                        // backgroundColor is the fill, not the line.
+                        let color;
+                        if (Array.isArray(bg)) {
+                            color = bg[ctx.dataIndex];
+                        } else if (border && border !== 'transparent' && border !== bg) {
+                            color = border;
+                        } else {
+                            color = bg;
+                        }
                         return {
-                            borderColor: ctx.dataset.borderColor || ctx.dataset.backgroundColor,
-                            backgroundColor: ctx.dataset.borderColor || ctx.dataset.backgroundColor,
+                            borderColor: color,
+                            backgroundColor: color,
                             borderRadius: 2,
                         };
                     }
@@ -380,6 +393,28 @@
                 }
             }
         };
+
+        // Draw a vertical crosshair line at the hover position
+        const verticalLinePlugin = {
+            id: 'verticalLine',
+            afterDraw(chart) {
+                const yAxis = chart.scales.y;
+                if (!yAxis) return;
+                const active = chart.tooltip?.getActiveElements();
+                if (!active || active.length === 0) return;
+                const x = active[0].element.x;
+                const ctx = chart.ctx;
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(x, yAxis.top);
+                ctx.lineTo(x, yAxis.bottom);
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgba(201, 209, 217, 0.3)';
+                ctx.stroke();
+                ctx.restore();
+            }
+        };
+        Chart.register(verticalLinePlugin);
 
         Chart.defaults.color = '#8b949e';
 
