@@ -9,16 +9,16 @@ document.addEventListener('alpine:init', () => {
         // nav is injected from the parent component via x-data merge
         nav: [],
 
-        // Score a match: lower is better. Prefix matches on the primary
-        // field (label/name) rank highest, then prefix on secondary fields,
-        // then substring matches.
-        matchScore(fields, q) {
+        // Score a single token against the candidate fields: lower is
+        // better. Prefix matches on the primary field (label/name) rank
+        // highest, then prefix on secondary fields, then substring matches.
+        tokenScore(fields, token) {
             let best = Infinity;
             for (let i = 0; i < fields.length; i++) {
                 const f = fields[i];
                 if (!f) continue;
                 const lower = f.toLowerCase();
-                const pos = lower.indexOf(q);
+                const pos = lower.indexOf(token);
                 if (pos === -1) continue;
                 // prefix on primary field (i=0) = 0, prefix on secondary = 1,
                 // substring on primary = 2, substring on secondary = 3
@@ -26,6 +26,25 @@ document.addEventListener('alpine:init', () => {
                 if (score < best) best = score;
             }
             return best;
+        },
+
+        // Score a (possibly multi-word) query against fields. Every word
+        // must match somewhere in the fields; the total score is the sum
+        // of per-word scores. A contiguous phrase match on the full query
+        // is preferred and gets a bonus (lower score).
+        matchScore(fields, q) {
+            const phraseScore = this.tokenScore(fields, q);
+            const words = q.split(/\s+/).filter(w => w.length > 0);
+            if (words.length <= 1) return phraseScore;
+            let total = 0;
+            for (const w of words) {
+                const s = this.tokenScore(fields, w);
+                if (s === Infinity) return Infinity;
+                total += s;
+            }
+            // Prefer the contiguous phrase match when it exists.
+            if (phraseScore !== Infinity && phraseScore < total) return phraseScore;
+            return total;
         },
 
         filteredResults() {
@@ -66,7 +85,7 @@ document.addEventListener('alpine:init', () => {
             if (q) {
                 for (const link of this.allLinks) {
                     const score = this.matchScore(
-                        [link.name, link.description], q
+                        [link.name, link.section, link.page, link.description], q
                     );
                     if (score < Infinity) {
                         links.push({
