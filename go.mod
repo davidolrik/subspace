@@ -23,12 +23,19 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/tools v0.44.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	gvisor.dev/gvisor v0.0.0-20260427222906-00af7dba072a // indirect
 	modernc.org/libc v1.72.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// gvisor relocated bridge_test.go from pkg/tcpip/stack/bridge/ to pkg/tcpip/stack/
+// in late 2025 without updating its `package bridge_test` declaration to `stack_test`.
+// Go's package loader rejects this (external test packages must be `<pkg>_test`);
+// gvisor builds with Bazel and didn't notice. Pinned to the last revision before the
+// move until upstream corrects the package declaration.
+replace gvisor.dev/gvisor => gvisor.dev/gvisor v0.0.0-20250503011706-39ed1f5ac29c
