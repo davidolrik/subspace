@@ -41,6 +41,18 @@ type Page struct {
 	Alias string // optional alias page name
 }
 
+// Tag is a globally defined label that pages may attach to links and
+// list sections. Each tag has its own color and is rendered as a small
+// pill in the page UI. The Name is the unique reference key used in
+// page KDL files; the Alias is the text shown on the pill (defaults to
+// Name) and may be repeated across tags so that multiple uniquely-named
+// tags can render with the same display label but different colors.
+type Tag struct {
+	Name  string
+	Alias string
+	Color string
+}
+
 // Config is the top-level configuration for subspace.
 type Config struct {
 	Listen        string
@@ -48,6 +60,7 @@ type Config struct {
 	Pages         []Page
 	Upstreams     map[string]Upstream
 	Routes        []Route
+	Tags          map[string]Tag
 	IncludedFiles []string // absolute paths of all files parsed (main + includes)
 }
 
@@ -69,6 +82,7 @@ func ParseFile(path string) (*Config, error) {
 	p := &parser{
 		cfg: &Config{
 			Upstreams: make(map[string]Upstream),
+			Tags:      make(map[string]Tag),
 		},
 		seen: make(map[string]bool),
 	}
@@ -86,6 +100,7 @@ func Parse(data []byte) (*Config, error) {
 	p := &parser{
 		cfg: &Config{
 			Upstreams: make(map[string]Upstream),
+			Tags:      make(map[string]Tag),
 		},
 		seen:         make(map[string]bool),
 		noIncludes:   true,
@@ -172,6 +187,11 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 			}
 			r.File = currentFile
 			p.cfg.Routes = append(p.cfg.Routes, r)
+
+		case "tags":
+			if err := parseTagsBlock(node, p.cfg.Tags); err != nil {
+				return err
+			}
 
 		case "include":
 			if err := p.handleInclude(node, baseDir); err != nil {
@@ -349,6 +369,43 @@ func parsePage(node *document.Node, baseDir string) (Page, error) {
 		Name:  name,
 		Alias: alias,
 	}, nil
+}
+
+func parseTagsBlock(node *document.Node, tags map[string]Tag) error {
+	for _, child := range node.Children {
+		if child.Name.ValueString() != "tag" {
+			return fmt.Errorf("tags block: unknown node %q", child.Name.ValueString())
+		}
+		if len(child.Arguments) < 1 {
+			return fmt.Errorf("tag requires a name argument")
+		}
+		name := child.Arguments[0].ValueString()
+		if name == "" {
+			return fmt.Errorf("tag requires a non-empty name")
+		}
+		if _, exists := tags[name]; exists {
+			return fmt.Errorf("duplicate tag name %q", name)
+		}
+
+		colorVal, ok := child.Properties.Get("color")
+		if !ok || colorVal == nil {
+			return fmt.Errorf("tag %q requires color property", name)
+		}
+		color := colorVal.ValueString()
+		if color == "" {
+			return fmt.Errorf("tag %q requires non-empty color property", name)
+		}
+
+		alias := name
+		if aliasVal, ok := child.Properties.Get("alias"); ok && aliasVal != nil {
+			if v := aliasVal.ValueString(); v != "" {
+				alias = v
+			}
+		}
+
+		tags[name] = Tag{Name: name, Alias: alias, Color: color}
+	}
+	return nil
 }
 
 func parseRoute(node *document.Node) (Route, error) {

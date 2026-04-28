@@ -788,3 +788,178 @@ upstream "bad" {
 		t.Fatal("expected error for invalid upstream type")
 	}
 }
+
+func TestParseTagsBlock(t *testing.T) {
+	input := `
+listen ":8080"
+
+tags {
+	tag "prod" color="#00ff88"
+	tag "internal" color="#ff6b6b"
+	tag "wip" color="#ffaa00"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(cfg.Tags) != 3 {
+		t.Fatalf("got %d tags, want 3", len(cfg.Tags))
+	}
+
+	prod, ok := cfg.Tags["prod"]
+	if !ok {
+		t.Fatal("missing tag 'prod'")
+	}
+	if prod.Name != "prod" {
+		t.Errorf("prod.Name = %q, want %q", prod.Name, "prod")
+	}
+	if prod.Color != "#00ff88" {
+		t.Errorf("prod.Color = %q, want %q", prod.Color, "#00ff88")
+	}
+
+	if cfg.Tags["internal"].Color != "#ff6b6b" {
+		t.Errorf("internal.Color = %q, want %q", cfg.Tags["internal"].Color, "#ff6b6b")
+	}
+	if cfg.Tags["wip"].Color != "#ffaa00" {
+		t.Errorf("wip.Color = %q, want %q", cfg.Tags["wip"].Color, "#ffaa00")
+	}
+}
+
+func TestParseTagsEmptyBlock(t *testing.T) {
+	input := `
+listen ":8080"
+
+tags {
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(cfg.Tags) != 0 {
+		t.Errorf("got %d tags, want 0", len(cfg.Tags))
+	}
+}
+
+func TestParseTagsNoBlock(t *testing.T) {
+	cfg, err := Parse([]byte(`listen ":8080"`))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.Tags == nil {
+		t.Fatal("Tags map should be initialized, got nil")
+	}
+	if len(cfg.Tags) != 0 {
+		t.Errorf("got %d tags, want 0", len(cfg.Tags))
+	}
+}
+
+func TestParseTagsDuplicateName(t *testing.T) {
+	input := `
+tags {
+	tag "prod" color="#00ff88"
+	tag "prod" color="#ff0000"
+}
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for duplicate tag name")
+	}
+	if !strings.Contains(err.Error(), "prod") {
+		t.Errorf("error %q should mention duplicate tag name", err.Error())
+	}
+}
+
+func TestParseTagsMissingColor(t *testing.T) {
+	input := `
+tags {
+	tag "prod"
+}
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for tag without color")
+	}
+	if !strings.Contains(err.Error(), "color") {
+		t.Errorf("error %q should mention missing color", err.Error())
+	}
+}
+
+func TestParseTagsMissingName(t *testing.T) {
+	input := `
+tags {
+	tag color="#00ff88"
+}
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for tag without name")
+	}
+}
+
+func TestParseTagsUnknownChild(t *testing.T) {
+	input := `
+tags {
+	widget "prod" color="#00ff88"
+}
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for unknown child node in tags block")
+	}
+}
+
+func TestParseTagsAlias(t *testing.T) {
+	input := `
+tags {
+	tag "services"         color="#00ff88"
+	tag "olrikit_services" color="#ff0088" alias="services"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	plain := cfg.Tags["services"]
+	if plain.Alias != "services" {
+		t.Errorf("plain services.Alias = %q, want %q (default to name)", plain.Alias, "services")
+	}
+
+	olrikit := cfg.Tags["olrikit_services"]
+	if olrikit.Alias != "services" {
+		t.Errorf("olrikit_services.Alias = %q, want %q", olrikit.Alias, "services")
+	}
+	if olrikit.Color != "#ff0088" {
+		t.Errorf("olrikit_services.Color = %q, want %q", olrikit.Color, "#ff0088")
+	}
+}
+
+func TestParseTagsAliasDefaultsToName(t *testing.T) {
+	input := `
+tags {
+	tag "prod" color="#00ff88"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.Tags["prod"].Alias != "prod" {
+		t.Errorf("prod.Alias = %q, want %q (default to name)", cfg.Tags["prod"].Alias, "prod")
+	}
+}
+
+func TestParseTagsEmptyColor(t *testing.T) {
+	input := `
+tags {
+	tag "prod" color=""
+}
+`
+	_, err := Parse([]byte(input))
+	if err == nil {
+		t.Fatal("expected error for empty color")
+	}
+}

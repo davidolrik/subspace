@@ -232,6 +232,115 @@ list "Docs" {
 	}
 }
 
+func TestParsePageLinkTags(t *testing.T) {
+	input := []byte(`
+list "Dev" {
+	link "GitHub" url="https://github.com" tags="prod external"
+	link "Wiki" url="https://wiki.example.com" tags="internal"
+	link "Plain" url="https://plain.example.com"
+}
+`)
+	cfg, err := ParsePage(input)
+	if err != nil {
+		t.Fatalf("ParsePage() error: %v", err)
+	}
+
+	links := cfg.Sections[0].Links
+
+	if got, want := links[0].Tags, []string{"external", "prod"}; !equalStringSlices(got, want) {
+		t.Errorf("links[0].Tags = %v, want %v", got, want)
+	}
+	if got, want := links[1].Tags, []string{"internal"}; !equalStringSlices(got, want) {
+		t.Errorf("links[1].Tags = %v, want %v", got, want)
+	}
+	if links[2].Tags != nil {
+		t.Errorf("links[2].Tags = %v, want nil", links[2].Tags)
+	}
+}
+
+func TestParsePageListTags(t *testing.T) {
+	input := []byte(`
+list "Dev" tags="internal wip" {
+	link "GitHub" url="https://github.com"
+}
+
+list "Ops" {
+	link "Grafana" url="https://grafana.example.com"
+}
+`)
+	cfg, err := ParsePage(input)
+	if err != nil {
+		t.Fatalf("ParsePage() error: %v", err)
+	}
+
+	if got, want := cfg.Sections[0].Tags, []string{"internal", "wip"}; !equalStringSlices(got, want) {
+		t.Errorf("sections[0].Tags = %v, want %v", got, want)
+	}
+	if cfg.Sections[1].Tags != nil {
+		t.Errorf("sections[1].Tags = %v, want nil", cfg.Sections[1].Tags)
+	}
+}
+
+func TestParsePageTagsExtraWhitespace(t *testing.T) {
+	input := []byte(`
+list "Dev" {
+	link "GitHub" url="https://github.com" tags="  prod    external  "
+}
+`)
+	cfg, err := ParsePage(input)
+	if err != nil {
+		t.Fatalf("ParsePage() error: %v", err)
+	}
+	if got, want := cfg.Sections[0].Links[0].Tags, []string{"external", "prod"}; !equalStringSlices(got, want) {
+		t.Errorf("Tags = %v, want %v", got, want)
+	}
+}
+
+func TestParsePageTagsSorted(t *testing.T) {
+	input := []byte(`
+list "Dev" tags="zebra alpha middle" {
+	link "X" url="https://x.example.com" tags="charlie alpha bravo"
+}
+`)
+	cfg, err := ParsePage(input)
+	if err != nil {
+		t.Fatalf("ParsePage() error: %v", err)
+	}
+	if got, want := cfg.Sections[0].Tags, []string{"alpha", "middle", "zebra"}; !equalStringSlices(got, want) {
+		t.Errorf("list Tags = %v, want sorted %v", got, want)
+	}
+	if got, want := cfg.Sections[0].Links[0].Tags, []string{"alpha", "bravo", "charlie"}; !equalStringSlices(got, want) {
+		t.Errorf("link Tags = %v, want sorted %v", got, want)
+	}
+}
+
+func TestParsePageTagsEmpty(t *testing.T) {
+	input := []byte(`
+list "Dev" {
+	link "GitHub" url="https://github.com" tags=""
+}
+`)
+	cfg, err := ParsePage(input)
+	if err != nil {
+		t.Fatalf("ParsePage() error: %v", err)
+	}
+	if cfg.Sections[0].Links[0].Tags != nil {
+		t.Errorf("Tags should be nil for empty tags property, got %v", cfg.Sections[0].Links[0].Tags)
+	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestParsePageUnknownTopLevel(t *testing.T) {
 	input := []byte(`
 something "foo"

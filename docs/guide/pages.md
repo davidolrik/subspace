@@ -61,6 +61,46 @@ list "Critical" color="#ff375f" icon="fa-fire" {
 
 The section icon uses the same color as the section, with a subtle glow. If no color is set, the icon uses a muted default color. Icons use the same `si-*`, `fa-*`, `mdi-*`, and `nf-*` naming as link icons.
 
+### Tags
+
+Tags are small colored pills used to label links and entire sections — for example to mark something as `prod`, `internal`, or `wip`. They are defined once in the main config so the same color palette applies to every page:
+
+```kdl
+// in subspace.kdl
+tags {
+    tag "prod"     color="#00ff88"
+    tag "internal" color="#ff6b6b"
+    tag "wip"      color="#ffaa00"
+}
+```
+
+Reference them from links and lists in any page KDL file using the `tags` property. Multiple tags are space-separated:
+
+```kdl
+list "Dev" tags="internal" {
+    link "GitHub"        url="https://github.com" tags="prod external"
+    link "Internal Wiki" url="https://wiki"       tags="internal wip"
+}
+```
+
+- Tags on a `link` render as inline pills, right-aligned after the link.
+- Tags on a `list` render as a row of pills along the bottom of the section card, left-aligned.
+
+Referencing a tag that is not defined in the global `tags` block causes a validation error at startup (and a warning on hot reload, with the previous configuration left in place).
+
+#### Aliases
+
+A tag's reference name must be unique, but the text shown on its pill can be overridden with `alias`. Aliases may repeat across tags, so you can render the same display label in different colors:
+
+```kdl
+tags {
+    tag "services"         color="#00ff88"
+    tag "olrikit_services" color="#ff0088" alias="services"
+}
+```
+
+Both pills above show the text "services" but use different colors, letting you distinguish (for example) generic services from a specific provider's services at a glance.
+
 ## Page Names and Aliases
 
 By default, the page name is derived from the filename (minus the `.kdl` extension). Override it with `name=`, and add an alias with `alias=`:

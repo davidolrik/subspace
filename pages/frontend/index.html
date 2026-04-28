@@ -59,9 +59,23 @@
                                         </template>
                                     </span>
                                 </a>
+                                <template x-if="link.Tags && link.Tags.length">
+                                    <span class="link-tags">
+                                        <template x-for="t in link.Tags" :key="t">
+                                            <span class="tag-pill" :style="`--tag-color: ${tagColor(t)}`" x-text="tagLabel(t)"></span>
+                                        </template>
+                                    </span>
+                                </template>
                             </li>
                         </template>
                     </ul>
+                    <template x-if="group.Tags && group.Tags.length">
+                        <div class="group-tags">
+                            <template x-for="t in group.Tags" :key="t">
+                                <span class="tag-pill" :style="`--tag-color: ${tagColor(t)}`" x-text="tagLabel(t)"></span>
+                            </template>
+                        </div>
+                    </template>
                 </section>
             </template>
         </div>
@@ -121,6 +135,7 @@
                 footer: '',
                 groups: [],
                 nav: [],
+                tags: {},
                 async loadLinks() {
                     try {
                         const [linksResp, navResp] = await Promise.all([
@@ -130,10 +145,17 @@
                         this.title = linksResp.Title || '';
                         this.footer = linksResp.Footer || '';
                         this.groups = linksResp.Sections || [];
+                        this.tags = linksResp.Tags || {};
                         this.nav = navResp || [];
                     } catch (e) {
                         console.error('Failed to load links:', e);
                     }
+                },
+                tagColor(name) {
+                    return (this.tags[name] && this.tags[name].Color) || 'var(--text-muted)';
+                },
+                tagLabel(name) {
+                    return (this.tags[name] && this.tags[name].Alias) || name;
                 },
                 iconClass(icon) {
                     if (icon.startsWith('si-')) return 'si ' + icon;

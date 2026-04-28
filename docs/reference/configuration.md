@@ -118,6 +118,23 @@ The `via` property is required and must reference a defined upstream name, or th
 
 See [Pattern Matching](/reference/pattern-matching) for pattern syntax.
 
+### `tags`
+
+Defines a global palette of tags. Each tag has a name and a color and is rendered as a small pill in the page UI when referenced from a link or list section in a page KDL file.
+
+```kdl
+tags {
+  tag "<name>" color="<#hex>" alias="<display>"
+}
+```
+
+| Property | Required | Description                                                                                       |
+| -------- | -------- | ------------------------------------------------------------------------------------------------- |
+| `color`  | Yes      | Any valid CSS color (typically hex)                                                               |
+| `alias`  | No       | Text shown on the pill. Defaults to the tag name. May repeat across tags to share a display label |
+
+Tag names must be unique within the block. Aliases may repeat — use this to render multiple distinct tags (each with its own color) under the same display label, e.g. two `services` pills in different colors. Pages that reference an undefined tag fail validation at startup. See [Internal Pages → Tags](/guide/pages#tags) for usage.
+
 ### `include`
 
 Includes other KDL config files.

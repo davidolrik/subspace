@@ -81,6 +81,10 @@ func newServeCommand(configFile *string) *cobra.Command {
 				return err
 			}
 			pagesHandler := pages.New(pageInfos, srv.Stats, statsStore)
+			pagesHandler.SetTags(tagDefs(cfg))
+			if err := pagesHandler.ValidateTagReferences(); err != nil {
+				return fmt.Errorf("validating page tag references: %w", err)
+			}
 			srv.Pages = pagesHandler
 
 			// Ensure the control socket directory exists
@@ -325,6 +329,10 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 			slog.Warn("config reload: failed to load link pages, keeping current", "error", err)
 		} else {
 			pagesHandler.ReloadPages(pageInfos)
+			pagesHandler.SetTags(tagDefs(newCfg))
+			if err := pagesHandler.ValidateTagReferences(); err != nil {
+				slog.Warn("config reload: tag references invalid", "error", err)
+			}
 		}
 	}
 
@@ -351,4 +359,14 @@ func loadPages(cfg *config.Config) ([]pages.PageInfo, error) {
 		})
 	}
 	return infos, nil
+}
+
+// tagDefs converts the parsed global tag palette into the form the
+// pages handler exposes to the frontend.
+func tagDefs(cfg *config.Config) map[string]pages.TagDef {
+	out := make(map[string]pages.TagDef, len(cfg.Tags))
+	for name, t := range cfg.Tags {
+		out[name] = pages.TagDef{Name: t.Name, Alias: t.Alias, Color: t.Color}
+	}
+	return out
 }

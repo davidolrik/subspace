@@ -2,6 +2,7 @@ package pages
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
@@ -42,15 +43,33 @@ type PageInfo struct {
 	Page  *PageConfig // parsed page data
 }
 
+// TagDef is a single tag definition exposed to the frontend so it can
+// render colored pills for tag references on links and lists. Alias is
+// the label displayed on the pill (defaults to Name when unset).
+type TagDef struct {
+	Name  string `json:"Name"`
+	Alias string `json:"Alias,omitempty"`
+	Color string `json:"Color"`
+}
+
+// linksResponse is the JSON shape returned by the /api/links endpoint.
+// It embeds the page configuration and adds the tag color map so the
+// frontend can render tag pills without a second round-trip.
+type linksResponse struct {
+	*PageConfig
+	Tags map[string]TagDef `json:"Tags,omitempty"`
+}
+
 // searchLink is a single link returned by the /api/all-links endpoint,
 // annotated with the page and section it belongs to.
 type searchLink struct {
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	Icon        string `json:"icon,omitempty"`
-	Description string `json:"description,omitempty"`
-	Page        string `json:"page"`
-	Section     string `json:"section"`
+	Name        string   `json:"name"`
+	URL         string   `json:"url"`
+	Icon        string   `json:"icon,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Page        string   `json:"page"`
+	Section     string   `json:"section"`
 }
 
 // navEntry is a single menu item returned by the /api/nav endpoint.
@@ -73,6 +92,7 @@ type Handler struct {
 	stats       *stats.Collector
 	store       *stats.Store
 	status      StatusProvider
+	tags        map[string]TagDef
 }
 
 // New creates a pages handler. The collector is used for live stats
@@ -154,6 +174,45 @@ func (h *Handler) SetStatusProvider(fn StatusProvider) {
 	h.mu.Lock()
 	h.status = fn
 	h.mu.Unlock()
+}
+
+// SetTags installs the global tag color palette used to render pills
+// in the page UI. The map is read by /api/links responses and by
+// ValidateTagReferences.
+func (h *Handler) SetTags(tags map[string]TagDef) {
+	h.mu.Lock()
+	h.tags = tags
+	h.mu.Unlock()
+}
+
+// ValidateTagReferences walks every loaded page and returns the first
+// link or list that references a tag not present in the configured
+// palette. Intended to be called once after SetTags at startup and
+// after each successful page reload.
+func (h *Handler) ValidateTagReferences() error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for _, lp := range h.pageList {
+		if lp.Page == nil {
+			continue
+		}
+		for _, section := range lp.Page.Sections {
+			for _, tag := range section.Tags {
+				if _, ok := h.tags[tag]; !ok {
+					return fmt.Errorf("page %q section %q references unknown tag %q", lp.Name, section.Name, tag)
+				}
+			}
+			for _, link := range section.Links {
+				for _, tag := range link.Tags {
+					if _, ok := h.tags[tag]; !ok {
+						return fmt.Errorf("page %q section %q link %q references unknown tag %q", lp.Name, section.Name, link.Name, tag)
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ReloadPages rebuilds the mux with a new set of link pages.
@@ -268,6 +327,7 @@ func (h *Handler) handleLinksAPI(w http.ResponseWriter, r *http.Request) {
 	if ok && idx < len(h.pageList) {
 		pageCfg = h.pageList[idx].Page
 	}
+	tags := h.tags
 	h.mu.RUnlock()
 
 	if pageCfg == nil {
@@ -275,7 +335,7 @@ func (h *Handler) handleLinksAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pageCfg)
+	json.NewEncoder(w).Encode(linksResponse{PageConfig: pageCfg, Tags: tags})
 }
 
 func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
@@ -344,6 +404,7 @@ func (h *Handler) handleAllLinksAPI(w http.ResponseWriter, r *http.Request) {
 					URL:         link.URL,
 					Icon:        link.Icon,
 					Description: link.Description,
+					Tags:        link.Tags,
 					Page:        pageLabel,
 					Section:     section.Name,
 				})

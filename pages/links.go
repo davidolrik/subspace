@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/sblinch/kdl-go"
 	"github.com/sblinch/kdl-go/document"
@@ -18,18 +20,20 @@ type PageConfig struct {
 
 // ListSection is a named section within a page that contains a list of items.
 type ListSection struct {
-	Name  string `json:"Name"`
-	Color string `json:"Color,omitempty"`
-	Icon  string `json:"Icon,omitempty"`
-	Links []Link `json:"Links"`
+	Name  string   `json:"Name"`
+	Color string   `json:"Color,omitempty"`
+	Icon  string   `json:"Icon,omitempty"`
+	Tags  []string `json:"Tags,omitempty"`
+	Links []Link   `json:"Links"`
 }
 
 // Link is a single page link.
 type Link struct {
-	Name        string `json:"Name"`
-	URL         string `json:"URL"`
-	Icon        string `json:"Icon,omitempty"`
-	Description string `json:"Description,omitempty"`
+	Name        string   `json:"Name"`
+	URL         string   `json:"URL"`
+	Icon        string   `json:"Icon,omitempty"`
+	Description string   `json:"Description,omitempty"`
+	Tags        []string `json:"Tags,omitempty"`
 }
 
 // ParsePageFile parses a page KDL file from disk.
@@ -91,6 +95,7 @@ func parseListSection(node *document.Node) (ListSection, error) {
 	if iconVal, ok := node.Properties.Get("icon"); ok && iconVal != nil {
 		s.Icon = iconVal.ValueString()
 	}
+	s.Tags = parseTagsProperty(node)
 
 	for _, child := range node.Children {
 		switch child.Name.ValueString() {
@@ -132,6 +137,23 @@ func parseLink(node *document.Node) (Link, error) {
 	if descVal, ok := node.Properties.Get("description"); ok && descVal != nil {
 		l.Description = descVal.ValueString()
 	}
+	l.Tags = parseTagsProperty(node)
 
 	return l, nil
+}
+
+// parseTagsProperty reads the optional "tags" property and splits it
+// on whitespace. Returns nil when the property is absent or empty so
+// that JSON serialization with omitempty works as expected.
+func parseTagsProperty(node *document.Node) []string {
+	val, ok := node.Properties.Get("tags")
+	if !ok || val == nil {
+		return nil
+	}
+	fields := strings.Fields(val.ValueString())
+	if len(fields) == 0 {
+		return nil
+	}
+	sort.Strings(fields)
+	return fields
 }

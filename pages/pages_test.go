@@ -219,6 +219,149 @@ func TestRootRedirectsToFirstPage(t *testing.T) {
 	}
 }
 
+func TestValidateTagReferencesOK(t *testing.T) {
+	pageInfos := []PageInfo{
+		{
+			Name: "dev",
+			Page: &PageConfig{
+				Sections: []ListSection{
+					{
+						Name: "Repos",
+						Tags: []string{"prod"},
+						Links: []Link{
+							{Name: "GitHub", URL: "https://github.com", Tags: []string{"prod", "internal"}},
+						},
+					},
+				},
+			},
+		},
+	}
+	h := New(pageInfos, nil, nil)
+	h.SetTags(map[string]TagDef{
+		"prod":     {Name: "prod", Color: "#00ff88"},
+		"internal": {Name: "internal", Color: "#ff6b6b"},
+	})
+
+	if err := h.ValidateTagReferences(); err != nil {
+		t.Fatalf("ValidateTagReferences() = %v, want nil", err)
+	}
+}
+
+func TestValidateTagReferencesUnknownLink(t *testing.T) {
+	pageInfos := []PageInfo{
+		{
+			Name: "dev",
+			Page: &PageConfig{
+				Sections: []ListSection{
+					{
+						Name: "Repos",
+						Links: []Link{
+							{Name: "GitHub", URL: "https://github.com", Tags: []string{"ghost"}},
+						},
+					},
+				},
+			},
+		},
+	}
+	h := New(pageInfos, nil, nil)
+	h.SetTags(map[string]TagDef{"prod": {Name: "prod", Color: "#00ff88"}})
+
+	err := h.ValidateTagReferences()
+	if err == nil {
+		t.Fatal("expected error for unknown tag reference")
+	}
+	for _, want := range []string{"ghost", "GitHub", "Repos", "dev"} {
+		if !contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err.Error(), want)
+		}
+	}
+}
+
+func TestValidateTagReferencesUnknownList(t *testing.T) {
+	pageInfos := []PageInfo{
+		{
+			Name: "dev",
+			Page: &PageConfig{
+				Sections: []ListSection{
+					{
+						Name: "Repos",
+						Tags: []string{"phantom"},
+						Links: []Link{
+							{Name: "GitHub", URL: "https://github.com"},
+						},
+					},
+				},
+			},
+		},
+	}
+	h := New(pageInfos, nil, nil)
+	h.SetTags(map[string]TagDef{})
+
+	err := h.ValidateTagReferences()
+	if err == nil {
+		t.Fatal("expected error for unknown tag reference on list")
+	}
+	for _, want := range []string{"phantom", "Repos", "dev"} {
+		if !contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err.Error(), want)
+		}
+	}
+}
+
+func TestHandleLinksAPIIncludesTags(t *testing.T) {
+	pageInfos := []PageInfo{
+		{
+			Name: "dev",
+			Page: &PageConfig{
+				Title: "Dev",
+				Sections: []ListSection{
+					{
+						Name: "Repos",
+						Links: []Link{
+							{Name: "GitHub", URL: "https://github.com", Tags: []string{"prod"}},
+						},
+					},
+				},
+			},
+		},
+	}
+	h := New(pageInfos, nil, nil)
+	h.SetTags(map[string]TagDef{
+		"prod": {Name: "prod", Color: "#00ff88"},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/links", nil)
+	rec := httptest.NewRecorder()
+	h.handleLinksAPI(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp struct {
+		Title    string
+		Sections []ListSection
+		Tags     map[string]TagDef
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+
+	if resp.Title != "Dev" {
+		t.Errorf("Title = %q, want %q", resp.Title, "Dev")
+	}
+	if len(resp.Sections) != 1 || resp.Sections[0].Links[0].Name != "GitHub" {
+		t.Errorf("unexpected sections: %+v", resp.Sections)
+	}
+	prod, ok := resp.Tags["prod"]
+	if !ok {
+		t.Fatal("response.Tags missing 'prod'")
+	}
+	if prod.Color != "#00ff88" {
+		t.Errorf("prod.Color = %q, want %q", prod.Color, "#00ff88")
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
 }
