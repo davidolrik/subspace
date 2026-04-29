@@ -62,6 +62,12 @@ type Config struct {
 	Routes        []Route
 	Tags          map[string]Tag
 	IncludedFiles []string // absolute paths of all files parsed (main + includes)
+	// Errors holds non-fatal config problems collected during parsing
+	// and finalization (e.g. a route that refers to an unknown
+	// upstream). Subspace skips the offending item and continues so the
+	// rest of the config can still take effect; the operator sees the
+	// list at startup logs and on the internal pages banner.
+	Errors []string
 }
 
 var validUpstreamTypes = map[string]bool{
@@ -149,31 +155,36 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 		switch node.Name.ValueString() {
 		case "listen":
 			if len(node.Arguments) < 1 {
-				return fmt.Errorf("listen requires an address argument")
+				p.collect(currentFile, "listen requires an address argument")
+				continue
 			}
 			p.cfg.Listen = node.Arguments[0].ValueString()
 
 		case "upstream":
 			if len(node.Arguments) < 1 {
-				return fmt.Errorf("upstream requires a name argument")
+				p.collect(currentFile, "upstream requires a name argument")
+				continue
 			}
 			name := node.Arguments[0].ValueString()
 			u, err := parseUpstream(node)
 			if err != nil {
-				return fmt.Errorf("upstream %q: %w", name, err)
+				p.collect(currentFile, fmt.Sprintf("upstream %q: %v", name, err))
+				continue
 			}
 			p.cfg.Upstreams[name] = u
 
 		case "control_socket":
 			if len(node.Arguments) < 1 {
-				return fmt.Errorf("control_socket requires a path argument")
+				p.collect(currentFile, "control_socket requires a path argument")
+				continue
 			}
 			p.cfg.ControlSocket = node.Arguments[0].ValueString()
 
 		case "page":
 			pg, err := parsePage(node, baseDir)
 			if err != nil {
-				return err
+				p.collect(currentFile, err.Error())
+				continue
 			}
 			if baseDir != "" {
 				p.cfg.IncludedFiles = append(p.cfg.IncludedFiles, pg.File)
@@ -183,27 +194,43 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 		case "route":
 			r, err := parseRoute(node)
 			if err != nil {
-				return err
+				p.collect(currentFile, err.Error())
+				continue
 			}
 			r.File = currentFile
 			p.cfg.Routes = append(p.cfg.Routes, r)
 
 		case "tags":
-			if err := parseTagsBlock(node, p.cfg.Tags); err != nil {
-				return err
+			tagErrs := parseTagsBlock(node, p.cfg.Tags)
+			for _, msg := range tagErrs {
+				p.collect(currentFile, msg)
 			}
 
 		case "include":
+			// Includes still propagate fatal errors (missing file,
+			// circular reference, glob errors). Per-item problems
+			// inside the included file go through the same collect
+			// path as the main file.
 			if err := p.handleInclude(node, baseDir); err != nil {
 				return err
 			}
 
 		default:
-			return fmt.Errorf("unknown config node: %q", node.Name.ValueString())
+			p.collect(currentFile, fmt.Sprintf("unknown config node: %q", node.Name.ValueString()))
 		}
 	}
 
 	return nil
+}
+
+// collect appends a non-fatal config error, prefixed with the source
+// file when known.
+func (p *parser) collect(file, msg string) {
+	if file != "" {
+		p.cfg.Errors = append(p.cfg.Errors, fmt.Sprintf("%s: %s", file, msg))
+		return
+	}
+	p.cfg.Errors = append(p.cfg.Errors, msg)
 }
 
 func (p *parser) handleInclude(node *document.Node, baseDir string) error {
@@ -250,23 +277,31 @@ func (p *parser) finalize() (*Config, error) {
 
 	// Validate route references. "direct" is a built-in that bypasses
 	// all upstreams, so it doesn't need to exist in the Upstreams map.
+	// Routes with an unknown via are dropped; routes with a bad
+	// fallback keep working but lose the fallback. Errors are
+	// collected so the operator can see all of them at once.
+	kept := cfg.Routes[:0]
 	for _, r := range cfg.Routes {
 		if r.Via != "direct" {
 			if _, ok := cfg.Upstreams[r.Via]; !ok {
-				return nil, fmt.Errorf("route %q references unknown upstream %q", r.Pattern, r.Via)
+				cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q references unknown upstream %q (route dropped)", r.Pattern, r.Via))
+				continue
 			}
 		}
 		if r.Fallback != "" {
 			if r.Fallback == r.Via {
-				return nil, fmt.Errorf("route %q: fallback must differ from via (%q)", r.Pattern, r.Via)
-			}
-			if r.Fallback != "direct" {
+				cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q: fallback must differ from via (%q) (fallback cleared)", r.Pattern, r.Via))
+				r.Fallback = ""
+			} else if r.Fallback != "direct" {
 				if _, ok := cfg.Upstreams[r.Fallback]; !ok {
-					return nil, fmt.Errorf("route %q references unknown fallback upstream %q", r.Pattern, r.Fallback)
+					cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q references unknown fallback upstream %q (fallback cleared)", r.Pattern, r.Fallback))
+					r.Fallback = ""
 				}
 			}
 		}
+		kept = append(kept, r)
 	}
+	cfg.Routes = kept
 
 	return cfg, nil
 }
@@ -371,29 +406,40 @@ func parsePage(node *document.Node, baseDir string) (Page, error) {
 	}, nil
 }
 
-func parseTagsBlock(node *document.Node, tags map[string]Tag) error {
+// parseTagsBlock walks the children of a `tags { ... }` node and adds
+// each successfully parsed tag to the supplied map. Per-child errors
+// are returned as a slice so the caller can collect them; the bad tag
+// is skipped and parsing continues.
+func parseTagsBlock(node *document.Node, tags map[string]Tag) []string {
+	var errs []string
 	for _, child := range node.Children {
 		if child.Name.ValueString() != "tag" {
-			return fmt.Errorf("tags block: unknown node %q", child.Name.ValueString())
+			errs = append(errs, fmt.Sprintf("tags block: unknown node %q", child.Name.ValueString()))
+			continue
 		}
 		if len(child.Arguments) < 1 {
-			return fmt.Errorf("tag requires a name argument")
+			errs = append(errs, "tag requires a name argument")
+			continue
 		}
 		name := child.Arguments[0].ValueString()
 		if name == "" {
-			return fmt.Errorf("tag requires a non-empty name")
+			errs = append(errs, "tag requires a non-empty name")
+			continue
 		}
 		if _, exists := tags[name]; exists {
-			return fmt.Errorf("duplicate tag name %q", name)
+			errs = append(errs, fmt.Sprintf("duplicate tag name %q", name))
+			continue
 		}
 
 		colorVal, ok := child.Properties.Get("color")
 		if !ok || colorVal == nil {
-			return fmt.Errorf("tag %q requires color property", name)
+			errs = append(errs, fmt.Sprintf("tag %q requires color property", name))
+			continue
 		}
 		color := colorVal.ValueString()
 		if color == "" {
-			return fmt.Errorf("tag %q requires non-empty color property", name)
+			errs = append(errs, fmt.Sprintf("tag %q requires non-empty color property", name))
+			continue
 		}
 
 		alias := name
@@ -405,7 +451,7 @@ func parseTagsBlock(node *document.Node, tags map[string]Tag) error {
 
 		tags[name] = Tag{Name: name, Alias: alias, Color: color}
 	}
-	return nil
+	return errs
 }
 
 func parseRoute(node *document.Node) (Route, error) {

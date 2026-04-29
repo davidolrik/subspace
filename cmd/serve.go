@@ -40,11 +40,11 @@ func newServeCommand(configFile *string) *cobra.Command {
 			stderrHandler := style.NewLogHandler(os.Stderr, nil)
 			slog.SetDefault(slog.New(newTeeHandler(stderrHandler, logHandler)))
 
-			// Build initial routing state
-			matcher, dialers, err := buildRouting(cfg)
-			if err != nil {
-				return err
-			}
+			// Build initial routing state. Per-upstream/dialer
+			// failures are appended to cfg.Errors and the offending
+			// item is dropped; only catastrophic problems return an
+			// error here.
+			matcher, dialers := buildRouting(cfg)
 
 			// Start proxy listener
 			ln, err := net.Listen("tcp", cfg.Listen)
@@ -57,7 +57,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			srv := proxy.NewServer(ln, matcher, dialers, pool)
 
 			// Start health monitor for upstream proxies
-			monitor := upstream.NewMonitor(buildMonitorTargets(cfg), 10*time.Second, 3*time.Second)
+			monitor := upstream.NewMonitor(buildMonitorTargets(cfg, dialers), 10*time.Second, 3*time.Second)
 			monitor.Start()
 			defer monitor.Stop()
 			srv.SetMonitor(monitor)
@@ -75,16 +75,13 @@ func newServeCommand(configFile *string) *cobra.Command {
 			go recorder.Run()
 			defer recorder.Stop()
 
-			// Set up internal pages (link pages, statistics, error pages)
-			pageInfos, err := loadPages(cfg)
-			if err != nil {
-				return err
-			}
+			// Set up internal pages (link pages, statistics, error pages).
+			// Pages that fail to load are skipped and their errors
+			// joined into cfg.Errors.
+			pageInfos := loadPages(cfg)
 			pagesHandler := pages.New(pageInfos, srv.Stats, statsStore)
 			pagesHandler.SetTags(tagDefs(cfg))
-			if err := pagesHandler.ValidateTagReferences(); err != nil {
-				return fmt.Errorf("validating page tag references: %w", err)
-			}
+			cfg.Errors = append(cfg.Errors, pagesHandler.ValidateTagReferences()...)
 			srv.Pages = pagesHandler
 
 			// Ensure the control socket directory exists
@@ -103,12 +100,22 @@ func newServeCommand(configFile *string) *cobra.Command {
 			// Give the statistics page access to upstream health data
 			pagesHandler.SetStatusProvider(func() any { return ctrlSrv.Status() })
 
+			// Surface collected non-fatal config errors: log them so
+			// the operator sees them on the terminal, and hand them
+			// to the pages handler so the internal-pages banner
+			// displays them.
+			for _, msg := range cfg.Errors {
+				slog.Warn("config error", "error", msg)
+			}
+			pagesHandler.SetConfigErrors(cfg.Errors)
+
 			slog.Info("subspace listening",
 				"version", Version,
 				"addr", cfg.Listen,
 				"control", cfg.ControlSocket,
 				"upstreams", len(cfg.Upstreams),
 				"routes", len(cfg.Routes),
+				"config_errors", len(cfg.Errors),
 			)
 
 			// Watch config files for changes (main config + included files)
@@ -128,16 +135,42 @@ func newServeCommand(configFile *string) *cobra.Command {
 	}
 }
 
-// buildRouting creates a route matcher and dialer map from the config.
-func buildRouting(cfg *config.Config) (*route.Matcher, map[string]upstream.Dialer, error) {
+// buildRouting creates a route matcher and dialer map from the
+// config. Dialer construction failures (e.g. an invalid WireGuard
+// key) are non-fatal: the offending upstream is dropped, the error is
+// appended to cfg.Errors, and any route or fallback that pointed at
+// the now-missing dialer is dropped or cleared so the rest of the
+// proxy still works.
+func buildRouting(cfg *config.Config) (*route.Matcher, map[string]upstream.Dialer) {
 	dialers := make(map[string]upstream.Dialer)
 	for name, u := range cfg.Upstreams {
 		d, err := buildDialer(u)
 		if err != nil {
-			return nil, nil, fmt.Errorf("upstream %q: %w", name, err)
+			cfg.Errors = append(cfg.Errors, fmt.Sprintf("upstream %q: %v (dropped)", name, err))
+			continue
 		}
 		dialers[name] = d
 	}
+
+	// Drop routes whose via lost its dialer at construction time, and
+	// clear fallbacks that lost theirs. "direct" is always available.
+	kept := cfg.Routes[:0]
+	for _, r := range cfg.Routes {
+		if r.Via != "direct" {
+			if _, ok := dialers[r.Via]; !ok {
+				cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q: upstream %q is unavailable (route dropped)", r.Pattern, r.Via))
+				continue
+			}
+		}
+		if r.Fallback != "" && r.Fallback != "direct" {
+			if _, ok := dialers[r.Fallback]; !ok {
+				cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q: fallback upstream %q is unavailable (fallback cleared)", r.Pattern, r.Fallback))
+				r.Fallback = ""
+			}
+		}
+		kept = append(kept, r)
+	}
+	cfg.Routes = kept
 
 	rules := make([]route.Rule, len(cfg.Routes))
 	for i, r := range cfg.Routes {
@@ -145,7 +178,7 @@ func buildRouting(cfg *config.Config) (*route.Matcher, map[string]upstream.Diale
 	}
 	matcher := route.NewMatcher(rules)
 
-	return matcher, dialers, nil
+	return matcher, dialers
 }
 
 func buildDialer(u config.Upstream) (upstream.Dialer, error) {
@@ -176,12 +209,18 @@ func closeDialers(dialers map[string]upstream.Dialer) {
 	}
 }
 
-// buildMonitorTargets extracts upstream addresses from config for the health monitor.
-// WireGuard upstreams are excluded because they use UDP and cannot be TCP health-checked.
-func buildMonitorTargets(cfg *config.Config) map[string]upstream.MonitorTarget {
+// buildMonitorTargets extracts upstream addresses from config for the
+// health monitor. WireGuard upstreams are excluded because they use
+// UDP and cannot be TCP health-checked. Upstreams whose dialer failed
+// to build are also excluded so we don't flap a target that can never
+// dial.
+func buildMonitorTargets(cfg *config.Config, dialers map[string]upstream.Dialer) map[string]upstream.MonitorTarget {
 	targets := make(map[string]upstream.MonitorTarget, len(cfg.Upstreams))
 	for name, u := range cfg.Upstreams {
 		if u.Type == "wireguard" {
+			continue
+		}
+		if _, ok := dialers[name]; !ok {
 			continue
 		}
 		targets[name] = upstream.MonitorTarget{Type: u.Type, Address: u.Address}
@@ -283,7 +322,9 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 
 // reloadConfig re-parses the config from the main file (which resolves
 // includes), validates it, and applies it. Returns the new config on
-// success, or nil if the reload failed.
+// success, or nil if the reload failed. Per-item validation errors
+// during reload follow the same model as startup: collected, logged,
+// and surfaced via the internal-pages banner.
 func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor, currentDialers map[string]upstream.Dialer) (*config.Config, *upstream.Monitor, map[string]upstream.Dialer) {
 	// The main config file is always the first in IncludedFiles
 	mainFile := currentCfg.IncludedFiles[0]
@@ -291,6 +332,9 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	newCfg, err := config.ParseFile(mainFile)
 	if err != nil {
 		slog.Warn("config reload: invalid config, keeping current", "error", err)
+		if pagesHandler != nil {
+			pagesHandler.SetReloadError(fmt.Sprintf("config reload failed (using previous config): %v", err))
+		}
 		return nil, currentMonitor, currentDialers
 	}
 
@@ -304,15 +348,11 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 			"current", currentCfg.ControlSocket, "new", newCfg.ControlSocket)
 	}
 
-	matcher, dialers, err := buildRouting(newCfg)
-	if err != nil {
-		slog.Warn("config reload: failed to build routing, keeping current", "error", err)
-		return nil, currentMonitor, currentDialers
-	}
+	matcher, dialers := buildRouting(newCfg)
 
 	// Replace the health monitor with one for the new upstream set
 	currentMonitor.Stop()
-	newMonitor := upstream.NewMonitor(buildMonitorTargets(newCfg), 10*time.Second, 3*time.Second)
+	newMonitor := upstream.NewMonitor(buildMonitorTargets(newCfg, dialers), 10*time.Second, 3*time.Second)
 	newMonitor.Start()
 
 	srv.Reload(matcher, dialers)
@@ -322,35 +362,42 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	// Close old dialers that hold resources (e.g. WireGuard tunnels)
 	closeDialers(currentDialers)
 
-	// Reload link pages
+	// Reload link pages (skipping any that fail to parse).
 	if pagesHandler != nil {
-		pageInfos, err := loadPages(newCfg)
-		if err != nil {
-			slog.Warn("config reload: failed to load link pages, keeping current", "error", err)
-		} else {
-			pagesHandler.ReloadPages(pageInfos)
-			pagesHandler.SetTags(tagDefs(newCfg))
-			if err := pagesHandler.ValidateTagReferences(); err != nil {
-				slog.Warn("config reload: tag references invalid", "error", err)
-			}
-		}
+		pageInfos := loadPages(newCfg)
+		pagesHandler.ReloadPages(pageInfos)
+		pagesHandler.SetTags(tagDefs(newCfg))
+		newCfg.Errors = append(newCfg.Errors, pagesHandler.ValidateTagReferences()...)
+	}
+
+	for _, msg := range newCfg.Errors {
+		slog.Warn("config error", "error", msg)
+	}
+	if pagesHandler != nil {
+		// Replaces both the previous error list and any prior
+		// reload-failure notice (handled inside SetConfigErrors).
+		pagesHandler.SetConfigErrors(newCfg.Errors)
 	}
 
 	slog.Info("config reloaded",
 		"upstreams", len(newCfg.Upstreams),
 		"routes", len(newCfg.Routes),
+		"config_errors", len(newCfg.Errors),
 	)
 
 	return newCfg, newMonitor, dialers
 }
 
-// loadPages parses all configured link page files into PageInfo structs.
-func loadPages(cfg *config.Config) ([]pages.PageInfo, error) {
+// loadPages parses all configured link page files into PageInfo
+// structs. Pages whose KDL fails to parse are skipped and the error
+// is appended to cfg.Errors so the operator sees it in the banner.
+func loadPages(cfg *config.Config) []pages.PageInfo {
 	var infos []pages.PageInfo
 	for _, pg := range cfg.Pages {
 		pageCfg, err := pages.ParsePageFile(pg.File)
 		if err != nil {
-			return nil, fmt.Errorf("loading page %q: %w", pg.File, err)
+			cfg.Errors = append(cfg.Errors, fmt.Sprintf("loading page %q: %v (page skipped)", pg.File, err))
+			continue
 		}
 		infos = append(infos, pages.PageInfo{
 			Name:  pg.Name,
@@ -358,7 +405,7 @@ func loadPages(cfg *config.Config) ([]pages.PageInfo, error) {
 			Page:  pageCfg,
 		})
 	}
-	return infos, nil
+	return infos
 }
 
 // tagDefs converts the parsed global tag palette into the form the

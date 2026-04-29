@@ -14,6 +14,48 @@
     --white: #ffffff;
     --link: #58a6ff;
     --link-hover: #00ffea;
+    --red: #f85149;
+}
+
+[x-cloak] {
+    display: none !important;
+}
+
+.config-error-banner {
+    background: color-mix(in srgb, var(--red) 12%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--red) 55%, transparent);
+    color: var(--text);
+    padding: 0.75rem 2rem;
+    font-size: 0.85rem;
+}
+
+.config-error-banner-title {
+    color: var(--red);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.75rem;
+    margin-bottom: 0.4rem;
+}
+
+.config-error-banner-title i {
+    margin-right: 0.4rem;
+}
+
+.config-error-banner ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.config-error-banner li {
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 0.8rem;
+    word-break: break-word;
 }
 
 body {

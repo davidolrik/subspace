@@ -93,6 +93,16 @@ type Handler struct {
 	store       *stats.Store
 	status      StatusProvider
 	tags        map[string]TagDef
+	// configErrors is the list of non-fatal config problems surfaced
+	// in the internal-pages banner. It's overwritten by
+	// SetConfigErrors after each successful (re)load.
+	configErrors []string
+	// reloadError is set by SetReloadError when a config reload fails
+	// to parse. It's prepended to configErrors in the API response so
+	// the operator sees that the *current* config is stale relative
+	// to what's on disk. Cleared by SetConfigErrors on a successful
+	// reload.
+	reloadError string
 }
 
 // New creates a pages handler. The collector is used for live stats
@@ -127,6 +137,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 				mux.HandleFunc(host+prefix+"/api/links", h.handleLinksAPI)
 				mux.HandleFunc(host+prefix+"/api/all-links", h.handleAllLinksAPI)
 				mux.HandleFunc(host+prefix+"/api/nav", h.handleNavAPI)
+				mux.HandleFunc(host+prefix+"/api/config-errors", h.handleConfigErrorsAPI)
 				mux.Handle(host+prefix+"/static/", http.StripPrefix(prefix+"/static/", fileServer))
 				mux.HandleFunc(host+prefix+"/", h.handleDashboard)
 			}
@@ -157,6 +168,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		mux.HandleFunc(host+"/api/status", h.handleStatusAPI)
 		mux.HandleFunc(host+"/api/all-links", h.handleAllLinksAPI)
 		mux.HandleFunc(host+"/api/nav", h.handleNavAPI)
+		mux.HandleFunc(host+"/api/config-errors", h.handleConfigErrorsAPI)
 		mux.Handle(host+"/static/", http.StripPrefix("/static/", fileServer))
 		mux.HandleFunc(host+"/", h.handleStatistics)
 	}
@@ -185,14 +197,40 @@ func (h *Handler) SetTags(tags map[string]TagDef) {
 	h.mu.Unlock()
 }
 
-// ValidateTagReferences walks every loaded page and returns the first
-// link or list that references a tag not present in the configured
-// palette. Intended to be called once after SetTags at startup and
-// after each successful page reload.
-func (h *Handler) ValidateTagReferences() error {
+// SetConfigErrors replaces the list of non-fatal config errors that
+// the internal-pages banner displays. Call after each successful
+// (re)load with the freshly-collected errors. Passing nil or an
+// empty slice clears the banner. A successful reload also clears
+// any prior reload-failure notice.
+func (h *Handler) SetConfigErrors(errs []string) {
+	h.mu.Lock()
+	h.configErrors = append([]string(nil), errs...)
+	h.reloadError = ""
+	h.mu.Unlock()
+}
+
+// SetReloadError records that the most recent config reload failed
+// to parse, while the previous (good) config remains in effect. The
+// message is prepended to the banner so the operator notices the
+// drift; it's cleared on the next successful reload.
+func (h *Handler) SetReloadError(msg string) {
+	h.mu.Lock()
+	h.reloadError = msg
+	h.mu.Unlock()
+}
+
+// ValidateTagReferences walks every loaded page and returns one entry
+// per link or list that references a tag not present in the configured
+// palette. The frontend already falls back to a neutral color for
+// unknown tags, so the page still renders — these messages are
+// surfaced in the config error banner so the operator notices.
+// Intended to be called after SetTags at startup and after each
+// successful page reload.
+func (h *Handler) ValidateTagReferences() []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	var errs []string
 	for _, lp := range h.pageList {
 		if lp.Page == nil {
 			continue
@@ -200,19 +238,19 @@ func (h *Handler) ValidateTagReferences() error {
 		for _, section := range lp.Page.Sections {
 			for _, tag := range section.Tags {
 				if _, ok := h.tags[tag]; !ok {
-					return fmt.Errorf("page %q section %q references unknown tag %q", lp.Name, section.Name, tag)
+					errs = append(errs, fmt.Sprintf("page %q section %q references unknown tag %q", lp.Name, section.Name, tag))
 				}
 			}
 			for _, link := range section.Links {
 				for _, tag := range link.Tags {
 					if _, ok := h.tags[tag]; !ok {
-						return fmt.Errorf("page %q section %q link %q references unknown tag %q", lp.Name, section.Name, link.Name, tag)
+						errs = append(errs, fmt.Sprintf("page %q section %q link %q references unknown tag %q", lp.Name, section.Name, link.Name, tag))
 					}
 				}
 			}
 		}
 	}
-	return nil
+	return errs
 }
 
 // ReloadPages rebuilds the mux with a new set of link pages.
@@ -381,6 +419,24 @@ func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(nav)
+}
+
+// configErrorsResponse is the JSON shape returned by /api/config-errors.
+type configErrorsResponse struct {
+	Errors []string `json:"errors"`
+}
+
+func (h *Handler) handleConfigErrorsAPI(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	combined := make([]string, 0, len(h.configErrors)+1)
+	if h.reloadError != "" {
+		combined = append(combined, h.reloadError)
+	}
+	combined = append(combined, h.configErrors...)
+	h.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(configErrorsResponse{Errors: combined})
 }
 
 func (h *Handler) handleAllLinksAPI(w http.ResponseWriter, r *http.Request) {

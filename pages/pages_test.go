@@ -242,8 +242,8 @@ func TestValidateTagReferencesOK(t *testing.T) {
 		"internal": {Name: "internal", Color: "#ff6b6b"},
 	})
 
-	if err := h.ValidateTagReferences(); err != nil {
-		t.Fatalf("ValidateTagReferences() = %v, want nil", err)
+	if errs := h.ValidateTagReferences(); len(errs) != 0 {
+		t.Fatalf("ValidateTagReferences() = %v, want nil", errs)
 	}
 }
 
@@ -266,13 +266,13 @@ func TestValidateTagReferencesUnknownLink(t *testing.T) {
 	h := New(pageInfos, nil, nil)
 	h.SetTags(map[string]TagDef{"prod": {Name: "prod", Color: "#00ff88"}})
 
-	err := h.ValidateTagReferences()
-	if err == nil {
-		t.Fatal("expected error for unknown tag reference")
+	errs := h.ValidateTagReferences()
+	if len(errs) == 0 {
+		t.Fatal("expected an error for unknown tag reference")
 	}
 	for _, want := range []string{"ghost", "GitHub", "Repos", "dev"} {
-		if !contains(err.Error(), want) {
-			t.Errorf("error %q should mention %q", err.Error(), want)
+		if !anyContains(errs, want) {
+			t.Errorf("errors %v should mention %q", errs, want)
 		}
 	}
 }
@@ -297,14 +297,117 @@ func TestValidateTagReferencesUnknownList(t *testing.T) {
 	h := New(pageInfos, nil, nil)
 	h.SetTags(map[string]TagDef{})
 
-	err := h.ValidateTagReferences()
-	if err == nil {
-		t.Fatal("expected error for unknown tag reference on list")
+	errs := h.ValidateTagReferences()
+	if len(errs) == 0 {
+		t.Fatal("expected an error for unknown tag reference on list")
 	}
 	for _, want := range []string{"phantom", "Repos", "dev"} {
-		if !contains(err.Error(), want) {
-			t.Errorf("error %q should mention %q", err.Error(), want)
+		if !anyContains(errs, want) {
+			t.Errorf("errors %v should mention %q", errs, want)
 		}
+	}
+}
+
+func TestValidateTagReferencesCollectsAll(t *testing.T) {
+	pageInfos := []PageInfo{
+		{
+			Name: "dev",
+			Page: &PageConfig{
+				Sections: []ListSection{
+					{
+						Name: "Repos",
+						Tags: []string{"phantom"},
+						Links: []Link{
+							{Name: "GitHub", URL: "https://github.com", Tags: []string{"ghost"}},
+						},
+					},
+				},
+			},
+		},
+	}
+	h := New(pageInfos, nil, nil)
+	h.SetTags(map[string]TagDef{})
+
+	errs := h.ValidateTagReferences()
+	if len(errs) != 2 {
+		t.Fatalf("expected 2 collected errors (list + link), got %d: %v", len(errs), errs)
+	}
+}
+
+func anyContains(errs []string, sub string) bool {
+	for _, e := range errs {
+		if contains(e, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestConfigErrorsAPI(t *testing.T) {
+	h := New(nil, nil, nil)
+	h.SetConfigErrors([]string{"route X bad", "tag Y missing"})
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/config-errors", nil)
+	rec := httptest.NewRecorder()
+	h.handleConfigErrorsAPI(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var resp struct {
+		Errors []string `json:"errors"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Errors) != 2 {
+		t.Fatalf("got %d errors, want 2: %v", len(resp.Errors), resp.Errors)
+	}
+}
+
+func TestConfigErrorsAPIPrependsReloadFailure(t *testing.T) {
+	h := New(nil, nil, nil)
+	h.SetConfigErrors([]string{"existing problem"})
+	h.SetReloadError("config reload failed (using previous config): boom")
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/config-errors", nil)
+	rec := httptest.NewRecorder()
+	h.handleConfigErrorsAPI(rec, req)
+
+	var resp struct {
+		Errors []string `json:"errors"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Errors) != 2 {
+		t.Fatalf("got %d errors, want 2: %v", len(resp.Errors), resp.Errors)
+	}
+	if !contains(resp.Errors[0], "reload failed") {
+		t.Errorf("first error should be the reload failure, got: %v", resp.Errors)
+	}
+}
+
+func TestConfigErrorsAPIClearsReloadFailureOnSuccess(t *testing.T) {
+	h := New(nil, nil, nil)
+	h.SetConfigErrors([]string{"existing problem"})
+	h.SetReloadError("reload failed: boom")
+	// A successful reload supplies a fresh error list (possibly empty).
+	h.SetConfigErrors(nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/config-errors", nil)
+	rec := httptest.NewRecorder()
+	h.handleConfigErrorsAPI(rec, req)
+
+	var resp struct {
+		Errors []string `json:"errors"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Errors) != 0 {
+		t.Errorf("expected zero errors after clearing, got %v", resp.Errors)
 	}
 }
 

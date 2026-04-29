@@ -12,6 +12,17 @@
     <link rel="stylesheet" href="static/fonts/nerdfonts.min.css">
 </head>
 <body x-data="{...dashboard(), ...search()}" x-init="loadLinks(); initSearch()">
+    <div class="config-error-banner" x-show="configErrors.length > 0" x-cloak>
+        <div class="config-error-banner-title">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span x-text="`Config error${configErrors.length === 1 ? '' : 's'} (${configErrors.length})`"></span>
+        </div>
+        <ul>
+            <template x-for="(msg, idx) in configErrors" :key="idx">
+                <li x-text="msg"></li>
+            </template>
+        </ul>
+    </div>
     <header>
         <h1>
             <span class="sub">sub</span><span class="space">space</span>
@@ -136,17 +147,20 @@
                 groups: [],
                 nav: [],
                 tags: {},
+                configErrors: [],
                 async loadLinks() {
                     try {
-                        const [linksResp, navResp] = await Promise.all([
+                        const [linksResp, navResp, errorsResp] = await Promise.all([
                             fetch('api/links').then(r => r.json()),
                             fetch('api/nav').then(r => r.json()),
+                            fetch('api/config-errors').then(r => r.json()).catch(() => null),
                         ]);
                         this.title = linksResp.Title || '';
                         this.footer = linksResp.Footer || '';
                         this.groups = linksResp.Sections || [];
                         this.tags = linksResp.Tags || {};
                         this.nav = navResp || [];
+                        this.configErrors = (errorsResp && errorsResp.errors) || [];
                     } catch (e) {
                         console.error('Failed to load links:', e);
                     }

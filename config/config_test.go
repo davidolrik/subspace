@@ -101,9 +101,15 @@ upstream "real" {
 
 route ".example.com" via="nonexistent"
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for route referencing nonexistent upstream")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if len(cfg.Routes) != 0 {
+		t.Errorf("bad route should be dropped, got %d routes", len(cfg.Routes))
+	}
+	if !hasErrorContaining(cfg.Errors, "nonexistent") {
+		t.Errorf("Errors = %v, want one mentioning the missing upstream", cfg.Errors)
 	}
 }
 
@@ -619,9 +625,18 @@ upstream "corp" {
 
 route ".example.com" via="corp" fallback="nonexistent"
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for route referencing nonexistent fallback upstream")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if len(cfg.Routes) != 1 {
+		t.Fatalf("route should be kept (only fallback dropped), got %d routes", len(cfg.Routes))
+	}
+	if cfg.Routes[0].Fallback != "" {
+		t.Errorf("Fallback = %q, want empty (cleared because target was unknown)", cfg.Routes[0].Fallback)
+	}
+	if !hasErrorContaining(cfg.Errors, "nonexistent") {
+		t.Errorf("Errors = %v, want one mentioning the missing fallback", cfg.Errors)
 	}
 }
 
@@ -636,9 +651,18 @@ upstream "corp" {
 
 route ".example.com" via="corp" fallback="corp"
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error when fallback equals via")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if len(cfg.Routes) != 1 {
+		t.Fatalf("route should be kept (only fallback cleared), got %d routes", len(cfg.Routes))
+	}
+	if cfg.Routes[0].Fallback != "" {
+		t.Errorf("Fallback = %q, want empty (cleared because it matched via)", cfg.Routes[0].Fallback)
+	}
+	if !hasErrorContaining(cfg.Errors, "fallback") {
+		t.Errorf("Errors = %v, want one mentioning the fallback conflict", cfg.Errors)
 	}
 }
 
@@ -729,9 +753,15 @@ upstream "bad" {
 	address "10.0.0.2/32"
 }
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for wireguard upstream missing endpoint")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if _, ok := cfg.Upstreams["bad"]; ok {
+		t.Error("invalid upstream should be skipped, but was added")
+	}
+	if !hasErrorContaining(cfg.Errors, "endpoint") {
+		t.Errorf("Errors = %v, want one mentioning the missing endpoint", cfg.Errors)
 	}
 }
 
@@ -745,9 +775,15 @@ upstream "bad" {
 	address "10.0.0.2/32"
 }
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for wireguard upstream missing keys")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if _, ok := cfg.Upstreams["bad"]; ok {
+		t.Error("invalid upstream should be skipped, but was added")
+	}
+	if len(cfg.Errors) == 0 {
+		t.Error("expected at least one collected error")
 	}
 }
 
@@ -783,9 +819,15 @@ upstream "bad" {
 	address "proxy:21"
 }
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for invalid upstream type")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if _, ok := cfg.Upstreams["bad"]; ok {
+		t.Error("invalid upstream should be skipped, but was added")
+	}
+	if !hasErrorContaining(cfg.Errors, "ftp") {
+		t.Errorf("Errors = %v, want one mentioning the bad type", cfg.Errors)
 	}
 }
 
@@ -863,12 +905,16 @@ tags {
 	tag "prod" color="#ff0000"
 }
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for duplicate tag name")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "prod") {
-		t.Errorf("error %q should mention duplicate tag name", err.Error())
+	// First definition wins; the duplicate is dropped.
+	if cfg.Tags["prod"].Color != "#00ff88" {
+		t.Errorf("prod.Color = %q, want first definition kept", cfg.Tags["prod"].Color)
+	}
+	if !hasErrorContaining(cfg.Errors, "prod") {
+		t.Errorf("Errors = %v, want one mentioning duplicate tag", cfg.Errors)
 	}
 }
 
@@ -878,12 +924,15 @@ tags {
 	tag "prod"
 }
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for tag without color")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "color") {
-		t.Errorf("error %q should mention missing color", err.Error())
+	if _, ok := cfg.Tags["prod"]; ok {
+		t.Error("tag without color should be skipped, but was added")
+	}
+	if !hasErrorContaining(cfg.Errors, "color") {
+		t.Errorf("Errors = %v, want one mentioning missing color", cfg.Errors)
 	}
 }
 
@@ -893,9 +942,12 @@ tags {
 	tag color="#00ff88"
 }
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for tag without name")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if len(cfg.Errors) == 0 {
+		t.Error("expected at least one collected error")
 	}
 }
 
@@ -905,9 +957,12 @@ tags {
 	widget "prod" color="#00ff88"
 }
 `
-	_, err := Parse([]byte(input))
-	if err == nil {
-		t.Fatal("expected error for unknown child node in tags block")
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if !hasErrorContaining(cfg.Errors, "widget") {
+		t.Errorf("Errors = %v, want one mentioning unknown child", cfg.Errors)
 	}
 }
 
@@ -958,8 +1013,84 @@ tags {
 	tag "prod" color=""
 }
 `
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if _, ok := cfg.Tags["prod"]; ok {
+		t.Error("tag with empty color should be skipped, but was added")
+	}
+	if !hasErrorContaining(cfg.Errors, "color") {
+		t.Errorf("Errors = %v, want one mentioning empty color", cfg.Errors)
+	}
+}
+
+func hasErrorContaining(errs []string, sub string) bool {
+	for _, e := range errs {
+		if strings.Contains(e, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestParseCollectsMultipleErrors(t *testing.T) {
+	input := `
+listen ":8080"
+
+upstream "good" {
+	type "http"
+	address "proxy:3128"
+}
+
+upstream "badtype" {
+	type "ftp"
+	address "x:21"
+}
+
+route ".ok.com" via="good"
+route ".bad.com" via="missing"
+route ".half.com" via="good" fallback="missing"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect errors, got: %v", err)
+	}
+
+	// One good upstream remains.
+	if _, ok := cfg.Upstreams["good"]; !ok {
+		t.Error("good upstream missing")
+	}
+	if _, ok := cfg.Upstreams["badtype"]; ok {
+		t.Error("badtype upstream should be skipped")
+	}
+
+	// Two routes survive: the good one and the half-broken one (fallback cleared).
+	if len(cfg.Routes) != 2 {
+		t.Fatalf("got %d routes, want 2 (the bad-via one is dropped)", len(cfg.Routes))
+	}
+	for _, r := range cfg.Routes {
+		if r.Pattern == ".half.com" && r.Fallback != "" {
+			t.Errorf(".half.com fallback should be cleared, got %q", r.Fallback)
+		}
+	}
+
+	// At least three errors collected: bad upstream type, bad via, bad fallback.
+	if len(cfg.Errors) < 3 {
+		t.Errorf("got %d collected errors, want at least 3: %v", len(cfg.Errors), cfg.Errors)
+	}
+}
+
+func TestParseFatalOnKDLSyntaxError(t *testing.T) {
+	// Unclosed brace — KDL parse should fail and we return a real error.
+	input := `
+listen ":8080"
+upstream "x" {
+	type "http"
+	address "y:1"
+`
 	_, err := Parse([]byte(input))
 	if err == nil {
-		t.Fatal("expected error for empty color")
+		t.Fatal("expected fatal error for KDL syntax error")
 	}
 }
