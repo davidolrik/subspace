@@ -81,6 +81,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			pageInfos := loadPages(cfg)
 			pagesHandler := pages.New(pageInfos, srv.Stats, statsStore)
 			pagesHandler.SetTags(tagDefs(cfg))
+			pagesHandler.SetSearchEngines(engineDefs(cfg), cfg.DefaultSearchEngine)
 			cfg.Errors = append(cfg.Errors, pagesHandler.ValidateTagReferences()...)
 			srv.Pages = pagesHandler
 
@@ -367,6 +368,7 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 		pageInfos := loadPages(newCfg)
 		pagesHandler.ReloadPages(pageInfos)
 		pagesHandler.SetTags(tagDefs(newCfg))
+		pagesHandler.SetSearchEngines(engineDefs(newCfg), newCfg.DefaultSearchEngine)
 		newCfg.Errors = append(newCfg.Errors, pagesHandler.ValidateTagReferences()...)
 	}
 
@@ -414,6 +416,22 @@ func tagDefs(cfg *config.Config) map[string]pages.TagDef {
 	out := make(map[string]pages.TagDef, len(cfg.Tags))
 	for name, t := range cfg.Tags {
 		out[name] = pages.TagDef{Name: t.Name, Alias: t.Alias, Color: t.Color}
+	}
+	return out
+}
+
+// engineDefs converts the parsed external search engines into the form
+// the pages handler exposes to the frontend search palette.
+func engineDefs(cfg *config.Config) map[string]pages.SearchEngineDef {
+	out := make(map[string]pages.SearchEngineDef, len(cfg.SearchEngines))
+	for name, e := range cfg.SearchEngines {
+		out[name] = pages.SearchEngineDef{
+			Name:        e.Name,
+			Alias:       e.Alias,
+			URL:         e.URL,
+			Icon:        e.Icon,
+			Description: e.Description,
+		}
 	}
 	return out
 }

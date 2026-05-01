@@ -41,6 +41,21 @@ type Page struct {
 	Alias string // optional alias page name
 }
 
+// SearchEngine is a globally defined external search target that the
+// pages dashboard search palette can route queries to. The Name is the
+// primary keyword used to invoke the engine (e.g. typing "google foo"
+// searches Google for "foo"); Alias provides an optional second
+// keyword for the same engine. URL must contain the literal substring
+// "{query}", which is replaced with the URL-encoded query at navigation
+// time.
+type SearchEngine struct {
+	Name        string
+	Alias       string
+	URL         string
+	Icon        string
+	Description string
+}
+
 // Tag is a globally defined label that pages may attach to links and
 // list sections. Each tag has its own color and is rendered as a small
 // pill in the page UI. The Name is the unique reference key used in
@@ -61,6 +76,13 @@ type Config struct {
 	Upstreams     map[string]Upstream
 	Routes        []Route
 	Tags          map[string]Tag
+	// SearchEngines maps engine name → definition. The DefaultSearchEngine
+	// (if set) names the engine used for the no-match fallback row in the
+	// pages dashboard search palette and must reference an entry in this
+	// map; an unknown reference is downgraded to a non-fatal error during
+	// finalize and the field is cleared.
+	SearchEngines       map[string]SearchEngine
+	DefaultSearchEngine string
 	IncludedFiles []string // absolute paths of all files parsed (main + includes)
 	// Errors holds non-fatal config problems collected during parsing
 	// and finalization (e.g. a route that refers to an unknown
@@ -87,8 +109,9 @@ func ParseFile(path string) (*Config, error) {
 
 	p := &parser{
 		cfg: &Config{
-			Upstreams: make(map[string]Upstream),
-			Tags:      make(map[string]Tag),
+			Upstreams:     make(map[string]Upstream),
+			Tags:          make(map[string]Tag),
+			SearchEngines: make(map[string]SearchEngine),
 		},
 		seen: make(map[string]bool),
 	}
@@ -105,8 +128,9 @@ func ParseFile(path string) (*Config, error) {
 func Parse(data []byte) (*Config, error) {
 	p := &parser{
 		cfg: &Config{
-			Upstreams: make(map[string]Upstream),
-			Tags:      make(map[string]Tag),
+			Upstreams:     make(map[string]Upstream),
+			Tags:          make(map[string]Tag),
+			SearchEngines: make(map[string]SearchEngine),
 		},
 		seen:         make(map[string]bool),
 		noIncludes:   true,
@@ -206,6 +230,12 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 				p.collect(currentFile, msg)
 			}
 
+		case "search-engines":
+			engineErrs := parseSearchEnginesBlock(node, p.cfg.SearchEngines, &p.cfg.DefaultSearchEngine)
+			for _, msg := range engineErrs {
+				p.collect(currentFile, msg)
+			}
+
 		case "include":
 			// Includes still propagate fatal errors (missing file,
 			// circular reference, glob errors). Per-item problems
@@ -302,6 +332,18 @@ func (p *parser) finalize() (*Config, error) {
 		kept = append(kept, r)
 	}
 	cfg.Routes = kept
+
+	// Validate the configured default search engine resolves to one of
+	// the parsed engines. An unknown reference is downgraded to a
+	// non-fatal error and the field is cleared so the pages search
+	// palette simply renders no fallback row instead of pointing at
+	// nothing.
+	if cfg.DefaultSearchEngine != "" {
+		if _, ok := cfg.SearchEngines[cfg.DefaultSearchEngine]; !ok {
+			cfg.Errors = append(cfg.Errors, fmt.Sprintf("search-engines: default %q does not match any configured engine (default cleared)", cfg.DefaultSearchEngine))
+			cfg.DefaultSearchEngine = ""
+		}
+	}
 
 	return cfg, nil
 }
@@ -450,6 +492,86 @@ func parseTagsBlock(node *document.Node, tags map[string]Tag) []string {
 		}
 
 		tags[name] = Tag{Name: name, Alias: alias, Color: color}
+	}
+	return errs
+}
+
+// parseSearchEnginesBlock walks the children of a `search-engines { ... }`
+// node and adds each successfully parsed engine to the supplied map.
+// Engine names are stored under their lowercase form so duplicate
+// detection and the default-engine cross-reference are case-insensitive,
+// while the original casing is preserved on the SearchEngine.Name field
+// for display in the search palette. The block-level `default=`
+// property names the engine used as the no-match fallback; it is
+// recorded in *defaultName (lowercased) and validated later in
+// finalize. Per-child errors are returned as a slice so the caller
+// can collect them; the bad engine is skipped and parsing continues.
+func parseSearchEnginesBlock(node *document.Node, engines map[string]SearchEngine, defaultName *string) []string {
+	var errs []string
+
+	if defVal, ok := node.Properties.Get("default"); ok && defVal != nil {
+		if v := defVal.ValueString(); v != "" {
+			*defaultName = strings.ToLower(v)
+		}
+	}
+
+	for _, child := range node.Children {
+		if child.Name.ValueString() != "engine" {
+			errs = append(errs, fmt.Sprintf("search-engines block: unknown node %q", child.Name.ValueString()))
+			continue
+		}
+		if len(child.Arguments) < 1 {
+			errs = append(errs, "engine requires a name argument")
+			continue
+		}
+		name := child.Arguments[0].ValueString()
+		if name == "" {
+			errs = append(errs, "engine requires a non-empty name")
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, exists := engines[key]; exists {
+			errs = append(errs, fmt.Sprintf("duplicate engine name %q", name))
+			continue
+		}
+
+		urlVal, ok := child.Properties.Get("url")
+		if !ok || urlVal == nil {
+			errs = append(errs, fmt.Sprintf("engine %q requires url property", name))
+			continue
+		}
+		urlStr := urlVal.ValueString()
+		if urlStr == "" {
+			errs = append(errs, fmt.Sprintf("engine %q requires non-empty url property", name))
+			continue
+		}
+		if !strings.Contains(urlStr, "{query}") {
+			errs = append(errs, fmt.Sprintf("engine %q url must contain {query} placeholder", name))
+			continue
+		}
+
+		var alias string
+		if aliasVal, ok := child.Properties.Get("alias"); ok && aliasVal != nil {
+			alias = aliasVal.ValueString()
+		}
+
+		var icon string
+		if iconVal, ok := child.Properties.Get("icon"); ok && iconVal != nil {
+			icon = iconVal.ValueString()
+		}
+
+		var description string
+		if descVal, ok := child.Properties.Get("description"); ok && descVal != nil {
+			description = descVal.ValueString()
+		}
+
+		engines[key] = SearchEngine{
+			Name:        name,
+			Alias:       alias,
+			URL:         urlStr,
+			Icon:        icon,
+			Description: description,
+		}
 	}
 	return errs
 }

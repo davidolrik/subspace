@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,6 +53,24 @@ type TagDef struct {
 	Color string `json:"Color"`
 }
 
+// SearchEngineDef is a single external search engine exposed to the
+// frontend search palette. The dashboard uses Name (and optional Alias)
+// as the inline keyword, and substitutes the user's query into URL by
+// replacing the literal "{query}" placeholder.
+type SearchEngineDef struct {
+	Name        string `json:"name"`
+	Alias       string `json:"alias,omitempty"`
+	URL         string `json:"url"`
+	Icon        string `json:"icon,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// searchEnginesResponse is the JSON shape returned by /api/search-engines.
+type searchEnginesResponse struct {
+	Engines []SearchEngineDef `json:"engines"`
+	Default string            `json:"default,omitempty"`
+}
+
 // linksResponse is the JSON shape returned by the /api/links endpoint.
 // It embeds the page configuration and adds the tag color map so the
 // frontend can render tag pills without a second round-trip.
@@ -93,6 +112,11 @@ type Handler struct {
 	store       *stats.Store
 	status      StatusProvider
 	tags        map[string]TagDef
+	// searchEngines maps engine name → definition, exposed to the
+	// frontend search palette via /api/search-engines.
+	// defaultEngine names the engine to use as the no-match fallback row.
+	searchEngines map[string]SearchEngineDef
+	defaultEngine string
 	// configErrors is the list of non-fatal config problems surfaced
 	// in the internal-pages banner. It's overwritten by
 	// SetConfigErrors after each successful (re)load.
@@ -103,6 +127,12 @@ type Handler struct {
 	// to what's on disk. Cleared by SetConfigErrors on a successful
 	// reload.
 	reloadError string
+	// configVersion increments on every successful (re)load. The
+	// frontend polls /api/config-errors, records this value on first
+	// fetch, and triggers a hard reload when it changes — so an
+	// operator editing the config doesn't need to remember to refresh
+	// each open dashboard tab.
+	configVersion uint64
 }
 
 // New creates a pages handler. The collector is used for live stats
@@ -136,6 +166,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 				prefix := "/" + name
 				mux.HandleFunc(host+prefix+"/api/links", h.handleLinksAPI)
 				mux.HandleFunc(host+prefix+"/api/all-links", h.handleAllLinksAPI)
+				mux.HandleFunc(host+prefix+"/api/search-engines", h.handleSearchEnginesAPI)
 				mux.HandleFunc(host+prefix+"/api/nav", h.handleNavAPI)
 				mux.HandleFunc(host+prefix+"/api/config-errors", h.handleConfigErrorsAPI)
 				mux.Handle(host+prefix+"/static/", http.StripPrefix(prefix+"/static/", fileServer))
@@ -167,6 +198,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		mux.HandleFunc(host+"/api/snapshot", h.handleSnapshotAPI)
 		mux.HandleFunc(host+"/api/status", h.handleStatusAPI)
 		mux.HandleFunc(host+"/api/all-links", h.handleAllLinksAPI)
+		mux.HandleFunc(host+"/api/search-engines", h.handleSearchEnginesAPI)
 		mux.HandleFunc(host+"/api/nav", h.handleNavAPI)
 		mux.HandleFunc(host+"/api/config-errors", h.handleConfigErrorsAPI)
 		mux.Handle(host+"/static/", http.StripPrefix("/static/", fileServer))
@@ -197,15 +229,28 @@ func (h *Handler) SetTags(tags map[string]TagDef) {
 	h.mu.Unlock()
 }
 
+// SetSearchEngines installs the configured external search engines
+// surfaced by the dashboard search palette via /api/search-engines.
+// The defaultName parameter is the engine the frontend renders as the
+// no-match fallback row; pass "" to disable the fallback.
+func (h *Handler) SetSearchEngines(engines map[string]SearchEngineDef, defaultName string) {
+	h.mu.Lock()
+	h.searchEngines = engines
+	h.defaultEngine = defaultName
+	h.mu.Unlock()
+}
+
 // SetConfigErrors replaces the list of non-fatal config errors that
 // the internal-pages banner displays. Call after each successful
 // (re)load with the freshly-collected errors. Passing nil or an
 // empty slice clears the banner. A successful reload also clears
-// any prior reload-failure notice.
+// any prior reload-failure notice and bumps the config version that
+// /api/config-errors reports so open dashboards force-reload.
 func (h *Handler) SetConfigErrors(errs []string) {
 	h.mu.Lock()
 	h.configErrors = append([]string(nil), errs...)
 	h.reloadError = ""
+	h.configVersion++
 	h.mu.Unlock()
 }
 
@@ -423,7 +468,8 @@ func (h *Handler) handleNavAPI(w http.ResponseWriter, r *http.Request) {
 
 // configErrorsResponse is the JSON shape returned by /api/config-errors.
 type configErrorsResponse struct {
-	Errors []string `json:"errors"`
+	Errors  []string `json:"errors"`
+	Version uint64   `json:"version"`
 }
 
 func (h *Handler) handleConfigErrorsAPI(w http.ResponseWriter, r *http.Request) {
@@ -433,10 +479,28 @@ func (h *Handler) handleConfigErrorsAPI(w http.ResponseWriter, r *http.Request) 
 		combined = append(combined, h.reloadError)
 	}
 	combined = append(combined, h.configErrors...)
+	version := h.configVersion
 	h.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(configErrorsResponse{Errors: combined})
+	json.NewEncoder(w).Encode(configErrorsResponse{Errors: combined, Version: version})
+}
+
+func (h *Handler) handleSearchEnginesAPI(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	engines := make([]SearchEngineDef, 0, len(h.searchEngines))
+	for _, e := range h.searchEngines {
+		engines = append(engines, e)
+	}
+	defaultEngine := h.defaultEngine
+	h.mu.RUnlock()
+
+	// Stable order so the frontend can render engines deterministically
+	// in the no-match fallback list and so tests aren't flaky.
+	sort.Slice(engines, func(i, j int) bool { return engines[i].Name < engines[j].Name })
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(searchEnginesResponse{Engines: engines, Default: defaultEngine})
 }
 
 func (h *Handler) handleAllLinksAPI(w http.ResponseWriter, r *http.Request) {

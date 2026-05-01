@@ -97,7 +97,7 @@
     <!-- Search popup -->
     <template x-if="open">
         <div class="search-backdrop" @click.self="hide()">
-            <div class="search-dialog" @keydown="onKeydown($event)">
+            <div class="search-dialog" :class="{ flashing }" @keydown="onKeydown($event)">
                 <div class="search-input-wrap">
                     <i class="fa-solid fa-magnifying-glass search-icon"></i>
                     <input
@@ -111,13 +111,13 @@
                     <kbd>esc</kbd>
                 </div>
                 <div class="search-results" x-ref="searchResults">
-                    <template x-for="(item, idx) in filteredResults()" :key="item.type + ':' + item.url">
-                        <a :href="item.url"
+                    <template x-for="(item, idx) in filteredResults()" :key="item.type + ':' + (item.url || item.label)">
+                        <a :href="resultURL(item)"
                            class="search-result"
-                           :class="{ selected: idx === selectedIndex }"
+                           :class="{ selected: idx === selectedIndex, engine: item.type === 'engine' || item.type === 'engine-prefix' }"
                            @mouseenter="selectedIndex = idx"
-                           @click.prevent="navigate(item.url)">
-                            <i :class="iconClass(item.icon)"
+                           @click.prevent="navigate(item)">
+                            <i :class="iconClass(item.icon, item.type)"
                                class="search-result-icon"></i>
                             <div class="search-result-text">
                                 <div class="search-result-label" x-text="item.label"></div>
@@ -133,11 +133,14 @@
                         No results
                     </div>
                 </div>
+                <div class="search-footer">
+                    <kbd>tab</kbd> autocomplete <span>·</span> <kbd>&crarr;</kbd> open <span>·</span> <kbd>esc</kbd> close
+                </div>
             </div>
         </div>
     </template>
 
-    <script src="static/search.js"></script>
+    <script type="module" src="static/search.js"></script>
     <script src="static/alpine.min.js" defer></script>
     <script>
         document.addEventListener('alpine:init', () => {

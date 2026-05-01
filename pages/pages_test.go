@@ -411,6 +411,39 @@ func TestConfigErrorsAPIClearsReloadFailureOnSuccess(t *testing.T) {
 	}
 }
 
+func TestConfigErrorsAPIVersionIncrements(t *testing.T) {
+	h := New(nil, nil, nil)
+
+	fetch := func() uint64 {
+		req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/config-errors", nil)
+		rec := httptest.NewRecorder()
+		h.handleConfigErrorsAPI(rec, req)
+		var resp struct {
+			Version uint64 `json:"version"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp.Version
+	}
+
+	if v := fetch(); v != 0 {
+		t.Errorf("initial version = %d, want 0", v)
+	}
+
+	h.SetConfigErrors(nil)
+	v1 := fetch()
+	if v1 != 1 {
+		t.Errorf("after first SetConfigErrors version = %d, want 1", v1)
+	}
+
+	h.SetConfigErrors([]string{"some problem"})
+	v2 := fetch()
+	if v2 != 2 {
+		t.Errorf("after second SetConfigErrors version = %d, want 2", v2)
+	}
+}
+
 func TestHandleLinksAPIIncludesTags(t *testing.T) {
 	pageInfos := []PageInfo{
 		{
@@ -462,6 +495,113 @@ func TestHandleLinksAPIIncludesTags(t *testing.T) {
 	}
 	if prod.Color != "#00ff88" {
 		t.Errorf("prod.Color = %q, want %q", prod.Color, "#00ff88")
+	}
+}
+
+func TestHandleSearchEnginesAPI(t *testing.T) {
+	pages := []PageInfo{
+		{Name: "dev", Page: &PageConfig{Title: "Development"}},
+	}
+	h := New(pages, nil, nil)
+
+	h.SetSearchEngines(map[string]SearchEngineDef{
+		"google":   {Name: "google", Alias: "g", URL: "https://www.google.com/search?q={query}", Icon: "si-google"},
+		"metacpan": {Name: "metacpan", Alias: "cpan", URL: "https://metacpan.org/search?q={query}"},
+	}, "google")
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search-engines", nil)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var resp searchEnginesResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+
+	if resp.Default != "google" {
+		t.Errorf("default = %q, want %q", resp.Default, "google")
+	}
+	if len(resp.Engines) != 2 {
+		t.Fatalf("got %d engines, want 2", len(resp.Engines))
+	}
+
+	byName := map[string]SearchEngineDef{}
+	for _, e := range resp.Engines {
+		byName[e.Name] = e
+	}
+	g, ok := byName["google"]
+	if !ok {
+		t.Fatal("missing google in response")
+	}
+	if g.Alias != "g" {
+		t.Errorf("google.Alias = %q, want %q", g.Alias, "g")
+	}
+	if g.URL != "https://www.google.com/search?q={query}" {
+		t.Errorf("google.URL = %q, want templated URL", g.URL)
+	}
+	if g.Icon != "si-google" {
+		t.Errorf("google.Icon = %q, want %q", g.Icon, "si-google")
+	}
+}
+
+func TestSearchEnginesAPIHotReload(t *testing.T) {
+	pages := []PageInfo{
+		{Name: "dev", Page: &PageConfig{Title: "Development"}},
+	}
+	h := New(pages, nil, nil)
+
+	h.SetSearchEngines(map[string]SearchEngineDef{
+		"google": {Name: "google", URL: "https://www.google.com/search?q={query}"},
+	}, "google")
+
+	h.SetSearchEngines(map[string]SearchEngineDef{
+		"ddg": {Name: "ddg", URL: "https://duckduckgo.com/?q={query}"},
+	}, "ddg")
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search-engines", nil)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+
+	var resp searchEnginesResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+
+	if resp.Default != "ddg" {
+		t.Errorf("default = %q, want %q", resp.Default, "ddg")
+	}
+	if len(resp.Engines) != 1 || resp.Engines[0].Name != "ddg" {
+		t.Errorf("engines = %+v, want only ddg", resp.Engines)
+	}
+}
+
+func TestSearchEnginesAPIEmpty(t *testing.T) {
+	pages := []PageInfo{
+		{Name: "dev", Page: &PageConfig{Title: "Development"}},
+	}
+	h := New(pages, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search-engines", nil)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp searchEnginesResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if resp.Default != "" {
+		t.Errorf("default = %q, want empty", resp.Default)
+	}
+	if len(resp.Engines) != 0 {
+		t.Errorf("engines = %+v, want empty", resp.Engines)
 	}
 }
 

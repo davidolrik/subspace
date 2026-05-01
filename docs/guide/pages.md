@@ -121,7 +121,7 @@ The currently active page is highlighted in the menu.
 
 ## Search
 
-Press `/` on any internal page to open the search popup. Search works across all pages, not just the one you're currently viewing.
+Press `/` on any internal page to open the search popup. Search works across all pages, not just the one you're currently viewing, and can route queries through external search engines you configure.
 
 ### What is searched
 
@@ -131,26 +131,93 @@ The search matches against:
 - **Page names** — the primary name and alias
 - **Link names** — the name of every link across all pages
 - **Link descriptions** — the `description` property of links
+- **Engine keywords** — names and aliases of any [search engines](#search-engines) you've configured
 
 ### Result ordering
 
-Results are split into two groups, with pages always appearing before links:
+Results appear in this order:
 
-1. **Pages** — matching pages, statistics, documentation, and GitHub links
-2. **Links** — matching links from any page, shown with their page and section as context
+1. **Engine row** — when the first token of your query matches an engine name or alias exactly (e.g. `cpan ojo`), a row at the top routes the rest of the query through that engine.
+2. **Engine prefix rows** — while you're still typing the first token, every engine whose name or alias starts with what you've typed appears as a candidate, so Tab can autocomplete the keyword.
+3. **Pages** — matching pages, statistics, documentation, and GitHub links.
+4. **Links** — matching links from any page, shown with their page and section as context.
+5. **Default-engine fallback** — when nothing else matched and a [default engine](#default-engine) is configured, a single row routes your full query through it.
 
-Within each group, prefix matches rank higher than substring matches. For example, typing `s` shows "Statistics" before "Dashboard" (which contains an `s` but not at the start).
+Within each group, prefix matches rank higher than substring matches. For example, typing `s` shows "Statistics" before "Dashboard" (which contains an `s` but not at the start). Engine name/alias matching is case-insensitive — `MetaCPAN`, `metacpan`, and `MetaCpan` all resolve to the same engine, while the original casing is preserved on the engine row label.
+
+### Tab autocomplete
+
+Press `Tab` to extend your input to the longest unambiguous prefix of the visible candidates — like shell tab completion:
+
+- One candidate → completes to the full label (or full engine name with a trailing space, ready for the query).
+- Multiple candidates with a shared prefix → input extends to that shared prefix and you keep typing.
+- Nothing more to extend (current input is already the longest common prefix) → the modal border flashes purple to signal "type more".
+
+Only labels that themselves extend what you typed are considered. Rows that surfaced via secondary fields (e.g. a link returned because its page name matched) don't block completion.
 
 ### Keyboard shortcuts
 
-| Key                       | Action                |
-| ------------------------- | --------------------- |
-| `/`                       | Open search           |
-| `Escape`                  | Close search          |
-| `Arrow Up` / `Arrow Down` | Navigate results      |
-| `Enter`                   | Go to selected result |
+| Key                       | Action                                                  |
+| ------------------------- | ------------------------------------------------------- |
+| `/`                       | Open search                                             |
+| `Escape`                  | Close search                                            |
+| `Arrow Up` / `Arrow Down` | Navigate results                                        |
+| `Tab`                     | Autocomplete to the longest unambiguous shared prefix   |
+| `Enter`                   | Go to selected result (or expand keyword on a prefix row) |
 
 You can also click any result or click outside the popup to close it.
+
+## Search Engines
+
+External search engines let you route queries from the `/` palette to sites like Google, Metacpan, GitHub, urlscan, etc. — without leaving the palette. Engines are declared in your main config alongside `tags { ... }`:
+
+```kdl
+search-engines default="google" {
+    engine "google"   url="https://www.google.com/search?q={query}"        icon="si-google"     alias="g"
+    engine "metacpan" url="https://metacpan.org/search?q={query}"          icon="fa-cube"       alias="cpan"
+    engine "github"   url="https://github.com/search?q={query}&type=code"  icon="si-github"     alias="gh"
+    engine "urlscan"  url="https://urlscan.io/search/?q={query}"           icon="si-urlscan"
+    engine "ddg"      url="https://duckduckgo.com/?q={query}"              icon="si-duckduckgo"
+}
+```
+
+### Engine fields
+
+| Field         | Required | Description                                                                                                                                              |
+| ------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| name          | yes      | Positional argument. The primary keyword used to invoke the engine. Must be unique (case-insensitive — `Google` and `google` collide).                  |
+| `url`         | yes      | Engine URL template. **Must contain the literal `{query}` placeholder.** Every occurrence is replaced with the URL-encoded query at navigation time.    |
+| `alias`       | no       | Additional keyword that triggers the same engine. Useful for short forms like `g` for `google` or `cpan` for `metacpan`.                                |
+| `icon`        | no       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. When omitted, a magnifier icon is used.                                                     |
+| `description` | no       | Currently parsed but not displayed.                                                                                                                      |
+
+### Default engine
+
+The block-level `default=` property names the engine used as the no-match fallback row. When your query matches no page, link, or engine keyword, a single row at the bottom of the results offers to route the full query through the default engine. Without a `default=`, queries with no matches simply produce empty results.
+
+The default reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared (you'll see it in the config error banner).
+
+### URL placeholder
+
+The `{query}` placeholder is replaced with `encodeURIComponent(query)`, so spaces and special characters are URL-safe. The placeholder may appear multiple times in a single template — all occurrences are replaced with the same encoded value:
+
+```kdl
+engine "urlscan" url="https://urlscan.io/search/?q={query}#{query}"
+```
+
+If the URL is missing `{query}` entirely, the engine is rejected with a config error.
+
+### Hot reload
+
+Search engines hot-reload like the rest of the config — edit your KDL, save, and every open dashboard tab automatically reloads within a few seconds (the dashboard polls a config-version counter on the `/api/config-errors` endpoint and refreshes when it changes).
+
+### Examples
+
+Type `cpan ojo` → top row "Search metacpan for "ojo"", press `Enter` → opens `https://metacpan.org/search?q=ojo`.
+
+Type `cp` → engine-prefix row for `metacpan` appears, press `Tab` → input becomes `metacpan⎵` and you can keep typing the query.
+
+Type `xyzzy-no-such-thing` (with `default="google"`) → fallback row "Search google for "xyzzy-no-such-thing"", press `Enter` → opens Google.
 
 ## Statistics Page
 

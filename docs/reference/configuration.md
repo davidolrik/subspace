@@ -135,6 +135,28 @@ tags {
 
 Tag names must be unique within the block. Aliases may repeat — use this to render multiple distinct tags (each with its own color) under the same display label, e.g. two `services` pills in different colors. Pages that reference an undefined tag fail validation at startup. See [Internal Pages → Tags](/guide/pages#tags) for usage.
 
+### `search-engines`
+
+Defines external search engines that the `/` palette can route queries to. The first token of a query is matched (case-insensitively) against engine names and aliases; on a hit, a top-of-list row routes the rest of the query through the engine.
+
+```kdl
+search-engines default="<name>" {
+  engine "<name>" url="<https://...{query}...>" alias="<keyword>" icon="<icon>" description="<text>"
+}
+```
+
+| Property      | Required | Description                                                                                                                                              |
+| ------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | Yes      | Positional argument. Primary keyword used to invoke the engine. Must be unique (case-insensitive — `Google` and `google` collide).                      |
+| `url`         | Yes      | Engine URL template. **Must contain the literal `{query}` placeholder.** Every occurrence is replaced with `encodeURIComponent(query)` at navigation time. |
+| `alias`       | No       | Additional keyword that triggers the same engine.                                                                                                        |
+| `icon`        | No       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. Falls back to a magnifier icon when omitted.                                                |
+| `description` | No       | Currently parsed but not displayed.                                                                                                                      |
+
+The block-level `default=` property names the engine used as the no-match fallback row in the search palette. The reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared. Without `default=`, queries with no matches produce empty results.
+
+Engine names are stored case-insensitively (so duplicates and the default reference are matched without regard to case), but the original casing is preserved on the search palette row label. Engines hot-reload alongside the rest of the config; open dashboard tabs automatically reload within a few seconds. See [Internal Pages → Search Engines](/guide/pages#search-engines) for usage.
+
 ### `include`
 
 Includes other KDL config files.

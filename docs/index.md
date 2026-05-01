@@ -31,7 +31,7 @@ features:
     link: /reference/connection-handling#socks5
   - icon: "\U0001F4D1"
     title: Internal Pages
-    details: Built-in link dashboards at pages.subspace.pub and live statistics at stats.subspace.pub. Press / to search across all pages, links, and descriptions.
+    details: Built-in link dashboards at pages.subspace.pub and live statistics at stats.subspace.pub. Press / to search across pages and links, or route queries through configured external search engines.
     link: /guide/pages
   - icon: "\U0001F504"
     title: Hot Reload

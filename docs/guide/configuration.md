@@ -185,6 +185,19 @@ By default, the page name is derived from the filename (minus the `.kdl` extensi
 
 Each page is configured in its own KDL file with links, sections, icons, and optional descriptions. See [Internal Pages](/guide/pages) for the full page file format, search, statistics, and other features.
 
+## Search Engines
+
+The `/` search palette can route queries through external services (Google, Metacpan, GitHub, etc.) by declaring a `search-engines` block:
+
+```kdl
+search-engines default="google" {
+    engine "google"   url="https://www.google.com/search?q={query}" icon="si-google" alias="g"
+    engine "metacpan" url="https://metacpan.org/search?q={query}"   icon="fa-cube"   alias="cpan"
+}
+```
+
+Type `cpan ojo` to search Metacpan, or let any unmatched query fall through to the default engine. See [Internal Pages → Search Engines](/guide/pages#search-engines) for keyword and Tab autocomplete behaviour, and the [`search-engines` reference](/reference/configuration#search-engines) for the full field list.
+
 ## Hot Reload
 
 All config files (main and included) are watched for changes. When any file is modified — or a new file is added to a watched directory — Subspace re-parses the entire config tree, validates it, and applies the new routing if valid.
@@ -219,6 +232,12 @@ include "routes/*.kdl"
 // Internal pages
 page "dev.kdl"
 page "ops.kdl" alias="o"
+
+// External search engines reachable from the `/` palette
+search-engines default="google" {
+    engine "google"   url="https://www.google.com/search?q={query}" icon="si-google" alias="g"
+    engine "metacpan" url="https://metacpan.org/search?q={query}"   icon="fa-cube"   alias="cpan"
+}
 ```
 
 `dev.kdl`:

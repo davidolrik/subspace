@@ -1025,6 +1025,287 @@ tags {
 	}
 }
 
+func TestParseSearchEnginesBlock(t *testing.T) {
+	input := `
+listen ":8080"
+
+search-engines {
+	engine "google"   url="https://www.google.com/search?q={query}" icon="si-google" alias="g"
+	engine "metacpan" url="https://metacpan.org/search?q={query}"   icon="fa-cube"   alias="cpan"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(cfg.SearchEngines) != 2 {
+		t.Fatalf("got %d search engines, want 2", len(cfg.SearchEngines))
+	}
+
+	g, ok := cfg.SearchEngines["google"]
+	if !ok {
+		t.Fatal("missing search engine 'google'")
+	}
+	if g.Name != "google" {
+		t.Errorf("google.Name = %q, want %q", g.Name, "google")
+	}
+	if g.URL != "https://www.google.com/search?q={query}" {
+		t.Errorf("google.URL = %q, want the templated URL", g.URL)
+	}
+	if g.Icon != "si-google" {
+		t.Errorf("google.Icon = %q, want %q", g.Icon, "si-google")
+	}
+	if g.Alias != "g" {
+		t.Errorf("google.Alias = %q, want %q", g.Alias, "g")
+	}
+
+	if cfg.SearchEngines["metacpan"].Alias != "cpan" {
+		t.Errorf("metacpan.Alias = %q, want %q", cfg.SearchEngines["metacpan"].Alias, "cpan")
+	}
+}
+
+func TestParseSearchEnginesDefault(t *testing.T) {
+	input := `
+search-engines default="google" {
+	engine "google" url="https://www.google.com/search?q={query}"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.DefaultSearchEngine != "google" {
+		t.Errorf("DefaultSearchEngine = %q, want %q", cfg.DefaultSearchEngine, "google")
+	}
+}
+
+func TestParseSearchEnginesUnknownDefault(t *testing.T) {
+	input := `
+search-engines default="missing" {
+	engine "google" url="https://www.google.com/search?q={query}"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if cfg.DefaultSearchEngine != "" {
+		t.Errorf("DefaultSearchEngine = %q, want empty after unknown reference", cfg.DefaultSearchEngine)
+	}
+	if !hasErrorContaining(cfg.Errors, "missing") {
+		t.Errorf("Errors = %v, want one mentioning the unknown default", cfg.Errors)
+	}
+}
+
+func TestParseSearchEnginesNoDefault(t *testing.T) {
+	input := `
+search-engines {
+	engine "google" url="https://www.google.com/search?q={query}"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.DefaultSearchEngine != "" {
+		t.Errorf("DefaultSearchEngine = %q, want empty when not configured", cfg.DefaultSearchEngine)
+	}
+	if len(cfg.SearchEngines) != 1 {
+		t.Errorf("got %d search engines, want 1", len(cfg.SearchEngines))
+	}
+}
+
+func TestParseSearchEnginesEmptyBlock(t *testing.T) {
+	input := `
+search-engines {
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(cfg.SearchEngines) != 0 {
+		t.Errorf("got %d search engines, want 0", len(cfg.SearchEngines))
+	}
+}
+
+func TestParseSearchEnginesNoBlock(t *testing.T) {
+	cfg, err := Parse([]byte(`listen ":8080"`))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.SearchEngines == nil {
+		t.Fatal("SearchEngines map should be initialized, got nil")
+	}
+	if len(cfg.SearchEngines) != 0 {
+		t.Errorf("got %d search engines, want 0", len(cfg.SearchEngines))
+	}
+}
+
+func TestParseSearchEnginesDuplicateName(t *testing.T) {
+	input := `
+search-engines {
+	engine "google" url="https://www.google.com/search?q={query}"
+	engine "google" url="https://other.example.com/?q={query}"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	// First definition wins; the duplicate is dropped.
+	if cfg.SearchEngines["google"].URL != "https://www.google.com/search?q={query}" {
+		t.Errorf("google.URL = %q, want first definition kept", cfg.SearchEngines["google"].URL)
+	}
+	if !hasErrorContaining(cfg.Errors, "google") {
+		t.Errorf("Errors = %v, want one mentioning duplicate engine", cfg.Errors)
+	}
+}
+
+func TestParseSearchEnginesMissingURL(t *testing.T) {
+	input := `
+search-engines {
+	engine "google"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if _, ok := cfg.SearchEngines["google"]; ok {
+		t.Error("engine without url should be skipped, but was added")
+	}
+	if !hasErrorContaining(cfg.Errors, "url") {
+		t.Errorf("Errors = %v, want one mentioning missing url", cfg.Errors)
+	}
+}
+
+func TestParseSearchEnginesMissingPlaceholder(t *testing.T) {
+	input := `
+search-engines {
+	engine "google" url="https://www.google.com/search"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if _, ok := cfg.SearchEngines["google"]; ok {
+		t.Error("engine with url missing {query} should be skipped, but was added")
+	}
+	if !hasErrorContaining(cfg.Errors, "{query}") {
+		t.Errorf("Errors = %v, want one mentioning the missing placeholder", cfg.Errors)
+	}
+}
+
+func TestParseSearchEnginesMissingName(t *testing.T) {
+	input := `
+search-engines {
+	engine url="https://www.google.com/search?q={query}"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if len(cfg.Errors) == 0 {
+		t.Error("expected at least one collected error")
+	}
+}
+
+func TestParseSearchEnginesUnknownChild(t *testing.T) {
+	input := `
+search-engines {
+	widget "google" url="https://www.google.com/search?q={query}"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if !hasErrorContaining(cfg.Errors, "widget") {
+		t.Errorf("Errors = %v, want one mentioning unknown child", cfg.Errors)
+	}
+}
+
+func TestParseSearchEnginesPreservesNameCase(t *testing.T) {
+	input := `
+search-engines {
+	engine "MetaCPAN" url="https://metacpan.org/search?q={query}" alias="cpan"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	// Map is keyed by the lowercase name so all lookups are
+	// case-insensitive, but the original casing is preserved on the
+	// Name field for display.
+	e, ok := cfg.SearchEngines["metacpan"]
+	if !ok {
+		t.Fatal("engine not found by lowercase key")
+	}
+	if e.Name != "MetaCPAN" {
+		t.Errorf("Name = %q, want %q (original casing preserved)", e.Name, "MetaCPAN")
+	}
+	if _, ok := cfg.SearchEngines["MetaCPAN"]; ok {
+		t.Error("engine should not be reachable by its original-case key")
+	}
+}
+
+func TestParseSearchEnginesDuplicateNameCaseInsensitive(t *testing.T) {
+	input := `
+search-engines {
+	engine "Google" url="https://www.google.com/search?q={query}"
+	engine "google" url="https://other.example.com/?q={query}"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if len(cfg.SearchEngines) != 1 {
+		t.Errorf("got %d engines, want 1 (second is a case-insensitive duplicate)", len(cfg.SearchEngines))
+	}
+	if cfg.SearchEngines["google"].Name != "Google" {
+		t.Errorf("Name = %q, want first definition kept", cfg.SearchEngines["google"].Name)
+	}
+	if !hasErrorContaining(cfg.Errors, "google") {
+		t.Errorf("Errors = %v, want one mentioning the duplicate", cfg.Errors)
+	}
+}
+
+func TestParseSearchEnginesDefaultCaseInsensitive(t *testing.T) {
+	input := `
+search-engines default="MetaCPAN" {
+	engine "metacpan" url="https://metacpan.org/search?q={query}"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.DefaultSearchEngine != "metacpan" {
+		t.Errorf("DefaultSearchEngine = %q, want %q (lowercased)", cfg.DefaultSearchEngine, "metacpan")
+	}
+}
+
+func TestParseSearchEnginesAliasDefaultsEmpty(t *testing.T) {
+	input := `
+search-engines {
+	engine "google" url="https://www.google.com/search?q={query}"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.SearchEngines["google"].Alias != "" {
+		t.Errorf("google.Alias = %q, want empty when not configured", cfg.SearchEngines["google"].Alias)
+	}
+}
+
 func hasErrorContaining(errs []string, sub string) bool {
 	for _, e := range errs {
 		if strings.Contains(e, sub) {

@@ -286,7 +286,7 @@
     <!-- Search popup -->
     <template x-if="open">
         <div class="search-backdrop" @click.self="hide()">
-            <div class="search-dialog" @keydown="onKeydown($event)">
+            <div class="search-dialog" :class="{ flashing }" @keydown="onKeydown($event)">
                 <div class="search-input-wrap">
                     <i class="fa-solid fa-magnifying-glass search-icon"></i>
                     <input
@@ -326,7 +326,7 @@
         </div>
     </template>
 
-    <script src="/static/search.js"></script>
+    <script type="module" src="/static/search.js"></script>
     <script src="/static/chart.min.js"></script>
     <script src="/static/alpine.min.js" defer></script>
     <script>
