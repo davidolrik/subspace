@@ -1291,6 +1291,33 @@ search-engines default="MetaCPAN" {
 	}
 }
 
+func TestParseSearchEnginesFallbackFlag(t *testing.T) {
+	input := `
+search-engines default="google" {
+	engine "google"   url="https://www.google.com/search?q={query}"
+	engine "kagi"     url="https://kagi.com/search?q={query}"     fallback=#true
+	engine "urlscan"  url="https://urlscan.io/search/?q={query}"
+	engine "explicit" url="https://e.example/?q={query}"          fallback=#false
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if !cfg.SearchEngines["kagi"].Fallback {
+		t.Errorf("kagi.Fallback = false, want true (opted in)")
+	}
+	if cfg.SearchEngines["urlscan"].Fallback {
+		t.Errorf("urlscan.Fallback = true, want false (default for omitted)")
+	}
+	if cfg.SearchEngines["google"].Fallback {
+		t.Errorf("google.Fallback = true, want false (default omitted; default-engine handling is separate)")
+	}
+	if cfg.SearchEngines["explicit"].Fallback {
+		t.Errorf("explicit.Fallback = true, want false (explicit #false)")
+	}
+}
+
 func TestParseSearchEnginesAliasDefaultsEmpty(t *testing.T) {
 	input := `
 search-engines {

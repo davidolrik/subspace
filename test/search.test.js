@@ -231,6 +231,73 @@ describe('buildResults', () => {
         expect(rows[0].description).toBe('General web search');
     });
 
+    it('renders one fallback row per engine with fallback=true plus the default', () => {
+        const richEngines = [
+            { name: 'google',  url: 'https://www.google.com/search?q={query}' },
+            { name: 'kagi',    url: 'https://kagi.com/search?q={query}',       fallback: true },
+            { name: 'urlscan', url: 'https://urlscan.io/search/?q={query}' },
+            { name: 'ddg',     url: 'https://duckduckgo.com/?q={query}',       fallback: true },
+        ];
+        const rows = buildResults({
+            query: 'xyzzy-nonexistent',
+            nav: [],
+            allLinks: [],
+            engines: richEngines,
+            defaultEngine: 'google',
+        });
+        // Expect: default first (google), then opt-ins alphabetically (ddg, kagi).
+        // urlscan is keyword-only — never appears in fallback list.
+        const names = rows.map(r => r.engine.name);
+        expect(names).toEqual(['google', 'ddg', 'kagi']);
+        expect(names).not.toContain('urlscan');
+    });
+
+    it('does not duplicate the default engine when it also has fallback=true', () => {
+        const richEngines = [
+            { name: 'google', url: 'https://www.google.com/search?q={query}', fallback: true },
+            { name: 'kagi',   url: 'https://kagi.com/search?q={query}',       fallback: true },
+        ];
+        const rows = buildResults({
+            query: 'xyzzy',
+            nav: [],
+            allLinks: [],
+            engines: richEngines,
+            defaultEngine: 'google',
+        });
+        const names = rows.map(r => r.engine.name);
+        expect(names).toEqual(['google', 'kagi']);
+    });
+
+    it('renders fallback engines even when no default is configured', () => {
+        const richEngines = [
+            { name: 'kagi', url: 'https://kagi.com/search?q={query}', fallback: true },
+            { name: 'ddg',  url: 'https://duckduckgo.com/?q={query}', fallback: true },
+        ];
+        const rows = buildResults({
+            query: 'xyzzy',
+            nav: [],
+            allLinks: [],
+            engines: richEngines,
+            defaultEngine: '',
+        });
+        const names = rows.map(r => r.engine.name);
+        expect(names).toEqual(['ddg', 'kagi']);
+    });
+
+    it('renders nothing when no default and no fallback engines are configured', () => {
+        const richEngines = [
+            { name: 'urlscan', url: 'https://urlscan.io/search/?q={query}' },
+        ];
+        const rows = buildResults({
+            query: 'xyzzy',
+            nav: [],
+            allLinks: [],
+            engines: richEngines,
+            defaultEngine: '',
+        });
+        expect(rows).toHaveLength(0);
+    });
+
     it('matches the default engine case-insensitively', () => {
         const casedEngines = [
             { name: 'Google', url: 'https://www.google.com/search?q={query}' },
@@ -360,6 +427,17 @@ describe('tabCompleteFrom', () => {
             { type: 'link',  label: 'Home Assistant' },
         ];
         expect(tabCompleteFrom(results, 'das')).toBe('Dashboard');
+    });
+
+    it('does not treat a fallback row as an exact-keyword candidate', () => {
+        // The fallback row exists because nothing matched, not because
+        // the user typed "google" — pressing Tab here should not turn
+        // their query into "google <whatever>". With no other
+        // candidates the function returns null, signalling a flash.
+        const results = [
+            { type: 'engine', engine: { name: 'google' }, query: 'xyzzy', fallback: true },
+        ];
+        expect(tabCompleteFrom(results, 'xyzzy')).toBeNull();
     });
 
     it('preserves keyword expansion when the top result is an exact engine match', () => {

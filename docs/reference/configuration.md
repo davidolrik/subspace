@@ -152,8 +152,9 @@ search-engines default="<name>" {
 | `alias`       | No       | Additional keyword that triggers the same engine.                                                                                                        |
 | `icon`        | No       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. Falls back to a magnifier icon when omitted.                                                |
 | `description` | No       | Short text shown as the third line of the engine's result row in the search palette.                                                                    |
+| `fallback`    | No       | When `#true`, the engine appears in the no-match fallback list alongside the default engine. Defaults to `#false` so engines stay keyword-only.         |
 
-The block-level `default=` property names the engine used as the no-match fallback row in the search palette. The reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared. Without `default=`, queries with no matches produce empty results.
+The block-level `default=` property names the engine shown first in the no-match fallback list. Additional engines appear in the same list when declared with `fallback=#true`, alphabetised by name. Engines without `fallback` (and not the default) stay keyword-only. The default reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared. With no `default=` and no `fallback=#true` engines, queries with no matches produce empty results.
 
 Engine names are stored case-insensitively (so duplicates and the default reference are matched without regard to case), but the original casing is preserved on the search palette row label. Engines hot-reload alongside the rest of the config; open dashboard tabs automatically reload within a few seconds. See [Internal Pages → Search Engines](/guide/pages#search-engines) for usage.
 

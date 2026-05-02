@@ -431,6 +431,7 @@ func engineDefs(cfg *config.Config) map[string]pages.SearchEngineDef {
 			URL:         e.URL,
 			Icon:        e.Icon,
 			Description: e.Description,
+			Fallback:    e.Fallback,
 		}
 	}
 	return out

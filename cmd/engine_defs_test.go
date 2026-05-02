@@ -15,6 +15,7 @@ func TestEngineDefs(t *testing.T) {
 search-engines default="google" {
 	engine "google"   url="https://www.google.com/search?q={query}" icon="si-google" alias="g" description="Web search"
 	engine "metacpan" url="https://metacpan.org/search?q={query}"   alias="cpan"
+	engine "kagi"     url="https://kagi.com/search?q={query}"       fallback=#true
 }
 `
 	cfg, err := config.Parse([]byte(input))
@@ -23,8 +24,14 @@ search-engines default="google" {
 	}
 
 	defs := engineDefs(cfg)
-	if len(defs) != 2 {
-		t.Fatalf("got %d defs, want 2", len(defs))
+	if len(defs) != 3 {
+		t.Fatalf("got %d defs, want 3", len(defs))
+	}
+	if !defs["kagi"].Fallback {
+		t.Error("kagi.Fallback = false, want true (opted into fallback list)")
+	}
+	if defs["metacpan"].Fallback {
+		t.Error("metacpan.Fallback = true, want false (omitted)")
 	}
 
 	g, ok := defs["google"]

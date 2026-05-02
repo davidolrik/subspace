@@ -47,13 +47,17 @@ type Page struct {
 // searches Google for "foo"); Alias provides an optional second
 // keyword for the same engine. URL must contain the literal substring
 // "{query}", which is replaced with the URL-encoded query at navigation
-// time.
+// time. Fallback opts the engine into the no-match fallback list shown
+// when a query has no other matches; the engine pointed at by the
+// block-level default= property is shown in the same list whether or
+// not Fallback is set.
 type SearchEngine struct {
 	Name        string
 	Alias       string
 	URL         string
 	Icon        string
 	Description string
+	Fallback    bool
 }
 
 // Tag is a globally defined label that pages may attach to links and
@@ -565,12 +569,27 @@ func parseSearchEnginesBlock(node *document.Node, engines map[string]SearchEngin
 			description = descVal.ValueString()
 		}
 
+		var fallback bool
+		if fbVal, ok := child.Properties.Get("fallback"); ok && fbVal != nil {
+			// Accept three syntaxes so operators can pick whichever
+			// reads best in their KDL: the v2 keyword form
+			// `fallback=#true`, the bare bool `fallback=true`, and
+			// the quoted string `fallback="true"`.
+			switch v := fbVal.ResolvedValue().(type) {
+			case bool:
+				fallback = v
+			case string:
+				fallback = strings.EqualFold(v, "true") || strings.EqualFold(v, "#true")
+			}
+		}
+
 		engines[key] = SearchEngine{
 			Name:        name,
 			Alias:       alias,
 			URL:         urlStr,
 			Icon:        icon,
 			Description: description,
+			Fallback:    fallback,
 		}
 	}
 	return errs

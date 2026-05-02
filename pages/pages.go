@@ -56,13 +56,15 @@ type TagDef struct {
 // SearchEngineDef is a single external search engine exposed to the
 // frontend search palette. The dashboard uses Name (and optional Alias)
 // as the inline keyword, and substitutes the user's query into URL by
-// replacing the literal "{query}" placeholder.
+// replacing the literal "{query}" placeholder. Fallback opts the
+// engine into the no-match fallback list.
 type SearchEngineDef struct {
 	Name        string `json:"name"`
 	Alias       string `json:"alias,omitempty"`
 	URL         string `json:"url"`
 	Icon        string `json:"icon,omitempty"`
 	Description string `json:"description,omitempty"`
+	Fallback    bool   `json:"fallback,omitempty"`
 }
 
 // searchEnginesResponse is the JSON shape returned by /api/search-engines.

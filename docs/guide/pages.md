@@ -141,7 +141,7 @@ Results appear in this order:
 2. **Engine prefix rows** — while you're still typing the first token, every engine whose name or alias starts with what you've typed appears as a candidate, so Tab can autocomplete the keyword.
 3. **Pages** — matching pages, statistics, documentation, and GitHub links.
 4. **Links** — matching links from any page, shown with their page and section as context.
-5. **Default-engine fallback** — when nothing else matched and a [default engine](#default-engine) is configured, a single row routes your full query through it.
+5. **Fallback engines** — when nothing else matched, a row is rendered for the configured [default engine](#default-engine) plus any engine declared with `fallback=#true`. Engines without `fallback` (and not designated as the default) stay keyword-only and never appear in this list.
 
 Within each group, prefix matches rank higher than substring matches. For example, typing `s` shows "Statistics" before "Dashboard" (which contains an `s` but not at the start). Engine name/alias matching is case-insensitive — `MetaCPAN`, `metacpan`, and `MetaCpan` all resolve to the same engine, while the original casing is preserved on the engine row label.
 
@@ -191,12 +191,24 @@ search-engines default="google" {
 | `alias`       | no       | Additional keyword that triggers the same engine. Useful for short forms like `g` for `google` or `cpan` for `metacpan`.                                |
 | `icon`        | no       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. When omitted, a magnifier icon is used.                                                     |
 | `description` | no       | Short text shown as the third line of the engine's result row, mirroring how link descriptions render on link rows.                                      |
+| `fallback`    | no       | When `#true`, the engine appears in the no-match fallback list alongside the default engine. Defaults to `#false` so niche engines stay keyword-only.    |
 
 ### Default engine
 
-The block-level `default=` property names the engine used as the no-match fallback row. When your query matches no page, link, or engine keyword, a single row at the bottom of the results offers to route the full query through the default engine. Without a `default=`, queries with no matches simply produce empty results.
+The block-level `default=` property names the engine shown first in the no-match fallback list. When your query matches no page, link, or engine keyword, the dashboard renders one row per fallback-eligible engine — the default first (when set), followed by each engine with `fallback=#true`, alphabetised by name. Without a `default=` and no `fallback=#true` engines, queries with no matches simply produce empty results.
 
-The default reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared (you'll see it in the config error banner).
+The default reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared (you'll see it in the config error banner). The default engine is implicitly part of the fallback list, so you don't need to set `fallback=#true` on it.
+
+```kdl
+search-engines default="google" {
+    engine "google"  url="https://www.google.com/search?q={query}"
+    engine "kagi"    url="https://kagi.com/search?q={query}"     fallback=#true
+    engine "ddg"     url="https://duckduckgo.com/?q={query}"     fallback=#true
+    engine "urlscan" url="https://urlscan.io/search/?q={query}"  // keyword-only
+}
+```
+
+With this config, an unknown query like `xyzzy` shows three fallback rows — google (default, first), then ddg and kagi alphabetically. urlscan only fires when you type its keyword.
 
 ### URL placeholder
 

@@ -214,29 +214,58 @@ export function buildResults({ query, nav, allLinks, engines, defaultEngine }) {
 
     out.push(...pages, ...links);
 
-    // Fallback: when nothing surfaced — no exact keyword, no engine
-    // prefix suggestions, no local matches — route the full query
-    // through the configured default engine so the user always has a
-    // destination. Skip this when prefix rows already populated the
-    // list, since those are the discoverability path.
+    // Fallback list: when nothing surfaced — no exact keyword, no
+    // engine prefix suggestions, no local matches — render one row
+    // per fallback-eligible engine so the user always has a
+    // destination. The configured default engine is always included
+    // (and shown first); additional engines opt in via fallback=#true.
+    // Engines that don't opt in stay keyword-only.
     const hasPrefixRows = out.some(r => r.type === 'engine-prefix');
-    if (!keywordMatched && !hasPrefixRows && pages.length === 0 && links.length === 0 && defaultEngine) {
-        const target = defaultEngine.toLowerCase();
-        const def = (engines || []).find(e => e.name.toLowerCase() === target);
-        if (def) {
+    if (!keywordMatched && !hasPrefixRows && pages.length === 0 && links.length === 0) {
+        const fallbackList = collectFallbackEngines(engines || [], defaultEngine);
+        for (const e of fallbackList) {
             out.push({
                 type: 'engine',
-                engine: def,
+                engine: e,
                 query: trimmed,
-                label: 'Search ' + def.name + ' for "' + trimmed + '"',
-                icon: def.icon,
+                label: 'Search ' + e.name + ' for "' + trimmed + '"',
+                icon: e.icon,
                 meta: '',
-                description: def.description,
+                description: e.description,
+                // fallback marker so tabCompleteFrom doesn't treat
+                // these as exact-keyword rows (the user did not type
+                // the engine's name or alias).
+                fallback: true,
             });
         }
     }
 
     return out;
+}
+
+// collectFallbackEngines returns the engines shown in the no-match
+// fallback list, in display order: the configured default first (when
+// it resolves), followed by engines opted in via `fallback=#true`,
+// alphabetised by name. The default is omitted from the alphabetised
+// remainder so it never appears twice.
+export function collectFallbackEngines(engines, defaultEngine) {
+    const list = [];
+    const seen = new Set();
+    let defEngine = null;
+    if (defaultEngine) {
+        const target = defaultEngine.toLowerCase();
+        defEngine = engines.find(e => e.name.toLowerCase() === target) || null;
+    }
+    if (defEngine) {
+        list.push(defEngine);
+        seen.add(defEngine.name.toLowerCase());
+    }
+    const optIns = engines
+        .filter(e => e.fallback && !seen.has(e.name.toLowerCase()))
+        .slice()
+        .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    list.push(...optIns);
+    return list;
 }
 
 // autocompleteFor returns the new input string when the user clicks
@@ -290,8 +319,11 @@ export function tabCompleteFrom(results, currentQuery) {
 
     // Exact-keyword expansion takes precedence so "cpan ojo" Tab still
     // routes to metacpan even when local matches are also present.
+    // Fallback rows are also `type: 'engine'` but the user did not
+    // type the engine's keyword, so they should not be treated as
+    // keyword-expansion candidates.
     const top = results[0];
-    if (top && top.type === 'engine') {
+    if (top && top.type === 'engine' && !top.fallback) {
         const parts = currentQuery.split(/\s+/);
         const tail = parts.slice(1).join(' ');
         return top.engine.name + (tail ? ' ' + tail : ' ');
