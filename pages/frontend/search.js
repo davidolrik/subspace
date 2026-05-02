@@ -431,6 +431,12 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
             // failed so the next render falls back to the magnifier
             // icon instead of showing a broken-image silhouette.
             faviconFailed: {},
+            // helpOpen toggles the keyboard-shortcut legend modal.
+            helpOpen: false,
+            // Expose the keybinding registry to the template so it
+            // can render the legend without duplicating the data.
+            keybindings,
+            keybindingGroups() { return groupBindingsForLegend(keybindings); },
             // nav is injected from the parent component via x-data merge
             nav: [],
 
@@ -571,6 +577,23 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
                 return iconClass(icon, type);
             },
 
+            openHelp() { this.helpOpen = true; },
+            closeHelp() { this.helpOpen = false; },
+            toggleHelp() { this.helpOpen = !this.helpOpen; },
+
+            quickJump(key) {
+                const pages = this.nav.filter(item => item.name && item.name !== 'stats');
+                if (key === '0') {
+                    const stats = this.nav.find(item => item.name === 'stats');
+                    if (stats) window.location.href = stats.url;
+                    return;
+                }
+                const idx = parseInt(key, 10) - 1;
+                if (idx >= 0 && idx < pages.length) {
+                    window.location.href = pages[idx].url;
+                }
+            },
+
             // iconImageURL returns a favicon URL when an engine row has
             // no explicit icon and we haven't already learned the
             // favicon fails to load. The template renders an <img>
@@ -607,29 +630,15 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
             async initSearch() {
                 document.addEventListener('keydown', (e) => {
                     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-                    if (e.key === '/') {
+                    // Help modal swallows Escape (and ?, which toggles
+                    // it off) before the global registry runs so the
+                    // dialog can close cleanly.
+                    if (this.helpOpen && (e.key === 'Escape' || e.key === '?')) {
                         e.preventDefault();
-                        this.show();
+                        this.closeHelp();
                         return;
                     }
-                    // Quick navigation: 1-9 for pages, 0 for statistics
-                    if (e.key >= '0' && e.key <= '9') {
-                        const pages = this.nav.filter(
-                            item => item.name && item.name !== 'stats'
-                        );
-                        if (e.key === '0') {
-                            const stats = this.nav.find(
-                                item => item.name === 'stats'
-                            );
-                            if (stats) window.location.href = stats.url;
-                        } else {
-                            const idx = parseInt(e.key, 10) - 1;
-                            if (idx < pages.length) {
-                                window.location.href = pages[idx].url;
-                            }
-                        }
-                        return;
-                    }
+                    matchGlobal(keybindings, this, e);
                 });
                 try {
                     const [linksResp, enginesResp] = await Promise.all([
@@ -683,6 +692,103 @@ if (typeof window !== 'undefined' && typeof fetch === 'function') {
     const tick = async () => { state = await pollConfigVersion(state, deps); };
     tick();
     setInterval(tick, CONFIG_POLL_INTERVAL_MS);
+}
+
+// Keyboard shortcut registry. Single source of truth for both the
+// global keydown dispatcher and the `?` legend modal — every binding
+// the dashboard advertises lives here. Each entry has:
+//   keys        — display labels (and, for global scope, the actual
+//                 KeyboardEvent.key values to match against).
+//   scope       — 'global' (page-level keydown), 'search' (only
+//                 meaningful while the search modal has focus), or
+//                 'help' (active while the legend is open).
+//   description — one-line copy shown in the legend.
+//   handler     — required for scope='global'; invoked with the
+//                 Alpine search component as `c` and the event.
+export const keybindings = [
+    {
+        keys: ['/'],
+        scope: 'global',
+        description: 'Open the search palette',
+        handler: (c, e) => { e.preventDefault(); c.show(); },
+    },
+    {
+        keys: ['?'],
+        scope: 'global',
+        description: 'Show this keyboard shortcut legend',
+        handler: (c, e) => { e.preventDefault(); c.toggleHelp(); },
+    },
+    {
+        keys: ['0'],
+        scope: 'global',
+        description: 'Jump to the Statistics page',
+        handler: (c) => { c.quickJump('0'); },
+    },
+    {
+        keys: ['1', '2', '3', '4', '5', '6', '7', '8', '9'],
+        scope: 'global',
+        description: 'Jump to the n-th page in the nav menu',
+        handler: (c, e) => { c.quickJump(e.key); },
+    },
+    {
+        keys: ['Esc'],
+        scope: 'search',
+        description: 'Close the search palette',
+    },
+    {
+        keys: ['↑', '↓'],
+        scope: 'search',
+        description: 'Move the selection in the search results',
+    },
+    {
+        keys: ['Tab'],
+        scope: 'search',
+        description: 'Autocomplete to the longest unambiguous prefix; flash if ambiguous',
+    },
+    {
+        keys: ['↵'],
+        scope: 'search',
+        description: 'Open the selected result',
+    },
+    {
+        keys: ['⌘↵', 'Ctrl+↵'],
+        scope: 'search',
+        description: 'Open the selected result in a new tab; modal stays open',
+    },
+    {
+        keys: ['Esc', '?'],
+        scope: 'help',
+        description: 'Close this legend',
+    },
+];
+
+// matchGlobal tries every global binding against the event and, on a
+// hit, dispatches the handler. Returns true when something matched so
+// the caller can stop propagating.
+export function matchGlobal(bindings, c, e) {
+    for (const b of bindings) {
+        if (b.scope !== 'global') continue;
+        if (!b.keys.includes(e.key)) continue;
+        b.handler(c, e);
+        return true;
+    }
+    return false;
+}
+
+// groupBindingsForLegend returns the registry grouped by scope, in the
+// order rendered in the legend modal: global → search → help.
+export function groupBindingsForLegend(bindings) {
+    const order = ['global', 'search', 'help'];
+    const labels = {
+        global: 'Anywhere',
+        search: 'In the search palette',
+        help: 'In this legend',
+    };
+    return order.map(scope => ({
+        scope,
+        label: labels[scope],
+        entries: bindings.filter(b => b.scope === scope),
+    })).filter(g => g.entries.length > 0);
 }
 
 // Theme handling. Saved preference takes precedence over the system

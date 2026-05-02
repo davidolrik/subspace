@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
     matchEngine,
     matchEnginePrefixes,
@@ -14,6 +14,9 @@ import {
     nextTheme,
     parseCookies,
     buildThemeCookie,
+    keybindings,
+    matchGlobal,
+    groupBindingsForLegend,
 } from '../pages/frontend/search.js';
 
 const engines = [
@@ -660,6 +663,98 @@ describe('parseCookies', () => {
     it('skips malformed segments', () => {
         const got = parseCookies('a=1; brokenpair; b=2');
         expect(got).toEqual({ a: '1', b: '2' });
+    });
+});
+
+describe('keybindings registry', () => {
+    it('every entry has at least one key, a scope, and a description', () => {
+        for (const b of keybindings) {
+            expect(Array.isArray(b.keys), 'keys is array').toBe(true);
+            expect(b.keys.length, 'keys non-empty').toBeGreaterThan(0);
+            expect(['global', 'search', 'help']).toContain(b.scope);
+            expect(typeof b.description).toBe('string');
+            expect(b.description.length).toBeGreaterThan(0);
+        }
+    });
+
+    it('every global binding has a callable handler', () => {
+        for (const b of keybindings) {
+            if (b.scope !== 'global') continue;
+            expect(typeof b.handler, `handler for ${b.keys.join(',')}`).toBe('function');
+        }
+    });
+
+    it('advertises the canonical entry points (/ and ?)', () => {
+        const keys = keybindings.flatMap(b => b.keys);
+        expect(keys).toContain('/');
+        expect(keys).toContain('?');
+    });
+});
+
+describe('matchGlobal', () => {
+    it('dispatches the handler whose keys list contains the event key', () => {
+        const calls = [];
+        const fakeBindings = [
+            { keys: ['/'], scope: 'global', description: 'open', handler: (c, e) => calls.push(['slash', c, e]) },
+            { keys: ['?'], scope: 'global', description: 'help', handler: (c, e) => calls.push(['help', c, e]) },
+        ];
+        const c = {};
+        const ok = matchGlobal(fakeBindings, c, { key: '?' });
+        expect(ok).toBe(true);
+        expect(calls).toHaveLength(1);
+        expect(calls[0][0]).toBe('help');
+        expect(calls[0][1]).toBe(c);
+    });
+
+    it('returns false when nothing matches', () => {
+        const fakeBindings = [
+            { keys: ['/'], scope: 'global', description: 'open', handler: () => {} },
+        ];
+        expect(matchGlobal(fakeBindings, {}, { key: 'q' })).toBe(false);
+    });
+
+    it('skips non-global bindings', () => {
+        const handler = vi.fn();
+        const fakeBindings = [
+            { keys: ['Escape'], scope: 'search', description: 'close', handler },
+        ];
+        expect(matchGlobal(fakeBindings, {}, { key: 'Escape' })).toBe(false);
+        expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('routes 1-9 to a single multi-key binding', () => {
+        const calls = [];
+        const fakeBindings = [
+            {
+                keys: ['1', '2', '3', '4', '5', '6', '7', '8', '9'],
+                scope: 'global',
+                description: 'jump',
+                handler: (c, e) => calls.push(e.key),
+            },
+        ];
+        for (const k of ['1', '5', '9']) {
+            matchGlobal(fakeBindings, {}, { key: k });
+        }
+        expect(calls).toEqual(['1', '5', '9']);
+    });
+});
+
+describe('groupBindingsForLegend', () => {
+    it('groups entries by scope in display order', () => {
+        const groups = groupBindingsForLegend(keybindings);
+        const scopes = groups.map(g => g.scope);
+        expect(scopes).toEqual(['global', 'search', 'help']);
+        // Each group has at least one entry.
+        for (const g of groups) {
+            expect(g.entries.length).toBeGreaterThan(0);
+            expect(typeof g.label).toBe('string');
+        }
+    });
+
+    it('omits groups with no entries', () => {
+        const fake = [{ keys: ['/'], scope: 'global', description: 'open', handler: () => {} }];
+        const groups = groupBindingsForLegend(fake);
+        expect(groups.map(g => g.scope)).toEqual(['global']);
     });
 });
 

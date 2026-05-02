@@ -304,6 +304,10 @@
                     </template>
                 </a>
             </template>
+            <button type="button" class="theme-toggle" title="Show keyboard shortcuts (?)"
+                    @click="openHelp()">
+                <i class="fa-solid fa-keyboard"></i>
+            </button>
             <button type="button" class="theme-toggle" title="Toggle light/dark theme"
                     @click="window.subspaceToggleTheme()">
                 <i class="fa-solid fa-sun theme-toggle-light"></i>
@@ -443,6 +447,43 @@
             </div>
         </div>
     </main>
+    <!-- Keyboard shortcut legend -->
+    <template x-if="helpOpen">
+        <div class="search-backdrop" @click.self="closeHelp()">
+            <div class="search-dialog help-dialog">
+                <div class="help-header">
+                    <i class="fa-solid fa-keyboard"></i>
+                    <span>Keyboard shortcuts</span>
+                    <kbd>esc</kbd>
+                </div>
+                <div class="help-body">
+                    <template x-for="group in keybindingGroups()" :key="group.scope">
+                        <section class="help-group">
+                            <h3 x-text="group.label"></h3>
+                            <dl>
+                                <template x-for="(b, idx) in group.entries" :key="group.scope + ':' + idx">
+                                    <div class="help-row">
+                                        <dt>
+                                            <template x-for="(k, ki) in b.keys" :key="ki">
+                                                <span>
+                                                    <kbd x-text="k"></kbd>
+                                                    <template x-if="ki < b.keys.length - 1">
+                                                        <span class="help-or">or</span>
+                                                    </template>
+                                                </span>
+                                            </template>
+                                        </dt>
+                                        <dd x-text="b.description"></dd>
+                                    </div>
+                                </template>
+                            </dl>
+                        </section>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </template>
+
     <!-- Search popup -->
     <template x-if="open">
         <div class="search-backdrop" @click.self="hide()">
