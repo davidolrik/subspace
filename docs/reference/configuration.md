@@ -159,6 +159,22 @@ The block-level `default=` property names the engine shown first in the no-match
 
 Engine names are stored case-insensitively (so duplicates and the default reference are matched without regard to case), but the original casing is preserved on the search palette row label. Engines hot-reload alongside the rest of the config; open dashboard tabs automatically reload within a few seconds. See [Internal Pages → Search Engines](/guide/pages#search-engines) for usage.
 
+### `stats`
+
+Optional block controlling the statistics database. Today only `retention` is recognised:
+
+```kdl
+stats {
+    retention "365d"   // default
+}
+```
+
+| Property    | Required | Description                                                                                                                                                            |
+| ----------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retention` | No       | How long historical samples are kept. Accepts day suffixes (`30d`, `90d`, `365d`) and any [time.ParseDuration](https://pkg.go.dev/time#ParseDuration) form (`168h`, `12h30m`). Use `"forever"` or `"0"` to disable pruning entirely. Defaults to `365d` when the block is absent. |
+
+Pruning runs once per minute alongside downsampling — there's no need to restart the server to apply a new value, just edit the config and save.
+
 ### `include`
 
 Includes other KDL config files.

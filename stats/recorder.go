@@ -9,6 +9,9 @@ import (
 type RecorderConfig struct {
 	SnapshotInterval time.Duration // how often to snapshot (default: 5s)
 	DownsampleRules  []DownsampleRule
+	// Retention controls how long historical data is kept. Zero or
+	// negative disables pruning entirely (data accumulates forever).
+	Retention time.Duration
 }
 
 // DownsampleRule defines when and how to aggregate old data.
@@ -17,7 +20,9 @@ type DownsampleRule struct {
 	Bucket    time.Duration // into buckets of this size
 }
 
-// DefaultRecorderConfig returns the default 5s → 1m → 1h scheme.
+// DefaultRecorderConfig returns the default 5s → 1m → 1h scheme with
+// a 365-day retention window so the historical-charts UI has data to
+// show without unbounded growth.
 func DefaultRecorderConfig() RecorderConfig {
 	return RecorderConfig{
 		SnapshotInterval: 5 * time.Second,
@@ -25,6 +30,7 @@ func DefaultRecorderConfig() RecorderConfig {
 			{OlderThan: time.Hour, Bucket: time.Minute},
 			{OlderThan: 7 * 24 * time.Hour, Bucket: time.Hour},
 		},
+		Retention: 365 * 24 * time.Hour,
 	}
 }
 
@@ -74,6 +80,11 @@ func (r *Recorder) Run() {
 			for _, rule := range r.config.DownsampleRules {
 				if err := r.store.Downsample(rule.OlderThan, rule.Bucket); err != nil {
 					slog.Error("stats downsample failed", "error", err)
+				}
+			}
+			if r.config.Retention > 0 {
+				if err := r.store.Prune(r.config.Retention); err != nil {
+					slog.Error("stats prune failed", "error", err)
 				}
 			}
 		}

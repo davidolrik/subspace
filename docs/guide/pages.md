@@ -257,7 +257,7 @@ The statistics page is always available at `http://stats.subspace.pub/` (or `htt
 - **Traffic by upstream** — stacked bar chart of bytes transferred per upstream
 - **Protocol breakdown** — pie chart of connections by protocol (HTTP, TLS, SOCKS5, CONNECT, WebSocket)
 
-All charts support selectable time ranges from 5 minutes to 365 days. Statistics are persisted to a SQLite database at `~/.config/subspace/stats.db` and retained for one year with automatic downsampling (5s resolution to 1m after 1 hour, 1m to 1h after 7 days).
+All charts support selectable time ranges from 5 minutes to 365 days. Statistics are persisted to a SQLite database at `~/.config/subspace/stats.db` with automatic downsampling (5s resolution to 1m after 1 hour, 1m to 1h after 7 days). Retention defaults to one year; configure it via the [`stats`](/reference/configuration#stats) block — accepts `"30d"`, `"168h"`, `"12h30m"`, etc., or `"forever"` to disable pruning.
 
 The statistics page auto-refreshes every 5 seconds.
 

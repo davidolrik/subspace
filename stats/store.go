@@ -249,6 +249,29 @@ func (s *Store) Query(from, to time.Time) (*TimeSeries, error) {
 	return &TimeSeries{Points: points}, nil
 }
 
+// Prune deletes data points older than the supplied duration from
+// every snapshot table. A non-positive duration is a no-op so callers
+// can wire a "no retention configured" path through without branching.
+func (s *Store) Prune(olderThan time.Duration) error {
+	if olderThan <= 0 {
+		return nil
+	}
+	cutoff := time.Now().Add(-olderThan).Unix()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, table := range []string{"snapshots", "snapshot_protocols", "snapshot_errors", "snapshot_upstreams"} {
+		if _, err := tx.Exec("DELETE FROM "+table+" WHERE timestamp < ?", cutoff); err != nil {
+			return fmt.Errorf("pruning %s: %w", table, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // Downsample aggregates fine-grained data older than `olderThan` into
 // buckets of the given duration. Within each bucket, cumulative counters
 // (connections, success, bytes) keep the max value and gauges (active)

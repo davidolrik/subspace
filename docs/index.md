@@ -39,7 +39,7 @@ features:
     link: /guide/configuration#hot-reload
   - icon: "\U0001F4CA"
     title: Statistics
-    details: Live metrics, upstream health, and historical charts with persistent SQLite storage. Data retained for one year with automatic downsampling.
+    details: Live metrics, upstream health, and historical charts with persistent SQLite storage. Configurable retention (defaults to one year) with automatic downsampling.
     link: /guide/pages#statistics-page
   - icon: "\U0000267B"
     title: Connection Pooling

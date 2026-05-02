@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sblinch/kdl-go"
 	"github.com/sblinch/kdl-go/document"
@@ -93,7 +95,12 @@ type Config struct {
 	// finalize and the field is cleared.
 	SearchEngines       map[string]SearchEngine
 	DefaultSearchEngine string
-	IncludedFiles []string // absolute paths of all files parsed (main + includes)
+	// StatsRetention controls how long the SQLite stats database keeps
+	// historical samples. Zero means "no automatic pruning" (the
+	// configured default in cmd/serve.go applies when the user hasn't
+	// set a value).
+	StatsRetention time.Duration
+	IncludedFiles  []string // absolute paths of all files parsed (main + includes)
 	// Errors holds non-fatal config problems collected during parsing
 	// and finalization (e.g. a route that refers to an unknown
 	// upstream). Subspace skips the offending item and continues so the
@@ -243,6 +250,11 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 		case "search-engines":
 			engineErrs := parseSearchEnginesBlock(node, p.cfg.SearchEngines, &p.cfg.DefaultSearchEngine)
 			for _, msg := range engineErrs {
+				p.collect(currentFile, msg)
+			}
+
+		case "stats":
+			for _, msg := range parseStatsBlock(node, &p.cfg.StatsRetention) {
 				p.collect(currentFile, msg)
 			}
 
@@ -612,6 +624,76 @@ func parseSearchEnginesBlock(node *document.Node, engines map[string]SearchEngin
 		}
 	}
 	return errs
+}
+
+// parseStatsBlock walks `stats { ... }` nodes. Today only `retention`
+// is recognised; unknown children are reported as non-fatal errors
+// so we can grow the block without breaking older configs.
+func parseStatsBlock(node *document.Node, retention *time.Duration) []string {
+	var errs []string
+	for _, child := range node.Children {
+		switch child.Name.ValueString() {
+		case "retention":
+			if len(child.Arguments) < 1 {
+				errs = append(errs, "stats retention requires a duration argument")
+				continue
+			}
+			val := child.Arguments[0].ValueString()
+			d, err := parseRetentionDuration(val)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("stats retention %q: %v", val, err))
+				continue
+			}
+			*retention = d
+		default:
+			errs = append(errs, fmt.Sprintf("stats block: unknown node %q", child.Name.ValueString()))
+		}
+	}
+	return errs
+}
+
+// RetentionForever is the sentinel value the parser writes when the
+// operator explicitly opts out of stats pruning ("forever" or "0").
+// Distinguishing this from a zero-valued (i.e. "not configured")
+// field lets cmd/serve.go apply its own default when the user hasn't
+// specified anything, while still honouring an explicit "keep
+// everything" request.
+const RetentionForever = time.Duration(-1)
+
+// parseRetentionDuration extends time.ParseDuration with day suffixes
+// ("30d") and the explicit sentinels "forever" / "0" for "never
+// prune" — both return RetentionForever. Anything else delegates to
+// time.ParseDuration so the standard "12h30m" / "168h" forms keep
+// working.
+func parseRetentionDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "forever" || s == "0" {
+		return RetentionForever, nil
+	}
+	if strings.HasSuffix(s, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err != nil {
+			return 0, fmt.Errorf("invalid day count: %s", strings.TrimSuffix(s, "d"))
+		}
+		if n < 0 {
+			return 0, fmt.Errorf("retention must be non-negative")
+		}
+		if n == 0 {
+			return RetentionForever, nil
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, err
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("retention must be non-negative")
+	}
+	if d == 0 {
+		return RetentionForever, nil
+	}
+	return d, nil
 }
 
 func parseRoute(node *document.Node) (Route, error) {

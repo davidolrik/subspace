@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testConfig = `
@@ -1315,6 +1316,77 @@ search-engines default="google" {
 	}
 	if cfg.SearchEngines["explicit"].Fallback {
 		t.Errorf("explicit.Fallback = true, want false (explicit #false)")
+	}
+}
+
+func TestParseStatsRetentionDays(t *testing.T) {
+	cfg, err := Parse([]byte("stats {\nretention \"30d\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if got, want := cfg.StatsRetention, 30*24*time.Hour; got != want {
+		t.Errorf("StatsRetention = %v, want %v", got, want)
+	}
+}
+
+func TestParseStatsRetentionGoDuration(t *testing.T) {
+	cfg, err := Parse([]byte("stats {\nretention \"12h30m\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if got, want := cfg.StatsRetention, 12*time.Hour+30*time.Minute; got != want {
+		t.Errorf("StatsRetention = %v, want %v", got, want)
+	}
+}
+
+func TestParseStatsRetentionForever(t *testing.T) {
+	for _, in := range []string{
+		"stats {\nretention \"forever\"\n}",
+		"stats {\nretention \"0\"\n}",
+	} {
+		cfg, err := Parse([]byte(in))
+		if err != nil {
+			t.Fatalf("Parse(%q) failed: %v", in, err)
+		}
+		if cfg.StatsRetention != RetentionForever {
+			t.Errorf("Parse(%q): StatsRetention = %v, want RetentionForever (%v)", in, cfg.StatsRetention, RetentionForever)
+		}
+	}
+}
+
+func TestParseStatsRetentionUnsetIsZero(t *testing.T) {
+	// No `stats` block → field stays at zero so cmd/serve.go can apply
+	// its own default. This is distinct from the explicit "forever"
+	// case, which writes RetentionForever.
+	cfg, err := Parse([]byte(`listen ":8080"`))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.StatsRetention != 0 {
+		t.Errorf("StatsRetention = %v, want 0 when unset", cfg.StatsRetention)
+	}
+}
+
+func TestParseStatsRetentionInvalid(t *testing.T) {
+	cfg, err := Parse([]byte("stats {\nretention \"not-a-duration\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if cfg.StatsRetention != 0 {
+		t.Errorf("StatsRetention = %v, want 0 after invalid value", cfg.StatsRetention)
+	}
+	if !hasErrorContaining(cfg.Errors, "retention") {
+		t.Errorf("Errors = %v, want one mentioning the bad retention", cfg.Errors)
+	}
+}
+
+func TestParseStatsUnknownChild(t *testing.T) {
+	cfg, err := Parse([]byte("stats {\nwidget \"x\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if !hasErrorContaining(cfg.Errors, "widget") {
+		t.Errorf("Errors = %v, want one mentioning the unknown child", cfg.Errors)
 	}
 }
 

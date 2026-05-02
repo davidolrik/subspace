@@ -180,3 +180,71 @@ func TestStoreDownsample(t *testing.T) {
 		t.Errorf("downsampled Connections = %d, want 12 (max)", p.Connections)
 	}
 }
+
+func TestStorePruneDeletesOldRows(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Now().Truncate(time.Second)
+	// Three points: 10 days old, 1 day old, "now". Pruning at 7 days
+	// must keep the latter two and drop the 10-day-old row across all
+	// four tables.
+	points := []time.Time{
+		now.Add(-10 * 24 * time.Hour),
+		now.Add(-1 * 24 * time.Hour),
+		now,
+	}
+	for i, ts := range points {
+		snap := Snapshot{
+			Connections: int64(i + 1),
+			Protocols:   map[string]int64{"HTTP": 1},
+			Errors:      map[string]int64{"dial_failed": 1},
+			Upstreams:   map[string]UpstreamStats{"direct": {Success: 1, BytesIn: 1}},
+		}
+		if err := store.Record(ts, snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := store.Prune(7 * 24 * time.Hour); err != nil {
+		t.Fatalf("Prune failed: %v", err)
+	}
+
+	for _, table := range []string{"snapshots", "snapshot_protocols", "snapshot_errors", "snapshot_upstreams"} {
+		var count int
+		if err := store.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+			t.Fatalf("counting %s: %v", table, err)
+		}
+		if count != 2 {
+			t.Errorf("%s row count after prune = %d, want 2 (kept 1d-old + now)", table, count)
+		}
+	}
+}
+
+func TestStorePruneZeroIsNoOp(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Now()
+	for i := 0; i < 5; i++ {
+		if err := store.Record(now.Add(-time.Duration(i)*time.Hour), Snapshot{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Prune(0); err != nil {
+		t.Fatalf("Prune(0) failed: %v", err)
+	}
+	var count int
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM snapshots").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 5 {
+		t.Errorf("Prune(0) deleted rows: count = %d, want 5 (no-op)", count)
+	}
+}

@@ -70,8 +70,20 @@ func newServeCommand(configFile *string) *cobra.Command {
 			}
 			defer statsStore.Close()
 
-			// Start the periodic stats recorder
-			recorder := stats.NewRecorder(srv.Stats, statsStore, stats.DefaultRecorderConfig())
+			// Start the periodic stats recorder. The default
+			// (365d, from DefaultRecorderConfig) is used when no
+			// `stats { retention "..." }` block is present. The
+			// parser uses RetentionForever (-1) as an explicit
+			// "keep everything" signal — translate that to the
+			// recorder's own zero ("disabled") here.
+			recorderCfg := stats.DefaultRecorderConfig()
+			switch {
+			case cfg.StatsRetention > 0:
+				recorderCfg.Retention = cfg.StatsRetention
+			case cfg.StatsRetention == config.RetentionForever:
+				recorderCfg.Retention = 0
+			}
+			recorder := stats.NewRecorder(srv.Stats, statsStore, recorderCfg)
 			go recorder.Run()
 			defer recorder.Stop()
 
