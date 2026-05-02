@@ -60,6 +60,44 @@ Shows:
 - The selected upstream with type and address
 - `direct connection` if no route matches
 
+## `subspace validate`
+
+Parses the config (main file plus all `include`s and `page` files) and reports any errors without starting the server. Useful for CI on a config repo, or as a pre-commit step.
+
+```sh
+subspace validate                         # uses --config or default location
+subspace validate --config ./subspace.kdl # validate a specific file
+```
+
+Validation runs the same pipeline as `serve`:
+
+- KDL syntax of the main config and every included/page file.
+- Cross-references: routes pointing at undefined upstreams, fallbacks differing from `via`, default search engine pointing at a real engine, page tags pointing at the global `tags` block, etc.
+- Page KDL parse errors (a broken page is reported and counts as a failure).
+
+Output is a count summary plus either `OK` (exit `0`) or a numbered list of errors (exit `1`):
+
+```text
+  config          /home/me/.config/subspace/config.kdl
+  files included   12
+  upstreams        5
+  routes           57
+  pages            3
+  tags             16
+  search engines   8
+
+  OK
+```
+
+A failing example:
+
+```text
+  1 error(s):
+    • route "*.x" references unknown upstream "missing" (route dropped)
+```
+
+Wire it into CI as `subspace validate --config path/to/config.kdl`; the non-zero exit on failure is enough to fail the job.
+
 ## `subspace logs`
 
 Streams log output from a running server via the control socket. Shows historical lines first, then optionally follows live output.
