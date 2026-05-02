@@ -1318,6 +1318,52 @@ search-engines default="google" {
 	}
 }
 
+func TestParseSearchEnginesURLEncode(t *testing.T) {
+	input := `
+search-engines {
+	engine "default" url="https://www.google.com/search?q={query}"
+	engine "form"    url="https://www.example.com/?q={query}"        url-encode="form"
+	engine "raw"     url="https://internal.example.com/?q={query}"   url-encode="raw"
+	engine "explicit" url="https://www.example.com/?q={query}"       url-encode="component"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	// Default: empty string is fine; the frontend treats empty as "component".
+	if cfg.SearchEngines["default"].URLEncode != "" {
+		t.Errorf("default engine: URLEncode = %q, want empty", cfg.SearchEngines["default"].URLEncode)
+	}
+	if cfg.SearchEngines["form"].URLEncode != "form" {
+		t.Errorf("form engine: URLEncode = %q, want %q", cfg.SearchEngines["form"].URLEncode, "form")
+	}
+	if cfg.SearchEngines["raw"].URLEncode != "raw" {
+		t.Errorf("raw engine: URLEncode = %q, want %q", cfg.SearchEngines["raw"].URLEncode, "raw")
+	}
+	if cfg.SearchEngines["explicit"].URLEncode != "component" {
+		t.Errorf("explicit engine: URLEncode = %q, want %q", cfg.SearchEngines["explicit"].URLEncode, "component")
+	}
+}
+
+func TestParseSearchEnginesURLEncodeRejectsUnknown(t *testing.T) {
+	input := `
+search-engines {
+	engine "bad" url="https://www.example.com/?q={query}" url-encode="nonsense"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if _, ok := cfg.SearchEngines["bad"]; ok {
+		t.Error("engine with unknown url-encode value should be skipped")
+	}
+	if !hasErrorContaining(cfg.Errors, "url-encode") {
+		t.Errorf("Errors = %v, want one mentioning the bad url-encode", cfg.Errors)
+	}
+}
+
 func TestParseSearchEnginesAliasDefaultsEmpty(t *testing.T) {
 	input := `
 search-engines {

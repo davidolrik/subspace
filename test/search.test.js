@@ -96,6 +96,36 @@ describe('buildEngineURL', () => {
         expect(buildEngineURL(e, 'google.com'))
             .toBe('https://urlscan.io/search/?q=google.com#google.com');
     });
+
+    it('defaults to component encoding (spaces become %20)', () => {
+        const e = { url: 'https://x.example/?q={query}' };
+        expect(buildEngineURL(e, 'hello world')).toBe('https://x.example/?q=hello%20world');
+    });
+
+    it('honours url-encode="component" explicitly', () => {
+        const e = { url: 'https://x.example/?q={query}', urlEncode: 'component' };
+        expect(buildEngineURL(e, 'hello world')).toBe('https://x.example/?q=hello%20world');
+    });
+
+    it('uses + for spaces under url-encode="form"', () => {
+        const e = { url: 'https://x.example/?q={query}', urlEncode: 'form' };
+        expect(buildEngineURL(e, 'hello world')).toBe('https://x.example/?q=hello+world');
+    });
+
+    it('still URL-encodes other special chars under form mode', () => {
+        const e = { url: 'https://x.example/?q={query}', urlEncode: 'form' };
+        // & and = must still be encoded — only space gets the + treatment.
+        expect(buildEngineURL(e, 'a&b=c d')).toBe('https://x.example/?q=a%26b%3Dc+d');
+    });
+
+    it('passes the query through verbatim under url-encode="raw"', () => {
+        const e = { url: 'https://internal/q?{query}', urlEncode: 'raw' };
+        // Raw mode is for engines whose URL grammar is encoded differently
+        // by the caller (e.g. embedding pre-built query strings). The
+        // dashboard does no transformation at all.
+        expect(buildEngineURL(e, 'hello world&foo=bar'))
+            .toBe('https://internal/q?hello world&foo=bar');
+    });
 });
 
 describe('buildResults', () => {

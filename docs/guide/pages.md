@@ -192,6 +192,7 @@ search-engines default="google" {
 | `icon`        | no       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. When omitted, subspace fetches the engine host's `/favicon.ico` once, caches it server-side, and serves it from `/api/favicon` with a 24-hour browser cache; missing favicons fall back to a magnifier glyph. |
 | `description` | no       | Short text shown as the third line of the engine's result row, mirroring how link descriptions render on link rows.                                      |
 | `fallback`    | no       | When `#true`, the engine appears in the no-match fallback list alongside the default engine. Defaults to `#false` so niche engines stay keyword-only.    |
+| `url-encode`  | no       | How the query is encoded before substitution into `{query}`. One of `"component"` (default — `%20` for spaces, `encodeURIComponent`-style), `"form"` (same but spaces become `+`), or `"raw"` (passthrough; the query is inserted verbatim). Use `"form"` for engines whose servers expect form-style encoding, and `"raw"` only when you've pre-encoded the value yourself. |
 
 ### Default engine
 
@@ -212,13 +213,27 @@ With this config, an unknown query like `xyzzy` shows three fallback rows — go
 
 ### URL placeholder
 
-The `{query}` placeholder is replaced with `encodeURIComponent(query)`, so spaces and special characters are URL-safe. The placeholder may appear multiple times in a single template — all occurrences are replaced with the same encoded value:
+The `{query}` placeholder is replaced with the user's query, encoded according to the engine's `url-encode` mode (default `component` — spaces become `%20`, special characters are percent-encoded). The placeholder may appear multiple times in a single template — all occurrences are replaced with the same encoded value:
 
 ```kdl
 engine "urlscan" url="https://urlscan.io/search/?q={query}#{query}"
 ```
 
 If the URL is missing `{query}` entirely, the engine is rejected with a config error.
+
+### Encoding modes
+
+Pick the mode whose output the engine's server expects:
+
+| Mode        | Spaces → | Other special chars | When to use                                                                          |
+| ----------- | -------- | ------------------- | ------------------------------------------------------------------------------------- |
+| `component` | `%20`    | percent-encoded     | Default. Works for most modern URLs.                                                  |
+| `form`      | `+`      | percent-encoded     | Engines that parse the query string as `application/x-www-form-urlencoded` (some older search backends). |
+| `raw`       | unchanged | unchanged           | You've already encoded the value yourself, or you're embedding pre-built query strings. |
+
+```kdl
+engine "form-style" url="https://example.com/search?q={query}" url-encode="form"
+```
 
 ### Hot reload
 

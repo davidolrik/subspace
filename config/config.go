@@ -58,6 +58,12 @@ type SearchEngine struct {
 	Icon        string
 	Description string
 	Fallback    bool
+	// URLEncode controls how the user's query is encoded when
+	// substituted into URL. One of "", "component", "form", or "raw":
+	//   - "" / "component" — encodeURIComponent (spaces → %20). Default.
+	//   - "form"           — same, but spaces → "+" (form-style).
+	//   - "raw"            — passthrough; the query is inserted as-is.
+	URLEncode string
 }
 
 // Tag is a globally defined label that pages may attach to links and
@@ -569,6 +575,18 @@ func parseSearchEnginesBlock(node *document.Node, engines map[string]SearchEngin
 			description = descVal.ValueString()
 		}
 
+		var urlEncode string
+		if encVal, ok := child.Properties.Get("url-encode"); ok && encVal != nil {
+			urlEncode = encVal.ValueString()
+			switch urlEncode {
+			case "", "component", "form", "raw":
+				// ok
+			default:
+				errs = append(errs, fmt.Sprintf("engine %q has unknown url-encode %q (want \"component\", \"form\", or \"raw\")", name, urlEncode))
+				continue
+			}
+		}
+
 		var fallback bool
 		if fbVal, ok := child.Properties.Get("fallback"); ok && fbVal != nil {
 			// Accept three syntaxes so operators can pick whichever
@@ -590,6 +608,7 @@ func parseSearchEnginesBlock(node *document.Node, engines map[string]SearchEngin
 			Icon:        icon,
 			Description: description,
 			Fallback:    fallback,
+			URLEncode:   urlEncode,
 		}
 	}
 	return errs

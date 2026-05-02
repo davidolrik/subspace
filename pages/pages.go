@@ -68,6 +68,7 @@ type SearchEngineDef struct {
 	Icon        string `json:"icon,omitempty"`
 	Description string `json:"description,omitempty"`
 	Fallback    bool   `json:"fallback,omitempty"`
+	URLEncode   string `json:"urlEncode,omitempty"`
 }
 
 // searchEnginesResponse is the JSON shape returned by /api/search-engines.

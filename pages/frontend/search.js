@@ -70,10 +70,35 @@ export function matchEnginePrefixes(engines, token) {
     return out;
 }
 
+// encodeQuery applies the engine's chosen url-encode mode to the
+// user's query. Modes:
+//   - "" / "component" — encodeURIComponent; spaces become %20.
+//   - "form"           — same, but spaces become "+".
+//   - "raw"            — no transformation; the query is inserted
+//                        verbatim. Use this for engines whose URL
+//                        grammar already embeds an encoded value.
+export function encodeQuery(query, mode) {
+    switch (mode) {
+        case 'raw':
+            return query;
+        case 'form':
+            return encodeURIComponent(query).replace(/%20/g, '+');
+        case '':
+        case undefined:
+        case null:
+        case 'component':
+            return encodeURIComponent(query);
+        default:
+            return encodeURIComponent(query);
+    }
+}
+
 // buildEngineURL substitutes the user's query into an engine's URL
-// template by replacing every "{query}" with the URL-encoded query.
+// template by replacing every "{query}" with the encoded query. The
+// engine's `urlEncode` field selects the encoding strategy.
 export function buildEngineURL(engine, query) {
-    return engine.url.replace(/\{query\}/g, encodeURIComponent(query));
+    const encoded = encodeQuery(query, engine && engine.urlEncode);
+    return engine.url.replace(/\{query\}/g, encoded);
 }
 
 // engineFaviconURL returns the dashboard's cached-favicon endpoint

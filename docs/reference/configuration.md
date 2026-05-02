@@ -153,6 +153,7 @@ search-engines default="<name>" {
 | `icon`        | No       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. When omitted, subspace fetches `/favicon.ico` from the engine host once, caches it server-side (24h positive / 1h negative), and serves it via `/api/favicon`; failed loads fall back to a magnifier glyph. |
 | `description` | No       | Short text shown as the third line of the engine's result row in the search palette.                                                                    |
 | `fallback`    | No       | When `#true`, the engine appears in the no-match fallback list alongside the default engine. Defaults to `#false` so engines stay keyword-only.         |
+| `url-encode`  | No       | Encoding applied to the query before `{query}` substitution. One of `"component"` (default; `encodeURIComponent` — spaces → `%20`), `"form"` (spaces → `+`), or `"raw"` (passthrough). Unknown values are rejected with a config error. |
 
 The block-level `default=` property names the engine shown first in the no-match fallback list. Additional engines appear in the same list when declared with `fallback=#true`, alphabetised by name. Engines without `fallback` (and not the default) stay keyword-only. The default reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared. With no `default=` and no `fallback=#true` engines, queries with no matches produce empty results.
 
