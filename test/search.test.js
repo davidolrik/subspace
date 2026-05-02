@@ -186,6 +186,51 @@ describe('buildResults', () => {
         expect(rows).toHaveLength(0);
     });
 
+    it('surfaces the engine description on exact-keyword rows', () => {
+        const richEngines = [
+            { name: 'metacpan', alias: 'cpan', url: 'https://metacpan.org/search?q={query}', icon: 'fa-cube', description: 'Perl module index' },
+        ];
+        const rows = buildResults({
+            query: 'cpan ojo',
+            nav: [],
+            allLinks: [],
+            engines: richEngines,
+            defaultEngine: '',
+        });
+        expect(rows[0].type).toBe('engine');
+        expect(rows[0].description).toBe('Perl module index');
+    });
+
+    it('surfaces the engine description on prefix suggestion rows', () => {
+        const richEngines = [
+            { name: 'metacpan', alias: 'cpan', url: 'https://metacpan.org/search?q={query}', description: 'Perl module index' },
+        ];
+        const rows = buildResults({
+            query: 'cp',
+            nav: [],
+            allLinks: [],
+            engines: richEngines,
+            defaultEngine: '',
+        });
+        expect(rows[0].type).toBe('engine-prefix');
+        expect(rows[0].description).toBe('Perl module index');
+    });
+
+    it('surfaces the engine description on the default-engine fallback row', () => {
+        const richEngines = [
+            { name: 'google', url: 'https://www.google.com/search?q={query}', description: 'General web search' },
+        ];
+        const rows = buildResults({
+            query: 'xyzzy-nonexistent',
+            nav: [],
+            allLinks: [],
+            engines: richEngines,
+            defaultEngine: 'google',
+        });
+        expect(rows).toHaveLength(1);
+        expect(rows[0].description).toBe('General web search');
+    });
+
     it('matches the default engine case-insensitively', () => {
         const casedEngines = [
             { name: 'Google', url: 'https://www.google.com/search?q={query}' },

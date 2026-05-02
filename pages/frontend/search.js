@@ -148,6 +148,7 @@ export function buildResults({ query, nav, allLinks, engines, defaultEngine }) {
             label: 'Search ' + keyword.name + ' for "' + tail + '"',
             icon: keyword.icon,
             meta: '',
+            description: keyword.description,
         });
     } else if (stillTypingFirstToken) {
         // The user is still typing the first token — surface every
@@ -162,6 +163,7 @@ export function buildResults({ query, nav, allLinks, engines, defaultEngine }) {
                 label: e.name + (e.alias ? ' (' + e.alias + ')' : ''),
                 icon: e.icon,
                 meta: 'Search engine',
+                description: e.description,
             });
         }
     }
@@ -229,6 +231,7 @@ export function buildResults({ query, nav, allLinks, engines, defaultEngine }) {
                 label: 'Search ' + def.name + ' for "' + trimmed + '"',
                 icon: def.icon,
                 meta: '',
+                description: def.description,
             });
         }
     }

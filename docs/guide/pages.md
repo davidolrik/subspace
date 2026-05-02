@@ -190,7 +190,7 @@ search-engines default="google" {
 | `url`         | yes      | Engine URL template. **Must contain the literal `{query}` placeholder.** Every occurrence is replaced with the URL-encoded query at navigation time.    |
 | `alias`       | no       | Additional keyword that triggers the same engine. Useful for short forms like `g` for `google` or `cpan` for `metacpan`.                                |
 | `icon`        | no       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. When omitted, a magnifier icon is used.                                                     |
-| `description` | no       | Currently parsed but not displayed.                                                                                                                      |
+| `description` | no       | Short text shown as the third line of the engine's result row, mirroring how link descriptions render on link rows.                                      |
 
 ### Default engine
 

@@ -151,7 +151,7 @@ search-engines default="<name>" {
 | `url`         | Yes      | Engine URL template. **Must contain the literal `{query}` placeholder.** Every occurrence is replaced with `encodeURIComponent(query)` at navigation time. |
 | `alias`       | No       | Additional keyword that triggers the same engine.                                                                                                        |
 | `icon`        | No       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. Falls back to a magnifier icon when omitted.                                                |
-| `description` | No       | Currently parsed but not displayed.                                                                                                                      |
+| `description` | No       | Short text shown as the third line of the engine's result row in the search palette.                                                                    |
 
 The block-level `default=` property names the engine used as the no-match fallback row in the search palette. The reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared. Without `default=`, queries with no matches produce empty results.
 
