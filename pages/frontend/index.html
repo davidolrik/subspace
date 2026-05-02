@@ -117,8 +117,18 @@
                            :class="{ selected: idx === selectedIndex, engine: item.type === 'engine' || item.type === 'engine-prefix' }"
                            @mouseenter="selectedIndex = idx"
                            @click.prevent="navigate(item)">
-                            <i :class="iconClass(item.icon, item.type)"
-                               class="search-result-icon"></i>
+                            <template x-if="iconImageURL(item)">
+                                <img :src="iconImageURL(item)"
+                                     class="search-result-icon search-result-favicon"
+                                     referrerpolicy="no-referrer"
+                                     loading="lazy"
+                                     @error="onFaviconError(item)"
+                                     alt="">
+                            </template>
+                            <template x-if="!iconImageURL(item)">
+                                <i :class="iconClass(item.icon, item.type)"
+                                   class="search-result-icon"></i>
+                            </template>
                             <div class="search-result-text">
                                 <div class="search-result-label" x-text="item.label"></div>
                                 <div class="search-result-meta" x-text="item.meta"></div>

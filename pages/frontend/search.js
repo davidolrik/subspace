@@ -76,6 +76,24 @@ export function buildEngineURL(engine, query) {
     return engine.url.replace(/\{query\}/g, encodeURIComponent(query));
 }
 
+// engineFaviconURL returns the dashboard's cached-favicon endpoint
+// URL for an engine. The backend fetches /favicon.ico from the engine
+// host once per host, caches the bytes, and serves them with long
+// Cache-Control headers — so result rows for engines without an
+// explicit icon show recognisable branding without re-fetching from
+// the engine origin on every page load. Returns null for engines
+// missing or with unparseable URLs.
+export function engineFaviconURL(engine) {
+    if (!engine || !engine.url) return null;
+    try {
+        const u = new URL(engine.url);
+        if (!u.host) return null;
+        return 'api/favicon?host=' + encodeURIComponent(u.host);
+    } catch (e) {
+        return null;
+    }
+}
+
 // navigationIntent returns the URL the modal should navigate to and
 // whether it should open in a new tab, given a result row and the
 // modifier keys held when the user pressed Enter (or clicked).
@@ -384,6 +402,10 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
             // can't extend the input further (ambiguous prefix).
             flashing: false,
             _flashTimer: null,
+            // faviconFailed remembers engines whose /favicon.ico load
+            // failed so the next render falls back to the magnifier
+            // icon instead of showing a broken-image silhouette.
+            faviconFailed: {},
             // nav is injected from the parent component via x-data merge
             nav: [],
 
@@ -522,6 +544,24 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
 
             iconClass(icon, type) {
                 return iconClass(icon, type);
+            },
+
+            // iconImageURL returns a favicon URL when an engine row has
+            // no explicit icon and we haven't already learned the
+            // favicon fails to load. The template renders an <img>
+            // when this is non-null and falls back to <i> otherwise.
+            iconImageURL(item) {
+                if (!item || item.icon) return null;
+                if (item.type !== 'engine' && item.type !== 'engine-prefix') return null;
+                if (!item.engine) return null;
+                if (this.faviconFailed[item.engine.name]) return null;
+                return engineFaviconURL(item.engine);
+            },
+
+            onFaviconError(item) {
+                if (item && item.engine) {
+                    this.faviconFailed[item.engine.name] = true;
+                }
             },
 
             flash() {

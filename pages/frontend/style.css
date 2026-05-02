@@ -417,6 +417,15 @@ footer {
     color: var(--cyan);
 }
 
+.search-result-favicon {
+    /* favicons are bitmaps, so size them in pixels rather than ems and
+       drop the icon-font color rule that doesn't apply. */
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    color: transparent;
+}
+
 .search-result-text {
     flex: 1;
     min-width: 0;

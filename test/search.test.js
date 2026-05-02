@@ -8,6 +8,7 @@ import {
     commonPrefix,
     tabCompleteFrom,
     navigationIntent,
+    engineFaviconURL,
     pollConfigVersion,
 } from '../pages/frontend/search.js';
 
@@ -446,6 +447,38 @@ describe('tabCompleteFrom', () => {
             { type: 'link', label: 'ojo' },
         ];
         expect(tabCompleteFrom(results, 'cpan ojo')).toBe('metacpan ojo');
+    });
+});
+
+describe('engineFaviconURL', () => {
+    it('points at the dashboard favicon proxy keyed by engine host', () => {
+        const e = { url: 'https://www.google.com/search?q={query}' };
+        expect(engineFaviconURL(e)).toBe('api/favicon?host=www.google.com');
+    });
+
+    it('routes http engines through the same proxy', () => {
+        const e = { url: 'http://internal.example.com/?q={query}' };
+        expect(engineFaviconURL(e)).toBe('api/favicon?host=internal.example.com');
+    });
+
+    it('handles URLs with {query} in the fragment', () => {
+        const e = { url: 'https://urlscan.io/search/?q={query}#{query}' };
+        expect(engineFaviconURL(e)).toBe('api/favicon?host=urlscan.io');
+    });
+
+    it('URL-encodes hosts with non-default ports', () => {
+        const e = { url: 'https://search.example.com:8443/?q={query}' };
+        expect(engineFaviconURL(e)).toBe('api/favicon?host=search.example.com%3A8443');
+    });
+
+    it('returns null for engines without a URL', () => {
+        expect(engineFaviconURL({})).toBeNull();
+        expect(engineFaviconURL(null)).toBeNull();
+        expect(engineFaviconURL(undefined)).toBeNull();
+    });
+
+    it('returns null for unparseable URLs', () => {
+        expect(engineFaviconURL({ url: 'not a url' })).toBeNull();
     });
 });
 

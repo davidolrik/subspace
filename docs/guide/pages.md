@@ -189,7 +189,7 @@ search-engines default="google" {
 | name          | yes      | Positional argument. The primary keyword used to invoke the engine. Must be unique (case-insensitive — `Google` and `google` collide).                  |
 | `url`         | yes      | Engine URL template. **Must contain the literal `{query}` placeholder.** Every occurrence is replaced with the URL-encoded query at navigation time.    |
 | `alias`       | no       | Additional keyword that triggers the same engine. Useful for short forms like `g` for `google` or `cpan` for `metacpan`.                                |
-| `icon`        | no       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. When omitted, a magnifier icon is used.                                                     |
+| `icon`        | no       | Same icon system as links: `si-*`, `fa-*`, `mdi-*`, `nf-*`. When omitted, subspace fetches the engine host's `/favicon.ico` once, caches it server-side, and serves it from `/api/favicon` with a 24-hour browser cache; missing favicons fall back to a magnifier glyph. |
 | `description` | no       | Short text shown as the third line of the engine's result row, mirroring how link descriptions render on link rows.                                      |
 | `fallback`    | no       | When `#true`, the engine appears in the no-match fallback list alongside the default engine. Defaults to `#false` so niche engines stay keyword-only.    |
 

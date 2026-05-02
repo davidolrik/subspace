@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -602,6 +605,126 @@ func TestSearchEnginesAPIEmpty(t *testing.T) {
 	}
 	if len(resp.Engines) != 0 {
 		t.Errorf("engines = %+v, want empty", resp.Engines)
+	}
+}
+
+func TestFaviconAPICachesOneFetchPerHost(t *testing.T) {
+	var hits int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/favicon.ico" {
+			atomic.AddInt32(&hits, 1)
+			w.Header().Set("Content-Type", "image/x-icon")
+			w.Write([]byte("FAKEICONBYTES"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+
+	h := New([]PageInfo{{Name: "dev", Page: &PageConfig{}}}, nil, nil)
+	h.SetSearchEngines(map[string]SearchEngineDef{
+		"test": {Name: "test", URL: upstream.URL + "/search?q={query}"},
+	}, "")
+
+	get := func(host string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet,
+			"http://pages.subspace.pub/dev/api/favicon?host="+host, nil)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// First call: cache miss, upstream fetched once.
+	rec1 := get(upURL.Host)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first call: status = %d, want 200 (body %q)", rec1.Code, rec1.Body.String())
+	}
+	if got := rec1.Body.String(); got != "FAKEICONBYTES" {
+		t.Errorf("first call: body = %q, want passthrough of upstream bytes", got)
+	}
+	if got := rec1.Header().Get("Content-Type"); got != "image/x-icon" {
+		t.Errorf("first call: Content-Type = %q, want image/x-icon", got)
+	}
+	if cc := rec1.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age") {
+		t.Errorf("first call: Cache-Control = %q, want max-age directive", cc)
+	}
+	if h := atomic.LoadInt32(&hits); h != 1 {
+		t.Fatalf("upstream hits after 1 call = %d, want 1", h)
+	}
+
+	// Second call: cache hit, no upstream fetch.
+	rec2 := get(upURL.Host)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("second call: status = %d, want 200", rec2.Code)
+	}
+	if h := atomic.LoadInt32(&hits); h != 1 {
+		t.Errorf("upstream hits after 2 calls = %d, want 1 (cached)", h)
+	}
+}
+
+func TestFaviconAPIRejectsUnknownHost(t *testing.T) {
+	h := New([]PageInfo{{Name: "dev", Page: &PageConfig{}}}, nil, nil)
+	h.SetSearchEngines(map[string]SearchEngineDef{
+		"google": {Name: "google", URL: "https://www.google.com/search?q={query}"},
+	}, "")
+
+	req := httptest.NewRequest(http.MethodGet,
+		"http://pages.subspace.pub/dev/api/favicon?host=evil.example.com", nil)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("unknown host: status = %d, want 403 (body %q)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestFaviconAPIRejectsMissingHost(t *testing.T) {
+	h := New([]PageInfo{{Name: "dev", Page: &PageConfig{}}}, nil, nil)
+	h.SetSearchEngines(map[string]SearchEngineDef{
+		"google": {Name: "google", URL: "https://www.google.com/search?q={query}"},
+	}, "")
+
+	req := httptest.NewRequest(http.MethodGet,
+		"http://pages.subspace.pub/dev/api/favicon", nil)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("missing host: status = %d, want 400", rec.Code)
+	}
+}
+
+func TestFaviconAPICachesUpstreamFailure(t *testing.T) {
+	var hits int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.NotFound(w, r)
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+
+	h := New([]PageInfo{{Name: "dev", Page: &PageConfig{}}}, nil, nil)
+	h.SetSearchEngines(map[string]SearchEngineDef{
+		"test": {Name: "test", URL: upstream.URL + "/search?q={query}"},
+	}, "")
+
+	get := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet,
+			"http://pages.subspace.pub/dev/api/favicon?host="+upURL.Host, nil)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := get(); rec.Code != http.StatusNotFound {
+		t.Fatalf("first call: status = %d, want 404", rec.Code)
+	}
+	if rec := get(); rec.Code != http.StatusNotFound {
+		t.Fatalf("second call: status = %d, want 404 (cached negative)", rec.Code)
+	}
+	if h := atomic.LoadInt32(&hits); h != 1 {
+		t.Errorf("upstream hits = %d, want 1 (negative cache prevents re-fetch)", h)
 	}
 }
 

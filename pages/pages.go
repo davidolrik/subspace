@@ -1,12 +1,15 @@
 package pages
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -119,6 +122,15 @@ type Handler struct {
 	// defaultEngine names the engine to use as the no-match fallback row.
 	searchEngines map[string]SearchEngineDef
 	defaultEngine string
+	// faviconCache stores fetched favicons keyed by host so we don't
+	// hammer the engine origin once per dashboard tab. Both successful
+	// fetches and upstream failures are cached (with different TTLs)
+	// so a missing favicon doesn't translate into a fetch on every
+	// page load.
+	faviconCache map[string]faviconEntry
+	// faviconFetcher is overridable for tests; the default issues an
+	// HTTP GET against the engine host.
+	faviconFetcher func(ctx context.Context, scheme, host string) faviconEntry
 	// configErrors is the list of non-fatal config problems surfaced
 	// in the internal-pages banner. It's overwritten by
 	// SetConfigErrors after each successful (re)load.
@@ -141,9 +153,11 @@ type Handler struct {
 // and the store provides historical time-series data.
 func New(pageList []PageInfo, collector *stats.Collector, store *stats.Store) *Handler {
 	h := &Handler{
-		stats: collector,
-		store: store,
+		stats:        collector,
+		store:        store,
+		faviconCache: make(map[string]faviconEntry),
 	}
+	h.faviconFetcher = h.realFetchFavicon
 	h.buildMux(pageList)
 	return h
 }
@@ -169,6 +183,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 				mux.HandleFunc(host+prefix+"/api/links", h.handleLinksAPI)
 				mux.HandleFunc(host+prefix+"/api/all-links", h.handleAllLinksAPI)
 				mux.HandleFunc(host+prefix+"/api/search-engines", h.handleSearchEnginesAPI)
+				mux.HandleFunc(host+prefix+"/api/favicon", h.handleFaviconAPI)
 				mux.HandleFunc(host+prefix+"/api/nav", h.handleNavAPI)
 				mux.HandleFunc(host+prefix+"/api/config-errors", h.handleConfigErrorsAPI)
 				mux.Handle(host+prefix+"/static/", http.StripPrefix(prefix+"/static/", fileServer))
@@ -201,6 +216,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		mux.HandleFunc(host+"/api/status", h.handleStatusAPI)
 		mux.HandleFunc(host+"/api/all-links", h.handleAllLinksAPI)
 		mux.HandleFunc(host+"/api/search-engines", h.handleSearchEnginesAPI)
+		mux.HandleFunc(host+"/api/favicon", h.handleFaviconAPI)
 		mux.HandleFunc(host+"/api/nav", h.handleNavAPI)
 		mux.HandleFunc(host+"/api/config-errors", h.handleConfigErrorsAPI)
 		mux.Handle(host+"/static/", http.StripPrefix("/static/", fileServer))
@@ -536,4 +552,149 @@ func (h *Handler) handleAllLinksAPI(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(links)
+}
+
+// faviconEntry is one cached favicon. Empty Body + non-2xx Status
+// indicates a negative cache record (engine had no /favicon.ico or the
+// fetch otherwise failed) so the client gets a 404 without us hitting
+// the engine again.
+type faviconEntry struct {
+	Body        []byte
+	ContentType string
+	Status      int
+	FetchedAt   time.Time
+}
+
+const (
+	faviconPositiveTTL = 24 * time.Hour
+	faviconNegativeTTL = 1 * time.Hour
+	faviconMaxBytes    = 256 * 1024 // arbitrary cap; favicons should be tiny
+	faviconFetchTimeout = 5 * time.Second
+)
+
+// handleFaviconAPI proxies favicon requests for engine hosts. The
+// response is cached in memory so subsequent dashboard tabs don't
+// re-fetch from the engine origin. We also set a long Cache-Control
+// header so the browser caches the bytes for the session even after
+// the in-memory cache evicts them.
+//
+// The host parameter is validated against the configured engine list
+// to keep the endpoint from being used as an arbitrary favicon proxy.
+func (h *Handler) handleFaviconAPI(w http.ResponseWriter, r *http.Request) {
+	host := r.URL.Query().Get("host")
+	if host == "" {
+		http.Error(w, "missing host parameter", http.StatusBadRequest)
+		return
+	}
+
+	scheme, ok := h.engineSchemeForHost(host)
+	if !ok {
+		http.Error(w, "host is not a configured search engine", http.StatusForbidden)
+		return
+	}
+
+	// Cache lookup: serve immediately if we have a fresh entry,
+	// regardless of whether it was a positive or negative result.
+	if entry, fresh := h.lookupFavicon(host); fresh {
+		writeFaviconResponse(w, entry)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), faviconFetchTimeout)
+	defer cancel()
+	entry := h.faviconFetcher(ctx, scheme, host)
+	entry.FetchedAt = time.Now()
+	h.storeFavicon(host, entry)
+	writeFaviconResponse(w, entry)
+}
+
+func (h *Handler) engineSchemeForHost(host string) (string, bool) {
+	h.mu.RLock()
+	engines := h.searchEngines
+	h.mu.RUnlock()
+	hostLower := strings.ToLower(host)
+	for _, e := range engines {
+		u, err := url.Parse(e.URL)
+		if err != nil {
+			continue
+		}
+		if strings.ToLower(u.Host) == hostLower {
+			return u.Scheme, true
+		}
+	}
+	return "", false
+}
+
+func (h *Handler) lookupFavicon(host string) (faviconEntry, bool) {
+	h.mu.RLock()
+	entry, ok := h.faviconCache[host]
+	h.mu.RUnlock()
+	if !ok {
+		return faviconEntry{}, false
+	}
+	ttl := faviconPositiveTTL
+	if entry.Status < 200 || entry.Status >= 300 {
+		ttl = faviconNegativeTTL
+	}
+	if time.Since(entry.FetchedAt) > ttl {
+		return faviconEntry{}, false
+	}
+	return entry, true
+}
+
+func (h *Handler) storeFavicon(host string, entry faviconEntry) {
+	h.mu.Lock()
+	if h.faviconCache == nil {
+		h.faviconCache = map[string]faviconEntry{}
+	}
+	h.faviconCache[host] = entry
+	h.mu.Unlock()
+}
+
+// realFetchFavicon performs the actual HTTP GET against the engine
+// host's /favicon.ico. Errors and non-2xx responses are recorded as
+// negative cache entries so we don't keep retrying.
+func (h *Handler) realFetchFavicon(ctx context.Context, scheme, host string) faviconEntry {
+	client := &http.Client{Timeout: faviconFetchTimeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme+"://"+host+"/favicon.ico", nil)
+	if err != nil {
+		return faviconEntry{Status: http.StatusBadGateway}
+	}
+	req.Header.Set("User-Agent", "subspace-favicon-cache/1")
+	resp, err := client.Do(req)
+	if err != nil {
+		return faviconEntry{Status: http.StatusBadGateway}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return faviconEntry{Status: resp.StatusCode}
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, faviconMaxBytes))
+	if err != nil {
+		return faviconEntry{Status: http.StatusBadGateway}
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "image/x-icon"
+	}
+	return faviconEntry{
+		Body:        body,
+		ContentType: ct,
+		Status:      http.StatusOK,
+	}
+}
+
+func writeFaviconResponse(w http.ResponseWriter, entry faviconEntry) {
+	if entry.Status < 200 || entry.Status >= 300 || len(entry.Body) == 0 {
+		// Cache the negative result in the browser too, but with the
+		// same shorter TTL we use server-side so a freshly-published
+		// favicon still gets picked up after an hour.
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		http.Error(w, "favicon unavailable", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", entry.ContentType)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(entry.Body)
 }
