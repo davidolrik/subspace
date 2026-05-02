@@ -7,6 +7,7 @@ import {
     autocompleteFor,
     commonPrefix,
     tabCompleteFrom,
+    navigationIntent,
     pollConfigVersion,
 } from '../pages/frontend/search.js';
 
@@ -322,6 +323,44 @@ describe('tabCompleteFrom', () => {
             { type: 'link', label: 'ojo' },
         ];
         expect(tabCompleteFrom(results, 'cpan ojo')).toBe('metacpan ojo');
+    });
+});
+
+describe('navigationIntent', () => {
+    it('returns plain navigation for a page row with no modifier', () => {
+        const result = { type: 'page', url: 'http://example.com/dev/' };
+        expect(navigationIntent(result, {})).toEqual({ url: 'http://example.com/dev/', newTab: false });
+    });
+
+    it('returns new-tab navigation when metaKey is held (Cmd on macOS)', () => {
+        const result = { type: 'link', url: 'https://github.com' };
+        expect(navigationIntent(result, { metaKey: true })).toEqual({ url: 'https://github.com', newTab: true });
+    });
+
+    it('returns new-tab navigation when ctrlKey is held (Linux/Windows)', () => {
+        const result = { type: 'link', url: 'https://github.com' };
+        expect(navigationIntent(result, { ctrlKey: true })).toEqual({ url: 'https://github.com', newTab: true });
+    });
+
+    it('builds the engine URL on demand for engine rows', () => {
+        const result = {
+            type: 'engine',
+            engine: { name: 'metacpan', url: 'https://metacpan.org/search?q={query}' },
+            query: 'ojo',
+        };
+        expect(navigationIntent(result, { metaKey: true }))
+            .toEqual({ url: 'https://metacpan.org/search?q=ojo', newTab: true });
+    });
+
+    it('returns null for engine-prefix rows regardless of modifier', () => {
+        const result = { type: 'engine-prefix', engine: { name: 'metacpan' } };
+        expect(navigationIntent(result, {})).toBeNull();
+        expect(navigationIntent(result, { metaKey: true })).toBeNull();
+    });
+
+    it('returns null when no result is supplied', () => {
+        expect(navigationIntent(null, {})).toBeNull();
+        expect(navigationIntent(undefined, { ctrlKey: true })).toBeNull();
     });
 });
 

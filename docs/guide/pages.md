@@ -157,15 +157,16 @@ Only labels that themselves extend what you typed are considered. Rows that surf
 
 ### Keyboard shortcuts
 
-| Key                       | Action                                                  |
-| ------------------------- | ------------------------------------------------------- |
-| `/`                       | Open search                                             |
-| `Escape`                  | Close search                                            |
-| `Arrow Up` / `Arrow Down` | Navigate results                                        |
-| `Tab`                     | Autocomplete to the longest unambiguous shared prefix   |
-| `Enter`                   | Go to selected result (or expand keyword on a prefix row) |
+| Key                       | Action                                                                            |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| `/`                       | Open search                                                                       |
+| `Escape`                  | Close search                                                                      |
+| `Arrow Up` / `Arrow Down` | Navigate results                                                                  |
+| `Tab`                     | Autocomplete to the longest unambiguous shared prefix                             |
+| `Enter`                   | Go to selected result (or expand keyword on a prefix row)                         |
+| `Cmd`+`Enter` / `Ctrl`+`Enter` | Open selected result in a new tab; the search modal stays open for the next query |
 
-You can also click any result or click outside the popup to close it.
+You can also click any result or click outside the popup to close it. `Cmd`/`Ctrl`-click on a result also opens it in a new tab via the browser's native link handling.
 
 ## Search Engines
 

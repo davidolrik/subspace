@@ -76,6 +76,21 @@ export function buildEngineURL(engine, query) {
     return engine.url.replace(/\{query\}/g, encodeURIComponent(query));
 }
 
+// navigationIntent returns the URL the modal should navigate to and
+// whether it should open in a new tab, given a result row and the
+// modifier keys held when the user pressed Enter (or clicked).
+// Returns null when the row has no destination — engine-prefix rows
+// expand the keyword instead of navigating, and an absent result is a
+// no-op.
+export function navigationIntent(result, modifiers) {
+    if (!result || result.type === 'engine-prefix') return null;
+    const url = result.type === 'engine'
+        ? buildEngineURL(result.engine, result.query)
+        : result.url;
+    const newTab = !!(modifiers && (modifiers.metaKey || modifiers.ctrlKey));
+    return { url, newTab };
+}
+
 function navMeta(item) {
     if (!item.name) return item.url;
     return item.url.replace(/^https?:\/\//, '').replace(/\/$/, '');
@@ -410,7 +425,7 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
                         });
                         return;
                     }
-                    this.navigate(result);
+                    this.navigate(result, { metaKey: e.metaKey, ctrlKey: e.ctrlKey });
                 } else if (e.key === 'Escape') {
                     this.hide();
                 }
@@ -443,7 +458,7 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
                 return item.url;
             },
 
-            navigate(item) {
+            navigate(item, modifiers) {
                 if (item.type === 'engine-prefix') {
                     this.query = autocompleteFor(item, this.query);
                     this.selectedIndex = 0;
@@ -456,10 +471,17 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
                     });
                     return;
                 }
+                const intent = navigationIntent(item, modifiers || {});
+                if (!intent) return;
+                if (intent.newTab) {
+                    // Keep the modal open so the user can fire several
+                    // lookups in a row without losing context.
+                    window.open(intent.url, '_blank', 'noopener,noreferrer');
+                    return;
+                }
                 this.open = false;
-                const url = this.resultURL(item);
                 this.$nextTick(() => {
-                    window.location.href = url;
+                    window.location.href = intent.url;
                 });
             },
 
