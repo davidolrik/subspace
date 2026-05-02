@@ -354,7 +354,11 @@ describe('buildResults', () => {
         expect(rows[0].engine.name).toBe('Google');
     });
 
-    it('does not emit a fallback when local matches exist', () => {
+    it('appends fallback engines after local matches so the user can still pivot to web search', () => {
+        // Mirrors the real-world case: the user types "test" and gets
+        // a Pages/Links section. The fallback engine rows should still
+        // trail at the bottom so they don't have to retype to search
+        // the web.
         const rows = buildResults({
             query: 'GitHub',
             nav,
@@ -362,8 +366,14 @@ describe('buildResults', () => {
             engines,
             defaultEngine: 'google',
         });
-        const fallback = rows.find(r => r.type === 'engine');
-        expect(fallback).toBeUndefined();
+        // Local match comes first.
+        const types = rows.map(r => r.type);
+        const firstLink = types.indexOf('link');
+        const firstFallback = rows.findIndex(r => r.type === 'engine' && r.fallback);
+        expect(firstLink).toBeGreaterThanOrEqual(0);
+        expect(firstFallback).toBeGreaterThan(firstLink);
+        // The fallback row exists and points at the default engine.
+        expect(rows[firstFallback].engine.name).toBe('google');
     });
 });
 

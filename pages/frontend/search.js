@@ -257,14 +257,17 @@ export function buildResults({ query, nav, allLinks, engines, defaultEngine }) {
 
     out.push(...pages, ...links);
 
-    // Fallback list: when nothing surfaced — no exact keyword, no
-    // engine prefix suggestions, no local matches — render one row
-    // per fallback-eligible engine so the user always has a
-    // destination. The configured default engine is always included
-    // (and shown first); additional engines opt in via fallback=#true.
-    // Engines that don't opt in stay keyword-only.
+    // Fallback list: append one row per fallback-eligible engine
+    // whenever the user typed a query that didn't match an exact
+    // keyword and isn't still typing a prefix-matching keyword. Local
+    // page/link matches do NOT suppress the fallback — those land
+    // first and the engine rows trail at the bottom, so the user can
+    // also pivot to "actually search the web for this" without
+    // re-typing the query. The configured default engine is always
+    // included (and shown first); additional engines opt in via
+    // fallback=#true. Engines that don't opt in stay keyword-only.
     const hasPrefixRows = out.some(r => r.type === 'engine-prefix');
-    if (!keywordMatched && !hasPrefixRows && pages.length === 0 && links.length === 0) {
+    if (!keywordMatched && !hasPrefixRows) {
         const fallbackList = collectFallbackEngines(engines || [], defaultEngine);
         for (const e of fallbackList) {
             out.push({
