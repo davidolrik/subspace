@@ -10,6 +10,29 @@
     <link rel="stylesheet" href="/static/fonts/simple-icons.min.css">
     <link rel="stylesheet" href="/static/fonts/materialdesignicons.min.css">
     <link rel="stylesheet" href="/static/fonts/nerdfonts.min.css">
+    <script>
+        // Apply the theme before first paint to avoid a flash while
+        // the deferred module loads. Mirrors the helper in
+        // index.html — reads the cross-subdomain cookie first.
+        (function () {
+            function read() {
+                var m = document.cookie.match(/(?:^|;\s*)subspace-theme=([^;]+)/);
+                if (m) {
+                    try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
+                }
+                try { return localStorage.getItem('subspace-theme'); } catch (e) { return null; }
+            }
+            try {
+                var saved = read();
+                if (saved !== 'light' && saved !== 'dark') {
+                    saved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+                document.documentElement.setAttribute('data-theme', saved);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
     <style>
         .stats-grid {
             display: grid;
@@ -281,6 +304,11 @@
                     </template>
                 </a>
             </template>
+            <button type="button" class="theme-toggle" title="Toggle light/dark theme"
+                    @click="window.subspaceToggleTheme()">
+                <i class="fa-solid fa-sun theme-toggle-light"></i>
+                <i class="fa-solid fa-moon theme-toggle-dark"></i>
+            </button>
         </nav>
     </header>
     <main>
@@ -474,16 +502,33 @@
         };
         const colorList = Object.values(chartColors);
 
-        const tooltipStyle = {
+        // Read chart-relevant CSS variables so charts pick up the
+        // current theme on each (re)build. Called when constructing
+        // chart options and again on themechange.
+        function cssVar(name) {
+            return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        }
+        function chartTheme() {
+            return {
+                bg:        cssVar('--surface') || '#161b22',
+                border:    cssVar('--border') || '#30363d',
+                text:      cssVar('--text') || '#c9d1d9',
+                textMuted: cssVar('--text-muted') || '#8b949e',
+            };
+        }
+
+        function buildTooltipStyle() {
+            const t = chartTheme();
+            return {
             tooltip: {
                 mode: 'index',
                 intersect: false,
-                backgroundColor: '#161b22',
-                borderColor: '#30363d',
+                backgroundColor: t.bg,
+                borderColor: t.border,
                 borderWidth: 1,
-                titleColor: '#c9d1d9',
+                titleColor: t.text,
                 titleFont: { weight: '600', size: 12 },
-                bodyColor: '#8b949e',
+                bodyColor: t.textMuted,
                 bodyFont: { size: 11 },
                 padding: 10,
                 cornerRadius: 6,
@@ -511,9 +556,13 @@
                     }
                 }
             }
-        };
+            };
+        }
+        let tooltipStyle = buildTooltipStyle();
 
-        const defaultChartOpts = {
+        function buildDefaultChartOpts() {
+            const t = chartTheme();
+            return {
             responsive: true,
             maintainAspectRatio: false,
             interaction: {
@@ -521,21 +570,23 @@
                 intersect: false,
             },
             plugins: {
-                legend: { labels: { color: '#8b949e', font: { size: 11 } } },
-                ...tooltipStyle,
+                legend: { labels: { color: t.textMuted, font: { size: 11 } } },
+                ...buildTooltipStyle(),
             },
             scales: {
                 x: {
-                    ticks: { color: '#585b70', font: { size: 10 } },
-                    grid: { color: 'rgba(48,54,61,0.5)' }
+                    ticks: { color: t.textMuted, font: { size: 10 } },
+                    grid: { color: t.border }
                 },
                 y: {
-                    ticks: { color: '#585b70', font: { size: 10 } },
-                    grid: { color: 'rgba(48,54,61,0.5)' },
+                    ticks: { color: t.textMuted, font: { size: 10 } },
+                    grid: { color: t.border },
                     beginAtZero: true
                 }
             }
-        };
+            };
+        }
+        let defaultChartOpts = buildDefaultChartOpts();
 
         // Draw a vertical crosshair line at the hover position
         const verticalLinePlugin = {
@@ -620,10 +671,53 @@
                 async init() {
                     await this.refresh();
                     this.refreshTimer = setInterval(() => this.refresh(), 5000);
+                    this._themeListener = () => this.onThemeChange();
+                    window.addEventListener('subspace:themechange', this._themeListener);
                 },
 
                 destroy() {
                     if (this.refreshTimer) clearInterval(this.refreshTimer);
+                    if (this._themeListener) window.removeEventListener('subspace:themechange', this._themeListener);
+                },
+
+                onThemeChange() {
+                    // Rebuild chart option presets from the new CSS
+                    // variables, push them onto the live charts, and
+                    // re-render. We deliberately don't re-fetch — the
+                    // dataset stays the same, only the colors change.
+                    tooltipStyle = buildTooltipStyle();
+                    defaultChartOpts = buildDefaultChartOpts();
+                    for (const key of Object.keys(chartInstances)) {
+                        const chart = chartInstances[key];
+                        if (!chart) continue;
+                        // Preserve any per-chart customisations (e.g.
+                        // stacked axes) while updating shared colors.
+                        const opts = chart.options;
+                        if (opts && opts.scales) {
+                            for (const ax of Object.values(opts.scales)) {
+                                if (ax.ticks) ax.ticks.color = chartTheme().textMuted;
+                                if (ax.grid) ax.grid.color = chartTheme().border;
+                            }
+                        }
+                        if (opts && opts.plugins) {
+                            if (opts.plugins.legend && opts.plugins.legend.labels) {
+                                opts.plugins.legend.labels.color = chartTheme().textMuted;
+                            }
+                            if (opts.plugins.tooltip) {
+                                Object.assign(opts.plugins.tooltip, buildTooltipStyle().tooltip);
+                            }
+                        }
+                        // Pie chart slices use the surface color as the
+                        // separator between segments — refresh that too.
+                        // Other chart types' borderColor encodes the
+                        // line/series color and must not be touched.
+                        if (key === 'protocol') {
+                            for (const ds of chart.data.datasets || []) {
+                                ds.borderColor = chartTheme().bg;
+                            }
+                        }
+                        chart.update('none');
+                    }
                 },
 
                 setDuration(d) {
@@ -833,7 +927,7 @@
                         datasets: [{
                             data: protoNames.map(k => protocols[k]),
                             backgroundColor: protoNames.map((_, i) => colorList[i % colorList.length]),
-                            borderColor: '#161b22',
+                            borderColor: chartTheme().bg,
                             borderWidth: 2,
                         }]
                     };

@@ -684,3 +684,106 @@ if (typeof window !== 'undefined' && typeof fetch === 'function') {
     tick();
     setInterval(tick, CONFIG_POLL_INTERVAL_MS);
 }
+
+// Theme handling. Saved preference takes precedence over the system
+// pref so a user who explicitly opted into one mode keeps it across
+// reloads. The choice is persisted in a cookie scoped to the parent
+// domain so it survives navigation between pages.subspace.pub and
+// stats.subspace.pub (which are separate origins as far as the
+// browser is concerned, so localStorage would not cross).
+const THEME_COOKIE_NAME = 'subspace-theme';
+const THEME_COOKIE_DOMAIN = '.subspace.pub';
+const THEME_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // one year
+
+export function resolveTheme(saved, systemPrefersDark) {
+    if (saved === 'light' || saved === 'dark') return saved;
+    return systemPrefersDark ? 'dark' : 'light';
+}
+
+export function nextTheme(current) {
+    return current === 'light' ? 'dark' : 'light';
+}
+
+// parseCookies extracts a name → value map from a `document.cookie`
+// string. Pure so it can be tested without a DOM.
+export function parseCookies(cookieString) {
+    const out = {};
+    if (!cookieString) return out;
+    for (const part of cookieString.split(';')) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq === -1) continue;
+        const key = trimmed.slice(0, eq);
+        let val;
+        try {
+            val = decodeURIComponent(trimmed.slice(eq + 1));
+        } catch (_) {
+            val = trimmed.slice(eq + 1);
+        }
+        out[key] = val;
+    }
+    return out;
+}
+
+// buildThemeCookie returns the Set-Cookie-style string written to
+// document.cookie when persisting a theme choice. Pure so it can be
+// asserted against in tests.
+export function buildThemeCookie(theme, { domain, maxAge } = {}) {
+    const parts = [
+        THEME_COOKIE_NAME + '=' + encodeURIComponent(theme),
+        'Path=/',
+        'Max-Age=' + (maxAge != null ? maxAge : THEME_COOKIE_MAX_AGE),
+        'SameSite=Lax',
+    ];
+    const dom = domain != null ? domain : THEME_COOKIE_DOMAIN;
+    if (dom) parts.push('Domain=' + dom);
+    return parts.join('; ');
+}
+
+if (typeof document !== 'undefined') {
+    const mql = typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-color-scheme: dark)')
+        : null;
+
+    const apply = (theme) => {
+        document.documentElement.setAttribute('data-theme', theme);
+    };
+
+    const readSaved = () => {
+        const cookies = parseCookies(document.cookie);
+        if (cookies[THEME_COOKIE_NAME] === 'light' || cookies[THEME_COOKIE_NAME] === 'dark') {
+            return cookies[THEME_COOKIE_NAME];
+        }
+        // Fall back to localStorage for environments that block
+        // cross-subdomain cookies, or for legacy data written by an
+        // earlier build.
+        try { return localStorage.getItem(THEME_COOKIE_NAME); }
+        catch (_) { return null; }
+    };
+
+    apply(resolveTheme(readSaved(), mql ? mql.matches : true));
+
+    // Follow the system theme when no explicit choice has been saved.
+    if (mql && typeof mql.addEventListener === 'function') {
+        mql.addEventListener('change', (e) => {
+            const cur = readSaved();
+            if (cur !== 'light' && cur !== 'dark') {
+                apply(e.matches ? 'dark' : 'light');
+            }
+        });
+    }
+
+    // Expose a tiny global so the inline header button can call it
+    // without needing Alpine state on every page.
+    window.subspaceToggleTheme = function () {
+        const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+        const next = nextTheme(cur);
+        apply(next);
+        document.cookie = buildThemeCookie(next, {});
+        try { localStorage.setItem(THEME_COOKIE_NAME, next); } catch (_) {}
+        // Notify any listeners (e.g. Chart.js renderers) that need
+        // to re-render with the new theme colors.
+        window.dispatchEvent(new CustomEvent('subspace:themechange', { detail: { theme: next } }));
+    };
+}

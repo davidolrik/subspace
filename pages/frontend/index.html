@@ -10,6 +10,31 @@
     <link rel="stylesheet" href="static/fonts/simple-icons.min.css">
     <link rel="stylesheet" href="static/fonts/materialdesignicons.min.css">
     <link rel="stylesheet" href="static/fonts/nerdfonts.min.css">
+    <script>
+        // Apply the theme before first paint to avoid a dark→light
+        // flash while the deferred module loads. The cookie crosses
+        // subdomains (pages.subspace.pub ↔ stats.subspace.pub) where
+        // localStorage would not. The module's own matchMedia
+        // listener and toggle helper take over once search.js loads.
+        (function () {
+            function read() {
+                var m = document.cookie.match(/(?:^|;\s*)subspace-theme=([^;]+)/);
+                if (m) {
+                    try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
+                }
+                try { return localStorage.getItem('subspace-theme'); } catch (e) { return null; }
+            }
+            try {
+                var saved = read();
+                if (saved !== 'light' && saved !== 'dark') {
+                    saved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+                document.documentElement.setAttribute('data-theme', saved);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        })();
+    </script>
 </head>
 <body x-data="{...dashboard(), ...search()}" x-init="loadLinks(); initSearch()">
     <div class="config-error-banner" x-show="configErrors.length > 0" x-cloak>
@@ -42,6 +67,11 @@
                     </template>
                 </a>
             </template>
+            <button type="button" class="theme-toggle" title="Toggle light/dark theme"
+                    @click="window.subspaceToggleTheme()">
+                <i class="fa-solid fa-sun theme-toggle-light"></i>
+                <i class="fa-solid fa-moon theme-toggle-dark"></i>
+            </button>
         </nav>
     </header>
     <main>

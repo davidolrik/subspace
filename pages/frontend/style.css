@@ -5,6 +5,7 @@
 }
 
 :root {
+    color-scheme: dark;
     --bg: #0d1117;
     --surface: #161b22;
     --border: #30363d;
@@ -16,6 +17,21 @@
     --link-hover: #00ffea;
     --red: #f85149;
     --purple: #a78bfa;
+}
+
+[data-theme="light"] {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #eaedf2;
+    --border: #9ba3b0;
+    --text: #161a20;
+    --text-muted: #353a42;
+    --cyan: #054a55;
+    --white: #161a20;
+    --link: #073d80;
+    --link-hover: #054a55;
+    --red: #8b1313;
+    --purple: #4a2786;
 }
 
 [x-cloak] {
@@ -76,6 +92,38 @@ header {
 header nav {
     display: flex;
     gap: 1.25rem;
+    align-items: center;
+}
+
+.theme-toggle {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
+    padding: 0.3rem 0.5rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.theme-toggle:hover {
+    border-color: var(--text-muted);
+    color: var(--text);
+}
+
+.theme-toggle .theme-toggle-light,
+.theme-toggle .theme-toggle-dark {
+    width: 1em;
+    text-align: center;
+}
+
+[data-theme="light"] .theme-toggle .theme-toggle-light,
+:root:not([data-theme="light"]) .theme-toggle .theme-toggle-dark {
+    display: none;
 }
 
 header nav a {

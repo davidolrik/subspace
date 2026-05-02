@@ -10,6 +10,10 @@ import {
     navigationIntent,
     engineFaviconURL,
     pollConfigVersion,
+    resolveTheme,
+    nextTheme,
+    parseCookies,
+    buildThemeCookie,
 } from '../pages/frontend/search.js';
 
 const engines = [
@@ -598,5 +602,84 @@ describe('pollConfigVersion', () => {
         const state = await pollConfigVersion({ initial: 7 }, deps);
         expect(state.initial).toBe(7);
         expect(didReload()).toBe(false);
+    });
+});
+
+describe('resolveTheme', () => {
+    it('honours an explicit saved light preference', () => {
+        expect(resolveTheme('light', true)).toBe('light');
+        expect(resolveTheme('light', false)).toBe('light');
+    });
+
+    it('honours an explicit saved dark preference', () => {
+        expect(resolveTheme('dark', true)).toBe('dark');
+        expect(resolveTheme('dark', false)).toBe('dark');
+    });
+
+    it('falls back to the system preference when nothing is saved', () => {
+        expect(resolveTheme(null, true)).toBe('dark');
+        expect(resolveTheme(null, false)).toBe('light');
+        expect(resolveTheme('', true)).toBe('dark');
+        expect(resolveTheme(undefined, false)).toBe('light');
+    });
+
+    it('treats unrecognised saved values as if no preference was saved', () => {
+        expect(resolveTheme('blue', true)).toBe('dark');
+        expect(resolveTheme('blue', false)).toBe('light');
+    });
+});
+
+describe('nextTheme', () => {
+    it('toggles light to dark and dark to light', () => {
+        expect(nextTheme('light')).toBe('dark');
+        expect(nextTheme('dark')).toBe('light');
+    });
+
+    it('treats anything other than "light" as dark and toggles to light', () => {
+        expect(nextTheme('')).toBe('light');
+        expect(nextTheme('whatever')).toBe('light');
+    });
+});
+
+describe('parseCookies', () => {
+    it('parses a typical document.cookie string', () => {
+        const got = parseCookies('a=1; b=two; subspace-theme=light');
+        expect(got).toEqual({ a: '1', b: 'two', 'subspace-theme': 'light' });
+    });
+
+    it('decodes URL-encoded values', () => {
+        const got = parseCookies('greeting=hello%20world');
+        expect(got.greeting).toBe('hello world');
+    });
+
+    it('returns an empty object for empty / undefined input', () => {
+        expect(parseCookies('')).toEqual({});
+        expect(parseCookies(undefined)).toEqual({});
+    });
+
+    it('skips malformed segments', () => {
+        const got = parseCookies('a=1; brokenpair; b=2');
+        expect(got).toEqual({ a: '1', b: '2' });
+    });
+});
+
+describe('buildThemeCookie', () => {
+    it('scopes the cookie to the parent domain by default', () => {
+        const got = buildThemeCookie('light');
+        expect(got).toContain('subspace-theme=light');
+        expect(got).toContain('Domain=.subspace.pub');
+        expect(got).toContain('Path=/');
+        expect(got).toContain('SameSite=Lax');
+        expect(got).toMatch(/Max-Age=\d+/);
+    });
+
+    it('omits the Domain attribute when explicitly null', () => {
+        const got = buildThemeCookie('dark', { domain: '' });
+        expect(got).not.toContain('Domain=');
+        expect(got).toContain('subspace-theme=dark');
+    });
+
+    it('honours a custom Max-Age', () => {
+        expect(buildThemeCookie('light', { maxAge: 60 })).toContain('Max-Age=60');
     });
 });
