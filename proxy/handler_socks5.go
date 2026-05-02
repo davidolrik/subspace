@@ -101,6 +101,8 @@ func (s *Server) handleSOCKS5(conn *PeekConn) {
 		} else {
 			slog.Error("SOCKS5 dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
 			s.Stats.IncUpstream(usedUpstream, false)
+			s.Stats.IncDomain(hostname, false)
+			s.Stats.IncRoute(route.pattern, false)
 			s.Stats.IncError("dial_failed")
 		}
 		s.socks5Reply(conn, socks5StatusFailure, "0.0.0.0", 0)
@@ -108,6 +110,8 @@ func (s *Server) handleSOCKS5(conn *PeekConn) {
 	}
 
 	s.Stats.IncUpstream(usedUpstream, true)
+	s.Stats.IncDomain(hostname, true)
+	s.Stats.IncRoute(route.pattern, true)
 
 	// Send success reply
 	s.socks5Reply(conn, socks5StatusOK, "0.0.0.0", 0)
@@ -116,6 +120,8 @@ func (s *Server) handleSOCKS5(conn *PeekConn) {
 	rawConn, buffered := conn.Unwrap()
 	result := Relay(rawConn, upstreamConn, buffered)
 	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
+	s.Stats.AddDomainBytes(hostname, result.BytesIn, result.BytesOut)
+	s.Stats.AddRouteBytes(route.pattern, result.BytesIn, result.BytesOut)
 }
 
 // socks5ReadAddr reads the target address based on the address type byte.

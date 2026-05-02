@@ -42,6 +42,8 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 		} else {
 			slog.Error("CONNECT dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
 			s.Stats.IncUpstream(usedUpstream, false)
+			s.Stats.IncDomain(host, false)
+			s.Stats.IncRoute(route.pattern, false)
 			s.Stats.IncError("dial_failed")
 			conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
 		}
@@ -50,6 +52,8 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 	}
 
 	s.Stats.IncUpstream(usedUpstream, true)
+	s.Stats.IncDomain(host, true)
+	s.Stats.IncRoute(route.pattern, true)
 	conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
 	// Unwrap to raw conn for zero-copy relay. After CONNECT + 200 response,
@@ -57,4 +61,6 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 	rawConn, buffered := conn.Unwrap()
 	result := Relay(rawConn, upstreamConn, buffered)
 	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
+	s.Stats.AddDomainBytes(host, result.BytesIn, result.BytesOut)
+	s.Stats.AddRouteBytes(route.pattern, result.BytesIn, result.BytesOut)
 }

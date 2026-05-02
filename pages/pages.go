@@ -215,6 +215,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		mux.HandleFunc(host+"/api/timeseries", h.handleTimeseriesAPI)
 		mux.HandleFunc(host+"/api/snapshot", h.handleSnapshotAPI)
 		mux.HandleFunc(host+"/api/status", h.handleStatusAPI)
+		mux.HandleFunc(host+"/api/top", h.handleTopAPI)
 		mux.HandleFunc(host+"/api/all-links", h.handleAllLinksAPI)
 		mux.HandleFunc(host+"/api/search-engines", h.handleSearchEnginesAPI)
 		mux.HandleFunc(host+"/api/favicon", h.handleFaviconAPI)
@@ -369,6 +370,83 @@ func (h *Handler) handleStatistics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(data)
+}
+
+// handleTopAPI returns Top-N entries for upstreams, domains, or routes
+// over a window. Query parameters:
+//   - kind:     "upstreams" (default), "domains", "routes"
+//   - metric:   "bytes_total" (default), "success", "failures",
+//               "bytes_in", "bytes_out"
+//   - duration: window in seconds (default 86400 = 24h)
+//   - n:        max entries (default 10, capped at 100)
+func (h *Handler) handleTopAPI(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		http.Error(w, "statistics not available", http.StatusServiceUnavailable)
+		return
+	}
+	q := r.URL.Query()
+
+	kind := q.Get("kind")
+	if kind == "" {
+		kind = "upstreams"
+	}
+
+	metric := q.Get("metric")
+	if metric == "" {
+		metric = "bytes_total"
+	}
+
+	duration := 24 * time.Hour
+	if d := q.Get("duration"); d != "" {
+		if seconds, err := strconv.Atoi(d); err == nil && seconds > 0 {
+			duration = time.Duration(seconds) * time.Second
+		}
+	}
+
+	limit := 10
+	if n := q.Get("n"); n != "" {
+		if v, err := strconv.Atoi(n); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	to := time.Now()
+	from := to.Add(-duration)
+
+	var (
+		top []stats.TopEntry
+		err error
+	)
+	switch kind {
+	case "upstreams":
+		top, err = h.store.TopUpstreams(from, to, metric, limit)
+	case "domains":
+		top, err = h.store.TopDomains(from, to, metric, limit)
+	case "routes":
+		top, err = h.store.TopRoutes(from, to, metric, limit)
+	default:
+		http.Error(w, "unknown kind (want upstreams, domains, or routes)", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if top == nil {
+		top = []stats.TopEntry{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"kind":   kind,
+		"metric": metric,
+		"window": int(duration.Seconds()),
+		"limit":  limit,
+		"top":    top,
+	})
 }
 
 func (h *Handler) handleTimeseriesAPI(w http.ResponseWriter, r *http.Request) {

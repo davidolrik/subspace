@@ -256,6 +256,7 @@ The statistics page is always available at `http://stats.subspace.pub/` (or `htt
 - **Connections over time** — line chart showing new connections, active connections, and errors
 - **Traffic by upstream** — stacked bar chart of bytes transferred per upstream
 - **Protocol breakdown** — pie chart of connections by protocol (HTTP, TLS, SOCKS5, CONNECT, WebSocket)
+- **Top activity** — three ranked lists (upstreams, destination hostnames, route patterns) over the same time window as the charts. The metric selector at the top of the section ranks all three lists by total bytes, bytes in, bytes out, successful connections, or failed connections.
 
 All charts support selectable time ranges from 5 minutes to 365 days. Statistics are persisted to a SQLite database at `~/.config/subspace/stats.db` with automatic downsampling (5s resolution to 1m after 1 hour, 1m to 1h after 7 days). Retention defaults to one year; configure it via the [`stats`](/reference/configuration#stats) block — accepts `"30d"`, `"168h"`, `"12h30m"`, etc., or `"forever"` to disable pruning.
 

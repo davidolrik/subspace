@@ -60,6 +60,42 @@ Shows:
 - The selected upstream with type and address
 - `direct connection` if no route matches
 
+## `subspace top <kind>`
+
+Renders a ranked summary of activity from the persistent statistics database. Reads the same SQLite file that `serve` writes (`<config-dir>/stats.db`), so it works whether or not the proxy is currently running. Three kinds are supported:
+
+- `upstreams` — ranked by per-upstream traffic.
+- `domains` — ranked by destination hostname (extracted from Host header / SNI / SOCKS5 destination).
+- `routes` — ranked by matched route pattern (`direct` for traffic that didn't match any rule).
+
+```sh
+subspace top upstreams                  # default: top 10 by bytes_total over 24h
+subspace top domains -w 168h            # busiest hosts over the last 7 days
+subspace top routes  -m success -n 5    # routes carrying the most successful conns
+subspace top domains -m failures        # hosts that fail most often
+subspace top upstreams -J               # JSON for piping into jq / a dashboard
+```
+
+| Flag             | Description                                                                    | Default        |
+| ---------------- | ------------------------------------------------------------------------------ | -------------- |
+| `-w, --window`   | Time window (`time.ParseDuration` syntax — `1h`, `24h`, `168h`)                | `24h`          |
+| `-m, --metric`   | One of `success`, `failures`, `bytes_in`, `bytes_out`, `bytes_total`           | `bytes_total`  |
+| `-n, --limit`    | Maximum number of entries returned                                              | `10`           |
+| `-J, --json`     | Emit a JSON envelope (`{kind, metric, window, limit, top: [{name, value}]}`)   | `false`        |
+
+Counters in the database are cumulative since process start, so the value shown is the per-window delta (`MAX − MIN` of the metric over the window). A subspace restart inside the window can cause a small undercount; for long windows that's negligible.
+
+The same data is rendered live on the [statistics page](/guide/pages#statistics-page) under "Top Activity", with the metric selector controlling all three lists at once.
+
+Example:
+
+```text
+  Top 2 upstreams by bytes_total over 24h0m0s
+
+   1.  direct  2.1 GiB
+   2.  hq      63.1 MiB
+```
+
 ## `subspace validate`
 
 Parses the config (main file plus all `include`s and `page` files) and reports any errors without starting the server. Useful for CI on a config repo, or as a pre-commit step.

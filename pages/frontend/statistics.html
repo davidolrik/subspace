@@ -80,6 +80,83 @@
             margin-bottom: 0.75rem;
             margin-top: 1.5rem;
         }
+        .top-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .top-controls-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-right: 0.25rem;
+        }
+        .top-controls button {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+            padding: 0.35rem 0.7rem;
+            font-size: 0.78rem;
+            cursor: pointer;
+        }
+        .top-controls button:hover {
+            border-color: var(--text-muted);
+            color: var(--text);
+        }
+        .top-controls button.active {
+            border-color: var(--cyan);
+            color: var(--cyan);
+        }
+        .top-card .top-list {
+            list-style: none;
+            counter-reset: top-rank;
+            padding: 0;
+            margin: 0;
+        }
+        .top-card .top-list li {
+            counter-increment: top-rank;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 0.75rem;
+            padding: 0.35rem 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.85rem;
+        }
+        .top-card .top-list li::before {
+            content: counter(top-rank) ".";
+            color: var(--text-muted);
+            font-variant-numeric: tabular-nums;
+            margin-right: 0.5rem;
+            min-width: 1.5em;
+        }
+        .top-card .top-list li:last-child {
+            border-bottom: none;
+        }
+        .top-card .top-name {
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+        .top-card .top-value {
+            color: var(--cyan);
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
+        }
+        .top-card .top-empty {
+            color: var(--text-muted);
+            font-style: italic;
+            border-bottom: none;
+        }
+        .top-card .top-empty::before {
+            content: "";
+            margin-right: 0;
+            min-width: 0;
+        }
         .section-title:first-of-type {
             margin-top: 0;
         }
@@ -282,6 +359,61 @@
                 </div>
             </div>
         </div>
+
+        <h2 class="section-title">Top Activity</h2>
+        <div class="top-controls">
+            <span class="top-controls-label">Rank by:</span>
+            <template x-for="opt in [
+                { label: 'Total bytes', value: 'bytes_total' },
+                { label: 'Bytes in',    value: 'bytes_in' },
+                { label: 'Bytes out',   value: 'bytes_out' },
+                { label: 'Successes',   value: 'success' },
+                { label: 'Failures',    value: 'failures' },
+            ]" :key="opt.value">
+                <button :class="{ active: topMetric === opt.value }"
+                        @click="setTopMetric(opt.value)"
+                        x-text="opt.label"></button>
+            </template>
+        </div>
+
+        <div class="stats-grid">
+            <div class="chart-card top-card">
+                <h2>Top Upstreams</h2>
+                <ol class="top-list">
+                    <template x-for="entry in topUpstreams" :key="entry.name">
+                        <li>
+                            <span class="top-name" x-text="entry.name"></span>
+                            <span class="top-value" x-text="formatTopValue(entry.value)"></span>
+                        </li>
+                    </template>
+                    <li class="top-empty" x-show="topUpstreams.length === 0">No activity yet</li>
+                </ol>
+            </div>
+            <div class="chart-card top-card">
+                <h2>Top Domains</h2>
+                <ol class="top-list">
+                    <template x-for="entry in topDomains" :key="entry.name">
+                        <li>
+                            <span class="top-name" x-text="entry.name"></span>
+                            <span class="top-value" x-text="formatTopValue(entry.value)"></span>
+                        </li>
+                    </template>
+                    <li class="top-empty" x-show="topDomains.length === 0">No activity yet</li>
+                </ol>
+            </div>
+            <div class="chart-card top-card">
+                <h2>Top Routes</h2>
+                <ol class="top-list">
+                    <template x-for="entry in topRoutes" :key="entry.name">
+                        <li>
+                            <span class="top-name" x-text="entry.name"></span>
+                            <span class="top-value" x-text="formatTopValue(entry.value)"></span>
+                        </li>
+                    </template>
+                    <li class="top-empty" x-show="topRoutes.length === 0">No activity yet</li>
+                </ol>
+            </div>
+        </div>
     </main>
     <!-- Search popup -->
     <template x-if="open">
@@ -450,6 +582,13 @@
             chart.update('none');
         }
 
+        function formatBytesJS(b) {
+            if (b >= (1 << 30)) return (b / (1 << 30)).toFixed(1) + ' GiB';
+            if (b >= (1 << 20)) return (b / (1 << 20)).toFixed(1) + ' MiB';
+            if (b >= (1 << 10)) return (b / (1 << 10)).toFixed(1) + ' KiB';
+            return b + ' B';
+        }
+
         document.addEventListener('alpine:init', () => {
             Alpine.data('statistics', () => ({
                 live: { connections: 0, active: 0, upstreams: {}, protocols: {} },
@@ -458,6 +597,13 @@
                 configErrors: [],
                 duration: 3600,
                 refreshTimer: null,
+                // Top-N reports — one ranking per kind (upstreams,
+                // domains, routes). Metric is shared across all three
+                // and selectable by the user.
+                topMetric: 'bytes_total',
+                topUpstreams: [],
+                topDomains: [],
+                topRoutes: [],
                 timeOptions: [
                     { label: '5m', seconds: 300 },
                     { label: '1h', seconds: 3600 },
@@ -486,18 +632,28 @@
                 },
 
                 async refresh() {
-                    const [liveData, timeseriesData, statusData, navData, errorsData] = await Promise.all([
+                    const topURL = (kind) => `/api/top?kind=${kind}&metric=${this.topMetric}&duration=${this.duration}&n=10`;
+                    const [
+                        liveData, timeseriesData, statusData, navData, errorsData,
+                        topUp, topDom, topRt,
+                    ] = await Promise.all([
                         fetch('/api/snapshot').then(r => r.json()).catch(() => null),
                         fetch(`/api/timeseries?duration=${this.duration}`).then(r => r.json()).catch(() => null),
                         fetch('/api/status').then(r => r.json()).catch(() => null),
                         fetch('/api/nav').then(r => r.json()).catch(() => null),
                         fetch('/api/config-errors').then(r => r.json()).catch(() => null),
+                        fetch(topURL('upstreams')).then(r => r.json()).catch(() => null),
+                        fetch(topURL('domains')).then(r => r.json()).catch(() => null),
+                        fetch(topURL('routes')).then(r => r.json()).catch(() => null),
                     ]);
 
                     if (liveData) this.live = liveData;
                     if (statusData) this.statusData = statusData;
                     if (navData) this.nav = navData;
                     this.configErrors = (errorsData && errorsData.errors) || [];
+                    this.topUpstreams = (topUp && topUp.top) || [];
+                    this.topDomains = (topDom && topDom.top) || [];
+                    this.topRoutes = (topRt && topRt.top) || [];
 
                     // Update charts after Alpine has finished processing DOM
                     // updates from the reactive data changes above
@@ -505,6 +661,16 @@
                         const points = (timeseriesData && timeseriesData.points) || [];
                         this.updateCharts(points);
                     });
+                },
+
+                setTopMetric(metric) {
+                    this.topMetric = metric;
+                    this.refresh();
+                },
+
+                formatTopValue(v) {
+                    if (this.topMetric.startsWith('bytes')) return formatBytesJS(v);
+                    return v.toLocaleString();
                 },
 
                 sortedUpstreams() {

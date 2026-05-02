@@ -191,8 +191,11 @@ func (s *Server) Reload(matcher *route.Matcher, dialers map[string]upstream.Dial
 }
 
 // resolvedRoute holds the result of routing a hostname: which upstream
-// was selected and the dialer to use, plus an optional fallback.
+// was selected and the dialer to use, plus an optional fallback. The
+// pattern is the matched rule's pattern, or "direct" when nothing
+// matched — used to attribute traffic to a route in the stats reports.
 type resolvedRoute struct {
+	pattern          string
 	upstream         string
 	dialer           upstream.Dialer
 	fallbackUpstream string
@@ -215,10 +218,10 @@ func (s *Server) routeFor(hostname string) resolvedRoute {
 
 	rule := matcher.Resolve(hostname)
 	if rule == nil {
-		return resolvedRoute{upstream: "direct", dialer: s.direct}
+		return resolvedRoute{pattern: "direct", upstream: "direct", dialer: s.direct}
 	}
 
-	r := resolvedRoute{upstream: rule.Upstream, dialer: s.direct}
+	r := resolvedRoute{pattern: rule.Pattern, upstream: rule.Upstream, dialer: s.direct}
 	if rule.Upstream != "direct" {
 		if d, ok := dialers[rule.Upstream]; ok {
 			r.dialer = d

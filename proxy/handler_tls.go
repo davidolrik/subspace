@@ -176,6 +176,8 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 		} else {
 			slog.Error("TLS dial failed", "sni", sni, "target", targetAddr, "via", usedUpstream, "error", err)
 			s.Stats.IncUpstream(usedUpstream, false)
+			s.Stats.IncDomain(sni, false)
+			s.Stats.IncRoute(route.pattern, false)
 			s.Stats.IncError("dial_failed")
 		}
 		conn.Close()
@@ -183,7 +185,11 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 	}
 
 	s.Stats.IncUpstream(usedUpstream, true)
+	s.Stats.IncDomain(sni, true)
+	s.Stats.IncRoute(route.pattern, true)
 	rawConn, buffered := conn.Unwrap()
 	result := Relay(rawConn, upstreamConn, buffered)
 	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
+	s.Stats.AddDomainBytes(sni, result.BytesIn, result.BytesOut)
+	s.Stats.AddRouteBytes(route.pattern, result.BytesIn, result.BytesOut)
 }

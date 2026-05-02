@@ -59,6 +59,26 @@ CREATE TABLE IF NOT EXISTS snapshot_upstreams (
 	bytes_out INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_snap_up_ts ON snapshot_upstreams(timestamp);
+
+CREATE TABLE IF NOT EXISTS snapshot_domains (
+	timestamp INTEGER NOT NULL,
+	domain TEXT NOT NULL,
+	success INTEGER NOT NULL,
+	failures INTEGER NOT NULL,
+	bytes_in INTEGER NOT NULL,
+	bytes_out INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_snap_dom_ts ON snapshot_domains(timestamp);
+
+CREATE TABLE IF NOT EXISTS snapshot_routes (
+	timestamp INTEGER NOT NULL,
+	route TEXT NOT NULL,
+	success INTEGER NOT NULL,
+	failures INTEGER NOT NULL,
+	bytes_in INTEGER NOT NULL,
+	bytes_out INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_snap_rt_ts ON snapshot_routes(timestamp);
 `
 
 // OpenStore opens or creates a SQLite database at the given path.
@@ -126,6 +146,24 @@ func (s *Store) Record(ts time.Time, snap Snapshot) error {
 		if _, err := tx.Exec(
 			"INSERT INTO snapshot_upstreams (timestamp, upstream, success, failures, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?)",
 			unix, name, us.Success, us.Failures, us.BytesIn, us.BytesOut,
+		); err != nil {
+			return err
+		}
+	}
+
+	for host, ds := range snap.Domains {
+		if _, err := tx.Exec(
+			"INSERT INTO snapshot_domains (timestamp, domain, success, failures, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?)",
+			unix, host, ds.Success, ds.Failures, ds.BytesIn, ds.BytesOut,
+		); err != nil {
+			return err
+		}
+	}
+
+	for pattern, rs := range snap.Routes {
+		if _, err := tx.Exec(
+			"INSERT INTO snapshot_routes (timestamp, route, success, failures, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?)",
+			unix, pattern, rs.Success, rs.Failures, rs.BytesIn, rs.BytesOut,
 		); err != nil {
 			return err
 		}
@@ -264,7 +302,14 @@ func (s *Store) Prune(olderThan time.Duration) error {
 	}
 	defer tx.Rollback()
 
-	for _, table := range []string{"snapshots", "snapshot_protocols", "snapshot_errors", "snapshot_upstreams"} {
+	for _, table := range []string{
+		"snapshots",
+		"snapshot_protocols",
+		"snapshot_errors",
+		"snapshot_upstreams",
+		"snapshot_domains",
+		"snapshot_routes",
+	} {
 		if _, err := tx.Exec("DELETE FROM "+table+" WHERE timestamp < ?", cutoff); err != nil {
 			return fmt.Errorf("pruning %s: %w", table, err)
 		}
@@ -357,6 +402,42 @@ func (s *Store) Downsample(olderThan time.Duration, bucket time.Duration) error 
 		return fmt.Errorf("insert aggregated upstreams: %w", err)
 	}
 	tx.Exec("DROP TABLE tmp_up")
+
+	// --- domains ---
+	if _, err := tx.Exec(`
+		CREATE TEMP TABLE tmp_dom AS
+		SELECT (timestamp / ?) * ? AS ts, domain, MAX(success) AS success, MAX(failures) AS failures,
+		       MAX(bytes_in) AS bytes_in, MAX(bytes_out) AS bytes_out
+		FROM snapshot_domains WHERE timestamp < ?
+		GROUP BY ts, domain
+	`, bucketSec, bucketSec, cutoff); err != nil {
+		return fmt.Errorf("aggregate domains: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM snapshot_domains WHERE timestamp < ?", cutoff); err != nil {
+		return fmt.Errorf("delete old domains: %w", err)
+	}
+	if _, err := tx.Exec("INSERT INTO snapshot_domains SELECT * FROM tmp_dom"); err != nil {
+		return fmt.Errorf("insert aggregated domains: %w", err)
+	}
+	tx.Exec("DROP TABLE tmp_dom")
+
+	// --- routes ---
+	if _, err := tx.Exec(`
+		CREATE TEMP TABLE tmp_rt AS
+		SELECT (timestamp / ?) * ? AS ts, route, MAX(success) AS success, MAX(failures) AS failures,
+		       MAX(bytes_in) AS bytes_in, MAX(bytes_out) AS bytes_out
+		FROM snapshot_routes WHERE timestamp < ?
+		GROUP BY ts, route
+	`, bucketSec, bucketSec, cutoff); err != nil {
+		return fmt.Errorf("aggregate routes: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM snapshot_routes WHERE timestamp < ?", cutoff); err != nil {
+		return fmt.Errorf("delete old routes: %w", err)
+	}
+	if _, err := tx.Exec("INSERT INTO snapshot_routes SELECT * FROM tmp_rt"); err != nil {
+		return fmt.Errorf("insert aggregated routes: %w", err)
+	}
+	tx.Exec("DROP TABLE tmp_rt")
 
 	return tx.Commit()
 }

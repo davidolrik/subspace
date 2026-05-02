@@ -5,6 +5,55 @@ import (
 	"testing"
 )
 
+func TestCollectorTracksDomainsAndRoutes(t *testing.T) {
+	c := New()
+
+	c.IncDomain("example.com", true)
+	c.IncDomain("example.com", true)
+	c.IncDomain("example.com", false)
+	c.AddDomainBytes("example.com", 100, 200)
+	c.IncDomain("github.com", true)
+
+	c.IncRoute("*.example.com", true)
+	c.AddRouteBytes("*.example.com", 50, 75)
+	c.IncRoute("direct", false)
+
+	snap := c.Snapshot()
+
+	if d := snap.Domains["example.com"]; d.Success != 2 || d.Failures != 1 || d.BytesIn != 100 || d.BytesOut != 200 {
+		t.Errorf("example.com domain stats = %+v, want success=2 failures=1 bytes_in=100 bytes_out=200", d)
+	}
+	if d := snap.Domains["github.com"]; d.Success != 1 {
+		t.Errorf("github.com.Success = %d, want 1", d.Success)
+	}
+	if r := snap.Routes["*.example.com"]; r.Success != 1 || r.BytesIn != 50 || r.BytesOut != 75 {
+		t.Errorf("*.example.com route stats = %+v, want success=1 bytes_in=50 bytes_out=75", r)
+	}
+	if r := snap.Routes["direct"]; r.Failures != 1 {
+		t.Errorf("direct route failures = %d, want 1", r.Failures)
+	}
+}
+
+func TestCollectorIgnoresEmptyDomainAndRoute(t *testing.T) {
+	// Some handler paths (e.g. peek_failed, no SNI) reach the
+	// instrumentation site without a usable hostname/route. Pass
+	// "" and verify nothing is recorded so we don't pollute the
+	// reports with anonymous entries.
+	c := New()
+	c.IncDomain("", true)
+	c.AddDomainBytes("", 100, 200)
+	c.IncRoute("", true)
+	c.AddRouteBytes("", 100, 200)
+
+	snap := c.Snapshot()
+	if len(snap.Domains) != 0 {
+		t.Errorf("Domains = %v, want empty", snap.Domains)
+	}
+	if len(snap.Routes) != 0 {
+		t.Errorf("Routes = %v, want empty", snap.Routes)
+	}
+}
+
 func TestCollectorGlobalCounters(t *testing.T) {
 	c := New()
 

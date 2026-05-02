@@ -20,6 +20,15 @@ type Snapshot struct {
 	Protocols   map[string]int64         `json:"protocols"`
 	Errors      map[string]int64         `json:"errors"`
 	Upstreams   map[string]UpstreamStats `json:"upstreams"`
+	// Domains tracks per-destination-host activity. Keys are the
+	// hostname extracted from the request (Host header / SNI / SOCKS5
+	// destination). Empty hostnames are not recorded.
+	Domains map[string]UpstreamStats `json:"domains,omitempty"`
+	// Routes tracks per-route-pattern activity. Keys are the matched
+	// route pattern from the config (e.g. "*.corp.example") or the
+	// literal "direct" when no rule matched. Empty patterns are not
+	// recorded.
+	Routes map[string]UpstreamStats `json:"routes,omitempty"`
 }
 
 // upstreamCounters holds the atomic counters for one upstream.
@@ -39,6 +48,8 @@ type Collector struct {
 	protocols map[string]*atomic.Int64
 	errors    map[string]*atomic.Int64
 	upstreams map[string]*upstreamCounters
+	domains   map[string]*upstreamCounters
+	routes    map[string]*upstreamCounters
 }
 
 // New creates a Collector with pre-populated counters for known protocol
@@ -61,6 +72,8 @@ func New() *Collector {
 		protocols: protocols,
 		errors:    errors,
 		upstreams: make(map[string]*upstreamCounters),
+		domains:   make(map[string]*upstreamCounters),
+		routes:    make(map[string]*upstreamCounters),
 	}
 }
 
@@ -102,6 +115,75 @@ func (c *Collector) AddUpstreamBytes(name string, bytesIn, bytesOut int64) {
 	u.bytesOut.Add(bytesOut)
 }
 
+// IncDomain records a connection attempt to the given destination
+// host. Empty hostnames are ignored so handler paths that reach the
+// instrumentation site without a usable hostname (peek failures, SNI
+// missing, etc.) don't pollute the report with anonymous entries.
+func (c *Collector) IncDomain(host string, success bool) {
+	if host == "" {
+		return
+	}
+	d := c.getOrCreateNamed(&c.domains, host)
+	if success {
+		d.success.Add(1)
+	} else {
+		d.failures.Add(1)
+	}
+}
+
+// AddDomainBytes adds byte transfer counts for a destination host.
+func (c *Collector) AddDomainBytes(host string, bytesIn, bytesOut int64) {
+	if host == "" {
+		return
+	}
+	d := c.getOrCreateNamed(&c.domains, host)
+	d.bytesIn.Add(bytesIn)
+	d.bytesOut.Add(bytesOut)
+}
+
+// IncRoute records a connection routed by the given pattern. Empty
+// patterns are ignored. Use the literal "direct" for traffic that did
+// not match any rule.
+func (c *Collector) IncRoute(pattern string, success bool) {
+	if pattern == "" {
+		return
+	}
+	r := c.getOrCreateNamed(&c.routes, pattern)
+	if success {
+		r.success.Add(1)
+	} else {
+		r.failures.Add(1)
+	}
+}
+
+// AddRouteBytes adds byte transfer counts for a route pattern.
+func (c *Collector) AddRouteBytes(pattern string, bytesIn, bytesOut int64) {
+	if pattern == "" {
+		return
+	}
+	r := c.getOrCreateNamed(&c.routes, pattern)
+	r.bytesIn.Add(bytesIn)
+	r.bytesOut.Add(bytesOut)
+}
+
+func (c *Collector) getOrCreateNamed(m *map[string]*upstreamCounters, name string) *upstreamCounters {
+	c.mu.RLock()
+	if u, ok := (*m)[name]; ok {
+		c.mu.RUnlock()
+		return u
+	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if u, ok := (*m)[name]; ok {
+		return u
+	}
+	u := &upstreamCounters{}
+	(*m)[name] = u
+	return u
+}
+
 // Snapshot returns a point-in-time copy of all statistics.
 func (c *Collector) Snapshot() Snapshot {
 	c.mu.RLock()
@@ -113,6 +195,8 @@ func (c *Collector) Snapshot() Snapshot {
 		Protocols:   make(map[string]int64, len(c.protocols)),
 		Errors:      make(map[string]int64, len(c.errors)),
 		Upstreams:   make(map[string]UpstreamStats, len(c.upstreams)),
+		Domains:     make(map[string]UpstreamStats, len(c.domains)),
+		Routes:      make(map[string]UpstreamStats, len(c.routes)),
 	}
 
 	for k, v := range c.protocols {
@@ -121,16 +205,22 @@ func (c *Collector) Snapshot() Snapshot {
 	for k, v := range c.errors {
 		snap.Errors[k] = v.Load()
 	}
-	for k, v := range c.upstreams {
-		snap.Upstreams[k] = UpstreamStats{
+	copyUpstreamCounters(snap.Upstreams, c.upstreams)
+	copyUpstreamCounters(snap.Domains, c.domains)
+	copyUpstreamCounters(snap.Routes, c.routes)
+
+	return snap
+}
+
+func copyUpstreamCounters(dst map[string]UpstreamStats, src map[string]*upstreamCounters) {
+	for k, v := range src {
+		dst[k] = UpstreamStats{
 			Success:  v.success.Load(),
 			Failures: v.failures.Load(),
 			BytesIn:  v.bytesIn.Load(),
 			BytesOut: v.bytesOut.Load(),
 		}
 	}
-
-	return snap
 }
 
 func (c *Collector) getOrCreateCounter(m map[string]*atomic.Int64, mu *sync.RWMutex, key string) *atomic.Int64 {

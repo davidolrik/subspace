@@ -5,9 +5,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"go.olrik.dev/subspace/stats"
 )
 
 func TestIsInternalHost(t *testing.T) {
@@ -725,6 +729,81 @@ func TestFaviconAPICachesUpstreamFailure(t *testing.T) {
 	}
 	if h := atomic.LoadInt32(&hits); h != 1 {
 		t.Errorf("upstream hits = %d, want 1 (negative cache prevents re-fetch)", h)
+	}
+}
+
+func TestHandleTopAPI(t *testing.T) {
+	store, err := stats.OpenStore(filepath.Join(t.TempDir(), "stats.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Now()
+	for i, snap := range []stats.Snapshot{
+		{
+			Domains: map[string]stats.UpstreamStats{"github.com": {BytesIn: 0}},
+			Routes:  map[string]stats.UpstreamStats{"*.corp": {BytesIn: 0}},
+		},
+		{
+			Domains: map[string]stats.UpstreamStats{"github.com": {BytesIn: 1500}},
+			Routes:  map[string]stats.UpstreamStats{"*.corp": {BytesIn: 5000}},
+		},
+	} {
+		ts := now.Add(time.Duration(i-2) * time.Minute)
+		if err := store.Record(ts, snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	h := New([]PageInfo{{Name: "stats"}}, nil, store)
+
+	cases := []struct {
+		kind     string
+		expect   string
+		minValue int64
+	}{
+		{"domains", "github.com", 1500},
+		{"routes", "*.corp", 5000},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodGet,
+			"http://stats.subspace.pub/api/top?kind="+c.kind+"&metric=bytes_in&duration=3600&n=5", nil)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("kind=%s: status = %d (body %s)", c.kind, rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Kind   string           `json:"kind"`
+			Metric string           `json:"metric"`
+			Top    []stats.TopEntry `json:"top"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("kind=%s decode: %v", c.kind, err)
+		}
+		if resp.Kind != c.kind {
+			t.Errorf("kind=%s: response.kind = %q", c.kind, resp.Kind)
+		}
+		if len(resp.Top) == 0 || resp.Top[0].Name != c.expect {
+			t.Errorf("kind=%s: top = %+v, want first entry %q", c.kind, resp.Top, c.expect)
+		}
+		if resp.Top[0].Value < c.minValue {
+			t.Errorf("kind=%s: top value = %d, want >= %d", c.kind, resp.Top[0].Value, c.minValue)
+		}
+	}
+}
+
+func TestHandleTopAPIRejectsUnknownKind(t *testing.T) {
+	store, _ := stats.OpenStore(filepath.Join(t.TempDir(), "stats.db"))
+	defer store.Close()
+	h := New([]PageInfo{{Name: "stats"}}, nil, store)
+	req := httptest.NewRequest(http.MethodGet,
+		"http://stats.subspace.pub/api/top?kind=widgets", nil)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown kind: status = %d, want 400", rec.Code)
 	}
 }
 
