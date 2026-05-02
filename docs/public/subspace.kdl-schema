@@ -80,8 +80,8 @@ document {
     // -- routes -------------------------------------------------------
 
     node "route" {
-        description "Map a hostname pattern to an upstream proxy."
-        value type="string" description="Hostname pattern: literal, glob, or wildcard (e.g. \"*.corp.example\")."
+        description "Map a hostname or IP-range pattern to an upstream proxy."
+        value type="string" description="Pattern: exact hostname (\"api.example.com\"), domain suffix (\".example.com\"), glob (\"*.cdn.example.com\"), or CIDR (\"10.0.0.0/8\", \"fd00::/8\"). Last matching rule wins, so list more specific rules later."
         prop "via" required=#true {
             description "Upstream name to route matching traffic through. Use the literal \"direct\" to bypass all upstreams."
             type "string"

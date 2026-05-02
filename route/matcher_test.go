@@ -190,6 +190,55 @@ func TestMatcherCIDRWithPort(t *testing.T) {
 	}
 }
 
+func TestMatcherCIDR6WithPort(t *testing.T) {
+	m := NewMatcher([]Rule{
+		{Pattern: "fd00::/8", Upstream: "private6"},
+	})
+
+	// IPv6 with port uses bracket notation. SplitHostPort should
+	// strip the port and the IPv6 host should still match.
+	if got := m.Match("[fd12::1]:8080"); got != "private6" {
+		t.Errorf("Match([fd12::1]:8080) = %q, want %q", got, "private6")
+	}
+}
+
+func TestMatcherCIDROverlapMoreSpecificWins(t *testing.T) {
+	// Last match wins — operators express "more specific" by
+	// listing it after the broader rule. Verify the common
+	// pattern: route "10.0.0.0/8" via the corporate proxy except
+	// for "10.99.0.0/16" which goes direct.
+	m := NewMatcher([]Rule{
+		{Pattern: "10.0.0.0/8", Upstream: "corp"},
+		{Pattern: "10.99.0.0/16", Upstream: "direct"},
+	})
+
+	if got := m.Match("10.1.2.3"); got != "corp" {
+		t.Errorf("Match(10.1.2.3) = %q, want %q", got, "corp")
+	}
+	if got := m.Match("10.99.5.5"); got != "direct" {
+		t.Errorf("Match(10.99.5.5) = %q, want %q (more specific overrides)", got, "direct")
+	}
+}
+
+func TestMatcherCIDRDoesNotMatchHostnames(t *testing.T) {
+	// CIDR rules must only match real IP destinations, never a
+	// hostname that happens to share digits — otherwise a malicious
+	// or accidental hostname could route through the wrong upstream.
+	m := NewMatcher([]Rule{
+		{Pattern: "10.0.0.0/8", Upstream: "internal"},
+	})
+
+	for _, h := range []string{
+		"example.com",
+		"10-0-0-5.example.com",
+		"10.example.com",
+	} {
+		if got := m.Match(h); got != "" {
+			t.Errorf("Match(%q) = %q, want empty (hostnames must not match CIDR)", h, got)
+		}
+	}
+}
+
 func TestMatcherMixedPatternTypes(t *testing.T) {
 	m := NewMatcher([]Rule{
 		{Pattern: "10.0.0.0/8", Upstream: "cidr-match"},
