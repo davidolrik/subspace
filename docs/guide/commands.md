@@ -96,6 +96,22 @@ Example:
    2.  hq      63.1 MiB
 ```
 
+## `subspace schema`
+
+Prints the embedded KDL schema describing every node, property, and child the config file accepts. Editors with kdl-schema support can use this for completion and validation; for editors without schema support it doubles as a machine-readable reference.
+
+```sh
+subspace schema > ~/.config/subspace/subspace.kdl-schema
+```
+
+Then point your editor at the file. Most KDL editor extensions look for a `kdl-schema` directive on the first line of the document, so add a comment to the top of your `config.kdl`:
+
+```kdl
+// kdl-schema "./subspace.kdl-schema"
+```
+
+The same schema is published at [`https://subspace.pub/subspace.kdl-schema`](https://subspace.pub/subspace.kdl-schema), so you can also reference it by URL if your editor supports remote schemas.
+
 ## `subspace validate`
 
 Parses the config (main file plus all `include`s and `page` files) and reports any errors without starting the server. Useful for CI on a config repo, or as a pre-commit step.

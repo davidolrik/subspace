@@ -1,0 +1,188 @@
+// subspace.kdl-schema
+//
+// KDL schema describing the layout of subspace's configuration file.
+// Editors that support kdl-schema (https://github.com/kdl-org/kdl) can
+// use this for completion, validation, and inline help; editors that
+// don't can still treat this as a machine-readable reference.
+//
+// The canonical copy lives in the subspace repo. To install locally:
+//
+//   subspace schema > ~/.config/subspace/subspace.kdl-schema
+//
+// Then point your editor at it (most KDL editor extensions look at a
+// `kdl-schema` directive on the first line of the document, e.g.:
+//
+//   // kdl-schema "./subspace.kdl-schema"
+//
+// at the top of your config.kdl).
+
+document {
+    info {
+        title "subspace configuration"
+        description "Configuration for the subspace transparent proxy and pages dashboard."
+        link "https://subspace.pub/reference/configuration" rel="documentation"
+        link "https://github.com/davidolrik/subspace" rel="source"
+    }
+
+    // -- listener -----------------------------------------------------
+
+    node "listen" max=1 {
+        description "Bind address for the proxy listener (e.g. \":8080\" or \"127.0.0.1:8118\")."
+        value type="string"
+    }
+
+    node "control_socket" max=1 {
+        description "Filesystem path to the Unix domain socket used by the CLI for status, logs, and resolve."
+        value type="string"
+    }
+
+    // -- upstreams ----------------------------------------------------
+
+    node "upstream" {
+        description "Define a named upstream proxy. Reference it from `route` rules with via=\"<name>\"."
+        value type="string" description="Unique upstream name."
+        children {
+            node "type" max=1 {
+                description "Upstream protocol. One of: \"http\" (default), \"socks5\", \"wireguard\"."
+                value type="string"
+            }
+            node "address" max=1 {
+                description "host:port of the upstream proxy. Required for http and socks5; ignored for wireguard."
+                value type="string"
+            }
+            node "username" max=1 {
+                description "Optional auth username (http and socks5)."
+                value type="string"
+            }
+            node "password" max=1 {
+                description "Optional auth password (http and socks5)."
+                value type="string"
+            }
+            node "endpoint" max=1 {
+                description "WireGuard peer endpoint (host:port)."
+                value type="string"
+            }
+            node "private_key" max=1 {
+                description "WireGuard local private key (base64)."
+                value type="string"
+            }
+            node "public_key" max=1 {
+                description "WireGuard peer public key (base64)."
+                value type="string"
+            }
+            node "dns" max=1 {
+                description "Optional DNS server reachable via the WireGuard tunnel."
+                value type="string"
+            }
+        }
+    }
+
+    // -- routes -------------------------------------------------------
+
+    node "route" {
+        description "Map a hostname pattern to an upstream proxy."
+        value type="string" description="Hostname pattern: literal, glob, or wildcard (e.g. \"*.corp.example\")."
+        prop "via" required=#true {
+            description "Upstream name to route matching traffic through. Use the literal \"direct\" to bypass all upstreams."
+            type "string"
+        }
+        prop "fallback" {
+            description "Optional second upstream used when `via` fails its health check. Must differ from `via`."
+            type "string"
+        }
+    }
+
+    // -- pages --------------------------------------------------------
+
+    node "page" {
+        description "Mount a link-page KDL file under pages.subspace.pub/<name>/."
+        value type="string" description="Relative or absolute path to the page KDL file."
+        prop "name" {
+            description "Override the page name (defaults to the filename minus .kdl)."
+            type "string"
+        }
+        prop "alias" {
+            description "Additional URL segment that maps to the same page."
+            type "string"
+        }
+    }
+
+    // -- tags ---------------------------------------------------------
+
+    node "tags" max=1 {
+        description "Global tag palette. Pages reference these by name to render coloured pills."
+        children {
+            node "tag" {
+                description "Define one tag."
+                value type="string" description="Unique tag name (referenced from page KDL files)."
+                prop "color" required=#true {
+                    description "Pill colour (any CSS-valid colour, typically a hex string)."
+                    type "string"
+                }
+                prop "alias" {
+                    description "Display label shown on the pill (defaults to the tag name; may repeat across tags)."
+                    type "string"
+                }
+            }
+        }
+    }
+
+    // -- search engines ----------------------------------------------
+
+    node "search-engines" max=1 {
+        description "External search engines invokable from the / search palette."
+        prop "default" {
+            description "Engine name (case-insensitive) shown first in the no-match fallback list."
+            type "string"
+        }
+        children {
+            node "engine" {
+                description "One search engine."
+                value type="string" description="Primary keyword used to invoke the engine."
+                prop "url" required=#true {
+                    description "URL template; must contain the literal placeholder {query}."
+                    type "string"
+                }
+                prop "alias" {
+                    description "Additional keyword that also invokes this engine."
+                    type "string"
+                }
+                prop "icon" {
+                    description "Icon name (si-*, fa-*, mdi-*, nf-*). When omitted, subspace fetches and caches /favicon.ico."
+                    type "string"
+                }
+                prop "description" {
+                    description "Short description rendered as the third line of the engine's result row."
+                    type "string"
+                }
+                prop "fallback" {
+                    description "When #true, include this engine in the no-match fallback list alongside the default."
+                    type "boolean"
+                }
+                prop "url-encode" {
+                    description "Encoding mode applied to the query before substitution. One of: \"component\" (default; encodeURIComponent — spaces → %20), \"form\" (spaces → +), \"raw\" (passthrough)."
+                    type "string"
+                }
+            }
+        }
+    }
+
+    // -- stats --------------------------------------------------------
+
+    node "stats" max=1 {
+        description "Statistics database settings."
+        children {
+            node "retention" max=1 {
+                description "How long historical samples are kept. Accepts day suffixes (\"30d\"), Go duration syntax (\"168h\", \"12h30m\"), or \"forever\" / \"0\" to disable pruning. Defaults to 365d."
+                value type="string"
+            }
+        }
+    }
+
+    // -- include ------------------------------------------------------
+
+    node "include" {
+        description "Include another KDL config file. Path is resolved relative to the file containing the include. Glob patterns (*, ?, [...]) are expanded; non-matching globs are silently ignored, exact missing paths are an error."
+        value type="string"
+    }
+}

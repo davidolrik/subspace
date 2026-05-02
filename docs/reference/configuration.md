@@ -202,6 +202,18 @@ Config validation runs after all includes are resolved:
 - Circular includes are rejected
 - Unknown node types produce an error
 
+For CI on a config repo, run `subspace validate` (see [Commands → validate](/guide/commands#subspace-validate)). It runs the same pipeline as `serve` and exits non-zero on any error.
+
+## Editor Schema
+
+A KDL schema describing every node, property, and child this reference documents lives in the binary and at [`https://subspace.pub/subspace.kdl-schema`](https://subspace.pub/subspace.kdl-schema). Generate a local copy with:
+
+```sh
+subspace schema > ~/.config/subspace/subspace.kdl-schema
+```
+
+and point your editor at it (most KDL editor extensions look for a `kdl-schema` comment on the first line of the document — see [Commands → schema](/guide/commands#subspace-schema) for the wiring).
+
 ## Hot Reload
 
 All parsed files (main config and all includes) are monitored via filesystem watchers. Changes trigger a full re-parse and validation cycle. If valid, the new routing is applied atomically. If invalid, the current config stays active and a warning is logged.
