@@ -17,9 +17,9 @@ list "Infrastructure" {
 }
 `)
 
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 
 	if len(cfg.Sections) != 2 {
@@ -59,9 +59,9 @@ list "Repos" {
 	link "internal" url="https://gitlab.example.com/team/internal"
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 
 	if len(cfg.Sections) != 1 {
@@ -94,14 +94,21 @@ list "Repos" {
 }
 
 func TestParsePageListSubtitleRequiresName(t *testing.T) {
-	_, err := ParsePage([]byte(`
+	cfg, errs := ParsePage([]byte(`
 list "Repos" {
 	title
 	link "x" url="https://x.example"
 }
 `))
-	if err == nil {
+	if len(errs) == 0 {
 		t.Fatal("expected error for title with no argument")
+	}
+	// The bare title is skipped, but the rest of the list still parses.
+	if cfg == nil || len(cfg.Sections) != 1 {
+		t.Fatalf("expected partial section to remain, got cfg=%+v", cfg)
+	}
+	if len(cfg.Sections[0].Links) != 1 || cfg.Sections[0].Links[0].Name != "x" {
+		t.Fatalf("link after bad title should still parse, got %+v", cfg.Sections[0].Links)
 	}
 }
 
@@ -114,9 +121,9 @@ list "Dev" {
 	link "GitHub" url="https://github.com"
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 	if cfg.Title != "My Links" {
 		t.Errorf("Title = %q, want %q", cfg.Title, "My Links")
@@ -132,9 +139,9 @@ list "Dev" {
 	link "GitHub" url="https://github.com"
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 	if cfg.Title != "" {
 		t.Errorf("Title = %q, want empty (default applied by frontend)", cfg.Title)
@@ -145,9 +152,9 @@ list "Dev" {
 }
 
 func TestParsePageEmpty(t *testing.T) {
-	cfg, err := ParsePage([]byte(""))
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage([]byte(""))
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 	if len(cfg.Sections) != 0 {
 		t.Errorf("got %d sections, want 0", len(cfg.Sections))
@@ -160,8 +167,8 @@ links {
 	link "GitHub" url="https://github.com"
 }
 `)
-	_, err := ParsePage(input)
-	if err == nil {
+	_, errs := ParsePage(input)
+	if len(errs) == 0 {
 		t.Fatal("expected error for list section without name")
 	}
 }
@@ -172,8 +179,8 @@ list "Dev" {
 	link url="https://github.com"
 }
 `)
-	_, err := ParsePage(input)
-	if err == nil {
+	_, errs := ParsePage(input)
+	if len(errs) == 0 {
 		t.Fatal("expected error for link without name")
 	}
 }
@@ -184,8 +191,8 @@ list "Dev" {
 	link "GitHub"
 }
 `)
-	_, err := ParsePage(input)
-	if err == nil {
+	_, errs := ParsePage(input)
+	if len(errs) == 0 {
 		t.Fatal("expected error for link without url")
 	}
 }
@@ -199,9 +206,9 @@ list "Dev" {
 	link "Plain" url="https://plain.example.com"
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 
 	links := cfg.Sections[0].Links
@@ -242,9 +249,9 @@ list "Ops" {
 	link "Grafana" url="https://grafana.example.com"
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 
 	if cfg.Sections[0].Color != "#ff6b6b" {
@@ -269,9 +276,9 @@ list "Docs" {
 	link "Wiki" url="https://wiki.example.com"
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 
 	if cfg.Sections[0].Icon != "fa-code" {
@@ -296,9 +303,9 @@ list "Dev" {
 	link "Plain" url="https://plain.example.com"
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 
 	links := cfg.Sections[0].Links
@@ -324,9 +331,9 @@ list "Ops" {
 	link "Grafana" url="https://grafana.example.com"
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 
 	if got, want := cfg.Sections[0].Tags, []string{"internal", "wip"}; !equalStringSlices(got, want) {
@@ -343,9 +350,9 @@ list "Dev" {
 	link "GitHub" url="https://github.com" tags="  prod    external  "
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 	if got, want := cfg.Sections[0].Links[0].Tags, []string{"external", "prod"}; !equalStringSlices(got, want) {
 		t.Errorf("Tags = %v, want %v", got, want)
@@ -358,9 +365,9 @@ list "Dev" tags="zebra alpha middle" {
 	link "X" url="https://x.example.com" tags="charlie alpha bravo"
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 	if got, want := cfg.Sections[0].Tags, []string{"alpha", "middle", "zebra"}; !equalStringSlices(got, want) {
 		t.Errorf("list Tags = %v, want sorted %v", got, want)
@@ -376,9 +383,9 @@ list "Dev" {
 	link "GitHub" url="https://github.com" tags=""
 }
 `)
-	cfg, err := ParsePage(input)
-	if err != nil {
-		t.Fatalf("ParsePage() error: %v", err)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
 	}
 	if cfg.Sections[0].Links[0].Tags != nil {
 		t.Errorf("Tags should be nil for empty tags property, got %v", cfg.Sections[0].Links[0].Tags)
@@ -397,12 +404,29 @@ func equalStringSlices(a, b []string) bool {
 	return true
 }
 
+// A page whose KDL is syntactically broken should still produce a
+// (non-nil) PageConfig so the page stays registered. The dashboard
+// then renders empty content with the error in the config-error
+// banner — better than redirecting the user to the troubleshooting
+// docs.
+func TestParsePageKDLSyntaxErrorKeepsEmptyPage(t *testing.T) {
+	cfg, errs := ParsePage([]byte(`list "HQ" icon=fa-home color="#0f0" {`))
+	if cfg == nil {
+		t.Fatal("expected non-nil PageConfig even when KDL parsing fails")
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected the KDL syntax error to be reported")
+	}
+	if len(cfg.Items) != 0 || len(cfg.Sections) != 0 {
+		t.Errorf("expected empty content, got Items=%v Sections=%v", cfg.Items, cfg.Sections)
+	}
+}
 func TestParsePageUnknownTopLevel(t *testing.T) {
 	input := []byte(`
 something "foo"
 `)
-	_, err := ParsePage(input)
-	if err == nil {
+	_, errs := ParsePage(input)
+	if len(errs) == 0 {
 		t.Fatal("expected error for unknown top-level node")
 	}
 }
@@ -413,8 +437,79 @@ list "Dev" {
 	widget "foo" url="https://example.com"
 }
 `)
-	_, err := ParsePage(input)
-	if err == nil {
+	_, errs := ParsePage(input)
+	if len(errs) == 0 {
 		t.Fatal("expected error for unknown child node in list section")
+	}
+}
+
+// Lenient parse: an unknown child node in a list (e.g. a `title` written
+// against an older subspace version that didn't yet support it) must not
+// drop the whole page. The error is reported, but the surrounding links
+// still parse so the dashboard renders something useful instead of
+// redirecting the user to the troubleshooting docs.
+func TestParsePageLenientUnknownChildKeepsValidLinks(t *testing.T) {
+	input := []byte(`
+title "My Links"
+
+list "Repos" {
+	title "GitHub"
+	link "subspace" url="https://github.com/davidolrik/subspace"
+	widget "broken"
+	link "kdl-go" url="https://github.com/sblinch/kdl-go"
+}
+
+list "Ops" {
+	link "Grafana" url="https://grafana.example.com"
+}
+`)
+	cfg, errs := ParsePage(input)
+	if cfg == nil {
+		t.Fatal("expected partial PageConfig even with non-fatal errors")
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected the unknown-child error to be reported")
+	}
+	if cfg.Title != "My Links" {
+		t.Errorf("Title = %q, want %q", cfg.Title, "My Links")
+	}
+	if len(cfg.Sections) != 2 {
+		t.Fatalf("got %d sections, want 2", len(cfg.Sections))
+	}
+	repos := cfg.Sections[0]
+	if len(repos.Links) != 2 {
+		t.Errorf("Repos.Links = %d, want 2 (widget skipped)", len(repos.Links))
+	}
+	if repos.Links[0].Name != "subspace" || repos.Links[1].Name != "kdl-go" {
+		t.Errorf("Repos.Links names = %q,%q", repos.Links[0].Name, repos.Links[1].Name)
+	}
+	if cfg.Sections[1].Name != "Ops" {
+		t.Errorf("second section should be Ops, got %q", cfg.Sections[1].Name)
+	}
+}
+
+// Lenient parse: a top-level unknown node skips itself but the rest of
+// the document (other lists, footer, title) still parses.
+func TestParsePageLenientUnknownTopLevelKeepsLists(t *testing.T) {
+	input := []byte(`
+title "Stuff"
+mystery "value"
+
+list "Dev" {
+	link "GitHub" url="https://github.com"
+}
+`)
+	cfg, errs := ParsePage(input)
+	if cfg == nil {
+		t.Fatal("expected partial PageConfig even with non-fatal errors")
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected the unknown-top-level error to be reported")
+	}
+	if cfg.Title != "Stuff" {
+		t.Errorf("Title = %q, want %q", cfg.Title, "Stuff")
+	}
+	if len(cfg.Sections) != 1 || cfg.Sections[0].Name != "Dev" {
+		t.Fatalf("expected Dev section to survive, got %+v", cfg.Sections)
 	}
 }

@@ -33,16 +33,18 @@ type ListSection struct {
 	Links []Link     `json:"Links"`
 }
 
-// ListItem is one entry in a ListSection. Kind is either "link" or
-// "subtitle"; Name + URL + Icon + Description + Tags carry the
-// per-kind payload (subtitles only use Name).
+// ListItem is one entry in a ListSection. Kind is "link", "subtitle",
+// or "markdown"; the per-kind fields are mutually exclusive — links
+// use Name/URL/Icon/Description/Tags, subtitles use Name only,
+// markdown uses HTML only.
 type ListItem struct {
 	Kind        string   `json:"Kind"`
-	Name        string   `json:"Name"`
+	Name        string   `json:"Name,omitempty"`
 	URL         string   `json:"URL,omitempty"`
 	Icon        string   `json:"Icon,omitempty"`
 	Description string   `json:"Description,omitempty"`
 	Tags        []string `json:"Tags,omitempty"`
+	HTML        string   `json:"HTML,omitempty"`
 }
 
 // Link is a single page link.
@@ -55,52 +57,67 @@ type Link struct {
 }
 
 // ParsePageFile parses a page KDL file from disk.
-func ParsePageFile(path string) (*PageConfig, error) {
+//
+// Always returns a non-nil PageConfig so callers can keep the page
+// registered even when the file is unreadable or the KDL is
+// syntactically broken — the operator gets the error in the
+// dashboard banner instead of being redirected to the troubleshooting
+// docs. When the KDL is well-formed but individual nodes are
+// malformed, the bad nodes are skipped and the rest is kept.
+func ParsePageFile(path string) (*PageConfig, []error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading page file: %w", err)
+		return &PageConfig{}, []error{fmt.Errorf("reading page file: %w", err)}
 	}
 	return ParsePage(data)
 }
 
-// ParsePage parses a page configuration from KDL data.
-func ParsePage(data []byte) (*PageConfig, error) {
+// ParsePage parses a page configuration from KDL data. See
+// ParsePageFile for the error-collection contract.
+func ParsePage(data []byte) (*PageConfig, []error) {
 	doc, err := kdl.Parse(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("parsing KDL: %w", err)
+		return &PageConfig{}, []error{fmt.Errorf("parsing KDL: %w", err)}
 	}
 
 	cfg := &PageConfig{}
+	var errs []error
 
 	for _, node := range doc.Nodes {
 		switch node.Name.ValueString() {
 		case "title":
 			if len(node.Arguments) < 1 {
-				return nil, fmt.Errorf("title requires a value argument")
+				errs = append(errs, fmt.Errorf("title requires a value argument"))
+				continue
 			}
 			cfg.Title = node.Arguments[0].ValueString()
 		case "footer":
 			if len(node.Arguments) < 1 {
-				return nil, fmt.Errorf("footer requires a value argument")
+				errs = append(errs, fmt.Errorf("footer requires a value argument"))
+				continue
 			}
 			cfg.Footer = node.Arguments[0].ValueString()
 		case "list":
-			s, err := parseListSection(node)
-			if err != nil {
-				return nil, err
+			s, sectionErrs := parseListSection(node)
+			errs = append(errs, sectionErrs...)
+			// Drop sections whose name was missing — there's nothing
+			// to render and no way to address it from the search
+			// palette. Other malformed sub-nodes are tolerated and
+			// the partial section is kept.
+			if s.Name != "" {
+				cfg.Sections = append(cfg.Sections, s)
 			}
-			cfg.Sections = append(cfg.Sections, s)
 		default:
-			return nil, fmt.Errorf("unknown node: %q", node.Name.ValueString())
+			errs = append(errs, fmt.Errorf("unknown node: %q", node.Name.ValueString()))
 		}
 	}
 
-	return cfg, nil
+	return cfg, errs
 }
 
-func parseListSection(node *document.Node) (ListSection, error) {
+func parseListSection(node *document.Node) (ListSection, []error) {
 	if len(node.Arguments) < 1 {
-		return ListSection{}, fmt.Errorf("list requires a name argument")
+		return ListSection{}, []error{fmt.Errorf("list requires a name argument")}
 	}
 
 	s := ListSection{
@@ -115,12 +132,14 @@ func parseListSection(node *document.Node) (ListSection, error) {
 	}
 	s.Tags = parseTagsProperty(node)
 
+	var errs []error
 	for _, child := range node.Children {
 		switch child.Name.ValueString() {
 		case "link":
 			l, err := parseLink(child)
 			if err != nil {
-				return ListSection{}, fmt.Errorf("list %q: %w", s.Name, err)
+				errs = append(errs, fmt.Errorf("list %q: %w", s.Name, err))
+				continue
 			}
 			s.Links = append(s.Links, l)
 			s.Items = append(s.Items, ListItem{
@@ -133,22 +152,24 @@ func parseListSection(node *document.Node) (ListSection, error) {
 			})
 		case "title":
 			if len(child.Arguments) < 1 {
-				return ListSection{}, fmt.Errorf("list %q: title requires a value argument", s.Name)
+				errs = append(errs, fmt.Errorf("list %q: title requires a value argument", s.Name))
+				continue
 			}
 			name := child.Arguments[0].ValueString()
 			if name == "" {
-				return ListSection{}, fmt.Errorf("list %q: title requires a non-empty value", s.Name)
+				errs = append(errs, fmt.Errorf("list %q: title requires a non-empty value", s.Name))
+				continue
 			}
 			s.Items = append(s.Items, ListItem{
 				Kind: "subtitle",
 				Name: name,
 			})
 		default:
-			return ListSection{}, fmt.Errorf("list %q: unknown node %q", s.Name, child.Name.ValueString())
+			errs = append(errs, fmt.Errorf("list %q: unknown node %q", s.Name, child.Name.ValueString()))
 		}
 	}
 
-	return s, nil
+	return s, errs
 }
 
 func parseLink(node *document.Node) (Link, error) {

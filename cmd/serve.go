@@ -403,15 +403,19 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 }
 
 // loadPages parses all configured link page files into PageInfo
-// structs. Pages whose KDL fails to parse are skipped and the error
-// is appended to cfg.Errors so the operator sees it in the banner.
+// structs. Every configured page is registered, even when its KDL
+// file is unreadable, syntactically broken, or has malformed nodes —
+// keeping the page in the routing table means the operator lands on
+// the dashboard with an error banner instead of getting redirected
+// to the troubleshooting docs. All collected errors are appended to
+// cfg.Errors so they surface in the banner and `subspace validate`
+// exits non-zero.
 func loadPages(cfg *config.Config) []pages.PageInfo {
 	var infos []pages.PageInfo
 	for _, pg := range cfg.Pages {
-		pageCfg, err := pages.ParsePageFile(pg.File)
-		if err != nil {
-			cfg.Errors = append(cfg.Errors, fmt.Sprintf("loading page %q: %v (page skipped)", pg.File, err))
-			continue
+		pageCfg, errs := pages.ParsePageFile(pg.File)
+		for _, e := range errs {
+			cfg.Errors = append(cfg.Errors, fmt.Sprintf("page %q: %v", pg.File, e))
 		}
 		infos = append(infos, pages.PageInfo{
 			Name:  pg.Name,
