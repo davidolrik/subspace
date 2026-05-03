@@ -128,6 +128,106 @@ func TestRenderMarkdownPlainBlockquoteUnchanged(t *testing.T) {
 	}
 }
 
+func TestStripCommonIndentTabs(t *testing.T) {
+	// Operator-facing scenario: a markdown node nested inside a
+	// `list "..." { markdown r#" ... "# }` block in a tab-indented
+	// config file. The leading indentation on the first content line
+	// (one tab here) should be stripped from every following line so
+	// the rendered markdown is flush-left.
+	in := "\t## Heading\n" +
+		"\tBody line 1.\n" +
+		"\n" + // blank line stays blank
+		"\t- item one\n" +
+		"\t- item two\n"
+	want := "## Heading\n" +
+		"Body line 1.\n" +
+		"\n" +
+		"- item one\n" +
+		"- item two\n"
+	if got := stripCommonIndent(in); got != want {
+		t.Errorf("stripCommonIndent\n got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestStripCommonIndentSpaces(t *testing.T) {
+	in := "    Line 1\n" +
+		"    Line 2\n"
+	want := "Line 1\nLine 2\n"
+	if got := stripCommonIndent(in); got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+func TestStripCommonIndentLeadingBlankLine(t *testing.T) {
+	// Heredoc-style sources often start with a newline immediately
+	// after the opening quote; the indent of the SECOND line (the
+	// first non-blank) should determine the prefix.
+	in := "\n" +
+		"        Line 1\n" +
+		"        Line 2\n"
+	want := "Line 1\nLine 2\n"
+	if got := stripCommonIndent(in); got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+func TestStripCommonIndentMixedDeeperLines(t *testing.T) {
+	// Lines indented MORE than the first line keep their extra
+	// indentation — markdown's own list/code semantics rely on it.
+	in := "  - top item\n" +
+		"    - nested item\n" +
+		"  - back to top\n"
+	want := "- top item\n" +
+		"  - nested item\n" +
+		"- back to top\n"
+	if got := stripCommonIndent(in); got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+func TestStripCommonIndentSingleLineUnchanged(t *testing.T) {
+	in := "no newline here"
+	if got := stripCommonIndent(in); got != in {
+		t.Errorf("single-line input must round-trip, got %q", got)
+	}
+}
+
+func TestStripCommonIndentNoIndent(t *testing.T) {
+	in := "Line 1\nLine 2\n"
+	if got := stripCommonIndent(in); got != in {
+		t.Errorf("uninidented input must round-trip, got %q", got)
+	}
+}
+
+func TestStripCommonIndentBlankLinesIgnored(t *testing.T) {
+	// Blank or whitespace-only lines never tighten the common
+	// prefix — otherwise a stray blank line at zero indent would
+	// disable the strip.
+	in := "    Line 1\n\n    Line 2\n   \n    Line 3\n"
+	want := "Line 1\n\nLine 2\n\nLine 3\n"
+	if got := stripCommonIndent(in); got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+func TestRenderMarkdownStripsIndent(t *testing.T) {
+	// End-to-end: indented multi-line source survives RenderMarkdown
+	// as if it had been written flush-left.
+	src := "\t## Heading\n\tBody line\n"
+	html, err := RenderMarkdown(src)
+	if err != nil {
+		t.Fatalf("RenderMarkdown: %v", err)
+	}
+	if !strings.Contains(html, "<h2") || !strings.Contains(html, "Heading</h2>") {
+		t.Errorf("indented heading should still render as <h2>, got: %q", html)
+	}
+	// If indentation weren't stripped the body would render as a
+	// 4-space code block instead of a paragraph.
+	if strings.Contains(html, "<pre") {
+		t.Errorf("body should be a paragraph, not a code block: %q", html)
+	}
+}
+
 func TestRenderMarkdownEmpty(t *testing.T) {
 	html, err := RenderMarkdown("")
 	if err != nil {

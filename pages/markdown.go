@@ -54,6 +54,7 @@ func RenderMarkdown(src string) (string, error) {
 	if strings.TrimSpace(src) == "" {
 		return "", nil
 	}
+	src = stripCommonIndent(src)
 	var buf bytes.Buffer
 	if err := markdownRenderer.Convert([]byte(src), &buf); err != nil {
 		return "", fmt.Errorf("rendering markdown: %w", err)
@@ -62,6 +63,55 @@ func RenderMarkdown(src string) (string, error) {
 	out := transformAlerts(string(clean))
 	out = addLinkTarget(out)
 	return strings.TrimRight(out, "\n"), nil
+}
+
+// stripCommonIndent trims a leading-whitespace prefix from every line
+// of src so operators can write `markdown r#" ... "#` nodes indented
+// to match the surrounding KDL block without that indentation leaking
+// into the rendered markdown (where four leading spaces would turn
+// the line into a code block, list bullets would lose their meaning,
+// etc.).
+//
+// The prefix is taken from the first non-blank line — that's the
+// "intended" indentation for the block. Blank or whitespace-only
+// lines are passed through as empty strings, so they don't tighten
+// the prefix when the source has stray blank lines at zero indent.
+// Lines indented more than the prefix keep their extra leading
+// whitespace; lines indented less are left untouched (we only strip
+// the exact prefix, never partial whitespace). A heredoc-style
+// leading blank line — common with `r#"\n...content...\n"#` — is
+// also trimmed so it doesn't render as an extra paragraph break.
+func stripCommonIndent(src string) string {
+	if !strings.Contains(src, "\n") {
+		return src
+	}
+	// Drop a single leading blank line introduced by the
+	// `r#"\n...` heredoc convention. Multiple leading blanks (rare,
+	// usually intentional) are preserved so they remain authorial.
+	if strings.HasPrefix(src, "\n") {
+		src = src[1:]
+	}
+	lines := strings.Split(src, "\n")
+	prefix := ""
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		i := 0
+		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+			i++
+		}
+		prefix = line[:i]
+		break
+	}
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			lines[i] = ""
+			continue
+		}
+		lines[i] = strings.TrimPrefix(line, prefix)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // alertRegex matches a blockquote whose first paragraph begins with a
