@@ -186,6 +186,11 @@ main {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 1.5rem;
+    /* Dense packing lets later items backfill earlier holes left by
+       explicitly-placed cards (e.g. a `markdown float="right"
+       columns=2 rows=2` opens a 2×2 void on the left that the next
+       lists slot into, instead of leaving an empty band). */
+    grid-auto-flow: dense;
 }
 
 @media (max-width: 1200px) {
@@ -362,6 +367,208 @@ main {
     color: var(--text-muted);
     text-align: center;
     padding: 4rem 0;
+}
+
+/* Vertical spacing between grids and markdown bands when both kinds
+   of band appear back-to-back. Each band is rendered in its own
+   wrapper div under <main>, so adjacent siblings get the gap. */
+main > .grid + .md-band-wrap,
+main > .md-band-wrap + .grid,
+main > .md-band-wrap + .md-band-wrap {
+    margin-top: 1.5rem;
+}
+
+.md-band {
+    padding: 0.5rem 0;
+    color: var(--text);
+}
+
+.md-card {
+    /* .group already gives card chrome; tighten the inner spacing
+       so prose reads at the same density as a list of links. */
+    font-size: 0.9rem;
+}
+.md-card.md > *:first-child { margin-top: 0; }
+.md-card.md > *:last-child  { margin-bottom: 0; }
+
+/* Column spans for markdown grid cards. Mirrors the grid's 4/3/2/1
+   responsive breakpoints — at each step, larger spans clamp down to
+   the current grid width so a card never overflows its row. */
+.md-cols-2 { grid-column: span 2; }
+.md-cols-3 { grid-column: span 3; }
+.md-cols-4, .md-cols-5, .md-cols-6 { grid-column: span 4; }
+
+@media (max-width: 1200px) {
+    .md-cols-3, .md-cols-4, .md-cols-5, .md-cols-6 { grid-column: span 3; }
+}
+@media (max-width: 800px) {
+    .md-cols-2, .md-cols-3, .md-cols-4, .md-cols-5, .md-cols-6 { grid-column: span 2; }
+}
+@media (max-width: 500px) {
+    .md-cols-2, .md-cols-3, .md-cols-4, .md-cols-5, .md-cols-6 { grid-column: span 1; }
+}
+
+/* Row spans — no clamping; the grid's row count is open-ended.
+   Dense auto-flow on .grid takes care of backfilling the holes a
+   multi-row card creates, so the spanned rows naturally size to the
+   tallest cell in each (lists or the card itself). */
+.md-rows-2 { grid-row: span 2; }
+.md-rows-3 { grid-row: span 3; }
+.md-rows-4 { grid-row: span 4; }
+.md-rows-5 { grid-row: span 5; }
+.md-rows-6 { grid-row: span 6; }
+
+/* float="right" — pin the markdown card to the right edge of the
+   grid using negative grid lines (-1 is the trailing edge regardless
+   of the grid's actual column count). The card span still follows
+   .md-cols-N, so the breakpoint clamps mirror those of left-flowing
+   cards: at narrow viewports a "columns=4 right" card collapses to
+   the current grid width and still hugs the right edge. */
+.md-right.md-cols-1 { grid-column: -2 / -1; }
+.md-right.md-cols-2 { grid-column: -3 / -1; }
+.md-right.md-cols-3 { grid-column: -4 / -1; }
+.md-right.md-cols-4,
+.md-right.md-cols-5,
+.md-right.md-cols-6 { grid-column: -5 / -1; }
+
+@media (max-width: 1200px) {
+    .md-right.md-cols-3,
+    .md-right.md-cols-4,
+    .md-right.md-cols-5,
+    .md-right.md-cols-6 { grid-column: -4 / -1; }
+}
+@media (max-width: 800px) {
+    .md-right.md-cols-2,
+    .md-right.md-cols-3,
+    .md-right.md-cols-4,
+    .md-right.md-cols-5,
+    .md-right.md-cols-6 { grid-column: -3 / -1; }
+}
+@media (max-width: 500px) {
+    .md-right.md-cols-1,
+    .md-right.md-cols-2,
+    .md-right.md-cols-3,
+    .md-right.md-cols-4,
+    .md-right.md-cols-5,
+    .md-right.md-cols-6 { grid-column: -2 / -1; }
+}
+
+.list-md {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+.list-md > *:first-child { margin-top: 0; }
+.list-md > *:last-child  { margin-bottom: 0; }
+
+.group li.list-md-item {
+    padding: 0.35rem 0;
+}
+
+/* Shared markdown typography. Applied to .md-band, .md-card, .list-md
+   so prose looks consistent regardless of placement. The selector
+   sets margins/spacing only — colours are inherited from the
+   surrounding container so each placement keeps its visual weight. */
+.md p {
+    margin: 0.5rem 0;
+    line-height: 1.55;
+}
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+    margin: 1rem 0 0.5rem;
+    line-height: 1.2;
+    font-weight: 600;
+}
+.md h1 { font-size: 1.5rem; }
+.md h2 { font-size: 1.25rem; }
+.md h3 { font-size: 1.05rem; }
+.md h4, .md h5, .md h6 { font-size: 1rem; }
+.md ul, .md ol {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+}
+.md li { margin: 0.15rem 0; }
+.md a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.md a:hover { color: var(--accent-bright, var(--accent)); }
+.md code {
+    background: var(--surface-alt, var(--surface));
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.05em 0.35em;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.md pre {
+    background: var(--surface-alt, var(--surface));
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+}
+.md pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: 0.85rem;
+}
+.md blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 0.75rem 0;
+    padding: 0.25rem 0.85rem;
+    color: var(--text-muted);
+}
+
+/* GitHub-style alert callouts. Each type tints the left border, the
+   title, and the background of the callout so it reads as a distinct
+   panel against the card / band surface. The accent colors map to
+   the same family used for tag pills and section borders so the
+   callouts feel native to the dashboard. The 8-digit hex values
+   (#RRGGBBAA) provide a translucent background that works against
+   both the dark and light card surfaces. */
+.md .md-alert {
+    border-left-width: 4px;
+    border-radius: 4px;
+    padding: 0.6rem 0.85rem;
+    color: var(--text);
+}
+.md .md-alert-title {
+    margin: 0 0 0.35rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+}
+.md .md-alert > p:last-child { margin-bottom: 0; }
+
+.md .md-alert-note      { border-left-color: #4a9eff; background: #4a9eff22; }
+.md .md-alert-note      .md-alert-title { color: #4a9eff; }
+.md .md-alert-tip       { border-left-color: #00d18f; background: #00d18f22; }
+.md .md-alert-tip       .md-alert-title { color: #00d18f; }
+.md .md-alert-important { border-left-color: #b478ff; background: #b478ff22; }
+.md .md-alert-important .md-alert-title { color: #b478ff; }
+.md .md-alert-warning   { border-left-color: #ffb84a; background: #ffb84a22; }
+.md .md-alert-warning   .md-alert-title { color: #ffb84a; }
+.md .md-alert-caution   { border-left-color: #ff5a6e; background: #ff5a6e22; }
+.md .md-alert-caution   .md-alert-title { color: #ff5a6e; }
+.md table {
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.9em;
+}
+.md th, .md td {
+    border-bottom: 1px solid var(--border);
+    padding: 0.4rem 0.75rem;
+    text-align: left;
+}
+.md th { font-weight: 600; }
+.md hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1.25rem 0;
 }
 
 footer {

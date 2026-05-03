@@ -1,6 +1,8 @@
 package pages
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -421,6 +423,330 @@ func TestParsePageKDLSyntaxErrorKeepsEmptyPage(t *testing.T) {
 		t.Errorf("expected empty content, got Items=%v Sections=%v", cfg.Items, cfg.Sections)
 	}
 }
+
+func TestParsePageMarkdownTopLevelDefaultsToBand(t *testing.T) {
+	input := []byte(`
+markdown "Hello **world**"
+list "Dev" {
+	link "GitHub" url="https://github.com"
+}
+`)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
+	}
+	if len(cfg.Items) != 2 {
+		t.Fatalf("Items length = %d, want 2", len(cfg.Items))
+	}
+	if cfg.Items[0].Kind != "markdown" || cfg.Items[0].Markdown == nil {
+		t.Fatalf("Items[0] should be a markdown, got %+v", cfg.Items[0])
+	}
+	if cfg.Items[0].Markdown.Columns != 0 || cfg.Items[0].Markdown.Rows != 0 {
+		t.Errorf("default markdown should have Columns=0 Rows=0 (band), got %+v", cfg.Items[0].Markdown)
+	}
+	if !strings.Contains(cfg.Items[0].Markdown.HTML, "<strong>world</strong>") {
+		t.Errorf("Items[0].Markdown.HTML missing <strong>: %q", cfg.Items[0].Markdown.HTML)
+	}
+}
+
+func TestParsePageMarkdownTopLevelColumnsValid(t *testing.T) {
+	for _, n := range []int{1, 2, 3, 4, 10} {
+		input := []byte(fmt.Sprintf(`markdown columns=%d "x"`, n))
+		cfg, errs := ParsePage(input)
+		if len(errs) > 0 {
+			t.Fatalf("columns=%d: errors: %v", n, errs)
+		}
+		md := cfg.Items[0].Markdown
+		if md == nil || md.Columns != n {
+			t.Errorf("columns=%d: Columns = %v, want %d", n, md, n)
+		}
+		// Setting columns alone forces Rows = 1 so the markdown is
+		// addressable as a grid cell rather than a band.
+		if md != nil && md.Rows != 1 {
+			t.Errorf("columns=%d: Rows = %d, want 1 (default when columns is set)", n, md.Rows)
+		}
+	}
+}
+
+func TestParsePageMarkdownTopLevelRowsValid(t *testing.T) {
+	for _, n := range []int{1, 2, 3, 4, 5} {
+		input := []byte(fmt.Sprintf(`markdown rows=%d "x"`, n))
+		cfg, errs := ParsePage(input)
+		if len(errs) > 0 {
+			t.Fatalf("rows=%d: errors: %v", n, errs)
+		}
+		md := cfg.Items[0].Markdown
+		if md == nil || md.Rows != n {
+			t.Errorf("rows=%d: Rows = %v, want %d", n, md, n)
+		}
+		// rows-only forces Columns=1 so the markdown stays in the
+		// surrounding grid as a 1-wide × N-tall card.
+		if md != nil && md.Columns != 1 {
+			t.Errorf("rows=%d: Columns = %d, want 1 (default when rows is set)", n, md.Columns)
+		}
+	}
+}
+
+func TestParsePageMarkdownTopLevelColumnsAndRows(t *testing.T) {
+	cfg, errs := ParsePage([]byte(`markdown columns=2 rows=3 "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Columns != 2 || md.Rows != 3 {
+		t.Errorf("expected Columns=2 Rows=3, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownTopLevelColumnsInvalid(t *testing.T) {
+	for _, src := range []string{
+		`markdown columns="huge" "x"`,
+		`markdown columns=0 "x"`,
+		`markdown columns=-1 "x"`,
+	} {
+		cfg, errs := ParsePage([]byte(src))
+		if len(errs) == 0 {
+			t.Errorf("%q: expected an error", src)
+		}
+		md := cfg.Items[0].Markdown
+		if md == nil {
+			t.Fatalf("%q: markdown should still render", src)
+		}
+		// Invalid columns is treated as if absent — the markdown
+		// remains a band (Columns == 0) since rows is also unset.
+		if md.Columns != 0 || md.Rows != 0 {
+			t.Errorf("%q: invalid columns should be treated as absent, got %+v", src, md)
+		}
+	}
+}
+
+func TestParsePageMarkdownTopLevelRowsInvalid(t *testing.T) {
+	for _, src := range []string{
+		`markdown rows="huge" "x"`,
+		`markdown rows=0 "x"`,
+		`markdown rows=-1 "x"`,
+	} {
+		cfg, errs := ParsePage([]byte(src))
+		if len(errs) == 0 {
+			t.Errorf("%q: expected an error", src)
+		}
+		md := cfg.Items[0].Markdown
+		if md == nil {
+			t.Fatalf("%q: markdown should still render", src)
+		}
+		if md.Columns != 0 || md.Rows != 0 {
+			t.Errorf("%q: invalid rows should be treated as absent, got %+v", src, md)
+		}
+	}
+}
+
+func TestParsePageMarkdownTopLevelFloatRight(t *testing.T) {
+	cfg, errs := ParsePage([]byte(`markdown float="right" columns=2 "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Float != "right" {
+		t.Errorf("expected Float=\"right\", got %+v", md)
+	}
+	if md.Columns != 2 || md.Rows != 1 {
+		t.Errorf("expected Columns=2 Rows=1, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownTopLevelFloatLeftIsDefault(t *testing.T) {
+	// Explicit float="left" round-trips to empty (the implicit default)
+	// so the frontend doesn't need to special-case both spellings.
+	cfg, errs := ParsePage([]byte(`markdown float="left" columns=2 "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Float != "" {
+		t.Errorf("expected Float=\"\" (default-left), got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownTopLevelFloatAlonePromotesToCard(t *testing.T) {
+	// float= without columns/rows still produces a grid card (not a
+	// band) — otherwise "float right" on a band would be meaningless.
+	cfg, errs := ParsePage([]byte(`markdown float="right" "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Columns != 1 || md.Rows != 1 || md.Float != "right" {
+		t.Errorf("expected 1×1 grid card floated right, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownTopLevelFloatInvalid(t *testing.T) {
+	cfg, errs := ParsePage([]byte(`markdown float="middle" columns=2 "x"`))
+	if len(errs) == 0 {
+		t.Fatal("expected error for invalid float value")
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Float != "" {
+		t.Errorf("invalid float should be ignored (default-left), got %+v", md)
+	}
+}
+
+func TestParsePageTopLevelUnknownPropertyErrors(t *testing.T) {
+	// Unknown properties on a top-level node are typos worth flagging.
+	cases := []struct {
+		name string
+		src  string
+		key  string
+	}{
+		{"markdown", `markdown foo="bar" "x"`, "foo"},
+		{"list", `list "X" foo="bar" {
+	link "y" url="https://example.com"
+}`, "foo"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, errs := ParsePage([]byte(c.src))
+			if len(errs) == 0 {
+				t.Fatalf("expected an error for unknown property %q", c.key)
+			}
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e.Error(), c.key) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected error mentioning %q, got %v", c.key, errs)
+			}
+		})
+	}
+}
+
+func TestParsePageInsideListUnknownPropertyIgnored(t *testing.T) {
+	// Inside a list, unknown properties on links/markdown stay
+	// lenient — operators frequently sketch with comments like
+	// `note="..."` and we shouldn't fail their config for it.
+	input := []byte(`
+list "Dev" {
+	link "GitHub" url="https://github.com" foo="bar"
+	markdown unknown="x" "_inline_"
+}
+`)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors for unknown props inside a list, got %v", errs)
+	}
+	if len(cfg.Sections) != 1 || len(cfg.Sections[0].Links) != 1 {
+		t.Fatalf("page should still render, got %+v", cfg)
+	}
+}
+
+func TestParsePageMarkdownInsideListIgnoresGridProps(t *testing.T) {
+	input := []byte(`
+list "Dev" {
+	link "GitHub" url="https://github.com"
+	markdown columns=2 rows=3 float="right" "_inline note_"
+}
+`)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	s := cfg.Sections[0]
+	if len(s.Items) != 2 {
+		t.Fatalf("Items length = %d, want 2", len(s.Items))
+	}
+	if s.Items[1].Kind != "markdown" {
+		t.Errorf("Items[1].Kind = %q, want \"markdown\"", s.Items[1].Kind)
+	}
+	// Inside a list, markdown is a row — column/row hints are
+	// dropped (ListItem doesn't carry them).
+	if !strings.Contains(s.Items[1].HTML, "<em>inline note</em>") {
+		t.Errorf("inline markdown HTML = %q", s.Items[1].HTML)
+	}
+}
+
+func TestParsePageMarkdownInsideList(t *testing.T) {
+	input := []byte(`
+list "Dev" {
+	link "GitHub" url="https://github.com"
+	markdown "_See banner above_"
+	link "Wiki" url="https://wiki.example.com"
+}
+`)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
+	}
+	s := cfg.Sections[0]
+	if len(s.Items) != 3 {
+		t.Fatalf("Items length = %d, want 3", len(s.Items))
+	}
+	wantKinds := []string{"link", "markdown", "link"}
+	for i, want := range wantKinds {
+		if s.Items[i].Kind != want {
+			t.Errorf("Items[%d].Kind = %q, want %q", i, s.Items[i].Kind, want)
+		}
+	}
+	if !strings.Contains(s.Items[1].HTML, "<em>See banner above</em>") {
+		t.Errorf("inline markdown HTML = %q", s.Items[1].HTML)
+	}
+	// Links view stays links-only — markdown is excluded.
+	if len(s.Links) != 2 {
+		t.Errorf("Links length = %d, want 2 (markdown excluded)", len(s.Links))
+	}
+}
+
+func TestParsePageItemsPreserveOrder(t *testing.T) {
+	input := []byte(`
+list "A" {
+	link "x" url="https://x.example"
+}
+markdown "first"
+list "B" {
+	link "y" url="https://y.example"
+}
+markdown columns=1 "second"
+list "C" {
+	link "z" url="https://z.example"
+}
+`)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Fatalf("ParsePage() errors: %v", errs)
+	}
+	if len(cfg.Items) != 5 {
+		t.Fatalf("Items length = %d, want 5", len(cfg.Items))
+	}
+	wantKinds := []string{"list", "markdown", "list", "markdown", "list"}
+	for i, want := range wantKinds {
+		if cfg.Items[i].Kind != want {
+			t.Errorf("Items[%d].Kind = %q, want %q", i, cfg.Items[i].Kind, want)
+		}
+	}
+	// Sections is the derived flat list view — markdown items don't appear.
+	if len(cfg.Sections) != 3 {
+		t.Errorf("Sections length = %d, want 3 (lists only)", len(cfg.Sections))
+	}
+}
+
+func TestParsePageMarkdownMissingArgument(t *testing.T) {
+	input := []byte(`
+markdown
+list "Dev" {
+	link "GitHub" url="https://github.com"
+}
+`)
+	cfg, errs := ParsePage(input)
+	if len(errs) == 0 {
+		t.Fatal("expected error for markdown with no argument")
+	}
+	// The markdown is dropped, the list survives.
+	if len(cfg.Items) != 1 || cfg.Items[0].Kind != "list" {
+		t.Errorf("surrounding list should survive, got Items=%+v", cfg.Items)
+	}
+}
+
 func TestParsePageUnknownTopLevel(t *testing.T) {
 	input := []byte(`
 something "foo"

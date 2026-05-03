@@ -139,6 +139,59 @@ function navMeta(item) {
     return item.url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 }
 
+// bands walks the page's top-level items in document order and groups
+// them into renderable bands. A markdown with neither Columns nor Rows
+// set becomes a full-width band that breaks the grid; lists and grid-
+// card markdowns (anything with Columns >= 1 or Rows >= 1) accumulate
+// into a "grid" band until the next band-style markdown (or the end
+// of the document).
+//
+// Pure function — exported so Vitest can cover the layout decisions
+// without booting Alpine.
+//
+// Output shape:
+//   { kind: "markdown", html: string }
+//   { kind: "grid",     cells: Array<{ kind: "list" | "markdown", ... }> }
+export function bands(items) {
+    const out = [];
+    let pending = null;
+    const flush = () => { if (pending) { out.push(pending); pending = null; } };
+
+    for (const item of items || []) {
+        const md = item.Markdown;
+        const isBand = item.Kind === 'markdown'
+            && md
+            && (md.Columns || 0) === 0
+            && (md.Rows    || 0) === 0
+            && !md.Float;
+
+        if (isBand) {
+            flush();
+            out.push({ kind: 'markdown', html: md.HTML });
+            continue;
+        }
+        if (!pending) pending = { kind: 'grid', cells: [] };
+        if (item.Kind === 'list') {
+            pending.cells.push({
+                kind: 'list',
+                section: item.Section,
+                key: 'list:' + (item.Section ? item.Section.Name : pending.cells.length),
+            });
+        } else if (item.Kind === 'markdown' && md) {
+            pending.cells.push({
+                kind:    'markdown',
+                html:    md.HTML,
+                columns: md.Columns || 1,
+                rows:    md.Rows    || 1,
+                float:   md.Float   || '',
+                key:     'md:' + pending.cells.length,
+            });
+        }
+    }
+    flush();
+    return out;
+}
+
 // buildResults assembles the rows shown in the search palette from the
 // current query and available data. Pure function so it can be tested
 // without booting Alpine. Returns rows in display order:
@@ -882,6 +935,11 @@ if (typeof document !== 'undefined') {
             }
         });
     }
+
+    // Expose the bands helper as a global so the inline dashboard
+    // component in index.html can call it from Alpine without a
+    // bundler step.
+    window.subspaceBands = bands;
 
     // Expose a tiny global so the inline header button can call it
     // without needing Alpine state on every page.

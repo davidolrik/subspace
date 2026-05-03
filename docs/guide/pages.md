@@ -66,6 +66,91 @@ list "Repositories" {
 
 Subtitles are only used for visual grouping — they aren't included in search results, can't carry tags, and don't accept any properties beyond their name.
 
+### Markdown blocks
+
+Use a `markdown "..."` node to add prose to a page — deprecation notices, ownership info, status callouts, anything that doesn't fit as a link. Markdown is rendered server-side and sanitised so untrusted HTML in the source can't reach the browser.
+
+Markdown can appear in two places:
+
+- **At the top level** of a page, as either a full-width band that breaks the grid (the default — no properties), or as a grid card with an explicit `columns=N` and/or `rows=N` span.
+- **Inside a `list` block**, interleaved with links and subtitles, rendered as a muted prose row in the list card. `columns` / `rows` are ignored here.
+
+`columns=N` sets the horizontal span (in grid columns); `rows=N` sets the vertical span. Setting either one puts the markdown in the surrounding grid as a card; setting `rows` without `columns` implies `columns=1` so the card stays a single column wide. With **all** of `columns`, `rows`, and `float` absent the markdown becomes a page-spanning band that splits the page into separate grids before and after.
+
+`columns` is clamped to whatever the grid currently shows (4 cards on desktop, 3 / 2 / 1 at narrower widths) so a `columns=4` card on a phone collapses to one column wide instead of overflowing. `rows` is not clamped — the grid's row count is open-ended.
+
+`float="left"` (default) places the card in the natural left-to-right flow of the grid; `float="right"` pins it to the right edge instead — handy for "owners" or "see also" sidebars. The card width still follows `columns` and clamps the same way at narrow viewports, just anchored to the right.
+
+The grid uses dense packing, so when a multi-row floated card opens a hole on the opposite side, the next lists (and card-width markdowns) flow up into it instead of leaving an empty band. A `markdown columns=2 rows=2 float="right"` next to two short lists on the left will result in two more lists slotting into the 2×2 void below them, not below the floated card.
+
+```kdl
+title "Platform"
+
+// No properties → full-width band, breaks the grid.
+markdown r#"
+## Heads up
+The legacy auth proxy is being **decommissioned on 2026-06-01**.
+Please migrate to the new SSO gateway before then.
+
+- [Migration guide](https://docs.example.com/sso)
+- Slack: `#platform-help`
+"#
+
+list "Auth" {
+    link "SSO Gateway" url="https://sso.example.com"
+    markdown "_The legacy proxy is **deprecated** — see banner above._"
+    link "Legacy proxy" url="https://old-auth.example.com"
+}
+
+// columns=2 → 2-wide × 1-tall grid card.
+markdown columns=2 r#"
+### Owners
+- Platform team
+- On-call: `#oncall-platform`
+"#
+
+// rows=2 → 1-wide × 2-tall grid card.
+markdown rows=2 r#"
+### Quick links
+- [Runbook](https://runbook.example.com)
+- [Dashboards](https://grafana.example.com)
+- [Status](https://status.example.com)
+- [Incidents](https://incidents.example.com)
+"#
+
+// float=right → 1-wide sidebar pinned to the right edge.
+markdown float="right" r#"
+### See also
+[Status page](https://status.example.com)
+"#
+
+list "Observability" {
+    link "Grafana" url="https://grafana.example.com"
+}
+```
+
+CommonMark plus GFM extensions (tables, strikethrough, autolinks, task lists) are supported. Use raw KDL strings (`r#"..."#`) to embed multi-line markdown without having to escape newlines or quotes. All links rendered from markdown open in a new tab.
+
+GitHub-flavored alerts also work — start a blockquote with `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, or `[!CAUTION]` and the dashboard renders it as a coloured callout with a tinted background that stands out against the surrounding card or band. An optional title may follow the marker; otherwise the type's name is used.
+
+| Marker         | Default title | Accent |
+|----------------|---------------|--------|
+| `[!NOTE]`      | Note          | blue   |
+| `[!TIP]`       | Tip           | green  |
+| `[!IMPORTANT]` | Important     | purple |
+| `[!WARNING]`   | Warning       | amber  |
+| `[!CAUTION]`   | Caution       | red    |
+
+```kdl
+markdown r#"
+> [!WARNING] Read me
+> The legacy proxy goes away on 2026-06-01.
+
+> [!TIP]
+> You can paste a curl command into the search palette to copy it.
+"#
+```
+
 ### Section colors and icons
 
 Sections can have an accent color that tints the card border and background, and an icon displayed in the top-right corner of the card:
@@ -129,6 +214,17 @@ By default, the page name is derived from the filename (minus the `.kdl` extensi
 | `page "ops.kdl" alias="o"`        | `http://pages.subspace.pub/ops/` and `http://p.subspace.pub/o/` |
 
 If a page is named `stats` or `statistics`, it will be accessible at `pages.subspace.pub/stats/` alongside the statistics page at `stats.subspace.pub`.
+
+## Validation and error handling
+
+Subspace tries hard to keep a page reachable even when its KDL has problems — losing the URL while you're editing config is worse than seeing a partial page. The rules:
+
+- **Top-level nodes are validated strictly.** Unknown properties on `title`, `footer`, `list`, or `markdown` (e.g. `markdown wdith="full"` — a typo) are flagged in the config-error banner and via `subspace validate`.
+- **Inside a `list` block, validation is lenient.** Unknown properties on `link`, in-list `title`, and in-list `markdown` are silently ignored so an in-progress sketch like `link "x" url="..." note="todo"` doesn't fail the whole page.
+- **KDL syntax errors don't drop the page.** If the file fails to parse at the KDL level (mismatched braces, unterminated strings) the page is still registered with empty content, and the error appears in the config-error banner at the top of the dashboard. The URL keeps working — you don't get redirected to "page not defined" mid-edit.
+- **Per-node errors don't drop the page either.** A list with one bad link, an unknown child node, or a markdown block whose source fails to render — the offending node is skipped, the rest of the page still renders, and each error is added to the banner.
+
+`subspace validate` exits non-zero whenever the banner would show anything, so you can wire it into CI on a config repo.
 
 ## Navigation
 

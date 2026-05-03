@@ -79,57 +79,78 @@
         </nav>
     </header>
     <main>
-        <div class="grid" x-show="groups.length > 0">
-            <template x-for="group in groups" :key="group.Name">
-                <section class="group" :style="group.Color ? `border-top: 2px solid ${group.Color}; box-shadow: 0 0 12px ${group.Color}15; background: linear-gradient(180deg, ${group.Color}1a, transparent)` : ''">
-                    <template x-if="group.Icon">
-                        <i :class="iconClass(group.Icon)" class="group-icon"
-                           :style="group.Color ? `color: ${group.Color}; text-shadow: 0 0 8px ${group.Color}` : ''"></i>
-                    </template>
-                    <h2 x-text="group.Name"></h2>
-                    <ul>
-                        <template x-for="(item, idx) in (group.Items || group.Links || [])" :key="item.Kind + ':' + idx + ':' + (item.URL || item.Name)">
-                            <li :class="{ 'list-subtitle-item': item.Kind === 'subtitle' }">
-                                <template x-if="item.Kind === 'subtitle'">
-                                    <h3 class="list-subtitle" x-text="item.Name"></h3>
-                                </template>
-                                <template x-if="item.Kind !== 'subtitle'">
-                                    <a :href="item.URL">
-                                        <template x-if="item.Icon">
-                                            <i :class="iconClass(item.Icon)" class="link-icon"></i>
-                                        </template>
-                                        <template x-if="!item.Icon">
-                                            <span class="default-icon">&#x2022;</span>
-                                        </template>
-                                        <span class="link-text">
-                                            <span class="link-name" x-text="item.Name"></span>
-                                            <template x-if="item.Description">
-                                                <span class="link-desc" x-text="item.Description"></span>
-                                            </template>
-                                        </span>
-                                    </a>
-                                </template>
-                                <template x-if="item.Kind !== 'subtitle' && item.Tags && item.Tags.length">
-                                    <span class="link-tags">
-                                        <template x-for="t in item.Tags" :key="t">
-                                            <span class="tag-pill" :style="`--tag-color: ${tagColor(t)}`" x-text="tagLabel(t)"></span>
-                                        </template>
-                                    </span>
-                                </template>
-                            </li>
-                        </template>
-                    </ul>
-                    <template x-if="group.Tags && group.Tags.length">
-                        <div class="group-tags">
-                            <template x-for="t in group.Tags" :key="t">
-                                <span class="tag-pill" :style="`--tag-color: ${tagColor(t)}`" x-text="tagLabel(t)"></span>
+        <template x-for="(band, bandIdx) in pageBands()" :key="'band:' + bandIdx">
+            <div :class="band.kind === 'grid' ? 'grid' : 'md-band-wrap'">
+                <template x-if="band.kind === 'markdown'">
+                    <section class="md md-band" x-html="band.html"></section>
+                </template>
+                <template x-if="band.kind === 'grid'">
+                    <template x-for="cell in band.cells" :key="cell.key">
+                        <section class="group"
+                                 :class="cell.kind === 'markdown'
+                                    ? ['md', 'md-card', 'md-cols-' + (cell.columns || 1), 'md-rows-' + (cell.rows || 1), cell.float === 'right' ? 'md-right' : '']
+                                    : ''"
+                                 :style="cell.kind === 'list' && cell.section.Color ? `border-top: 2px solid ${cell.section.Color}; box-shadow: 0 0 12px ${cell.section.Color}15; background: linear-gradient(180deg, ${cell.section.Color}1a, transparent)` : ''">
+                            <template x-if="cell.kind === 'markdown'">
+                                <div class="md" x-html="cell.html"></div>
                             </template>
-                        </div>
+                            <template x-if="cell.kind === 'list'">
+                                <div class="group-inner">
+                                    <template x-if="cell.section.Icon">
+                                        <i :class="iconClass(cell.section.Icon)" class="group-icon"
+                                           :style="cell.section.Color ? `color: ${cell.section.Color}; text-shadow: 0 0 8px ${cell.section.Color}` : ''"></i>
+                                    </template>
+                                    <h2 x-text="cell.section.Name"></h2>
+                                    <ul>
+                                        <template x-for="(item, idx) in (cell.section.Items || cell.section.Links || [])" :key="item.Kind + ':' + idx + ':' + (item.URL || item.Name || '')">
+                                            <li :class="{ 'list-subtitle-item': item.Kind === 'subtitle', 'list-md-item': item.Kind === 'markdown' }">
+                                                <template x-if="item.Kind === 'subtitle'">
+                                                    <h3 class="list-subtitle" x-text="item.Name"></h3>
+                                                </template>
+                                                <template x-if="item.Kind === 'markdown'">
+                                                    <div class="md list-md" x-html="item.HTML"></div>
+                                                </template>
+                                                <template x-if="item.Kind !== 'subtitle' && item.Kind !== 'markdown'">
+                                                    <a :href="item.URL">
+                                                        <template x-if="item.Icon">
+                                                            <i :class="iconClass(item.Icon)" class="link-icon"></i>
+                                                        </template>
+                                                        <template x-if="!item.Icon">
+                                                            <span class="default-icon">&#x2022;</span>
+                                                        </template>
+                                                        <span class="link-text">
+                                                            <span class="link-name" x-text="item.Name"></span>
+                                                            <template x-if="item.Description">
+                                                                <span class="link-desc" x-text="item.Description"></span>
+                                                            </template>
+                                                        </span>
+                                                    </a>
+                                                </template>
+                                                <template x-if="item.Kind !== 'subtitle' && item.Kind !== 'markdown' && item.Tags && item.Tags.length">
+                                                    <span class="link-tags">
+                                                        <template x-for="t in item.Tags" :key="t">
+                                                            <span class="tag-pill" :style="`--tag-color: ${tagColor(t)}`" x-text="tagLabel(t)"></span>
+                                                        </template>
+                                                    </span>
+                                                </template>
+                                            </li>
+                                        </template>
+                                    </ul>
+                                    <template x-if="cell.section.Tags && cell.section.Tags.length">
+                                        <div class="group-tags">
+                                            <template x-for="t in cell.section.Tags" :key="t">
+                                                <span class="tag-pill" :style="`--tag-color: ${tagColor(t)}`" x-text="tagLabel(t)"></span>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </section>
                     </template>
-                </section>
-            </template>
-        </div>
-        <p class="empty" x-show="groups.length === 0">No links configured.</p>
+                </template>
+            </div>
+        </template>
+        <p class="empty" x-show="items.length === 0">No content configured.</p>
     </main>
     <footer x-show="footer" x-text="footer"></footer>
 
@@ -233,6 +254,7 @@
             Alpine.data('dashboard', () => ({
                 title: '',
                 footer: '',
+                items: [],
                 groups: [],
                 nav: [],
                 tags: {},
@@ -246,6 +268,7 @@
                         ]);
                         this.title = linksResp.Title || '';
                         this.footer = linksResp.Footer || '';
+                        this.items = linksResp.Items || [];
                         this.groups = linksResp.Sections || [];
                         this.tags = linksResp.Tags || {};
                         this.nav = navResp || [];
@@ -253,6 +276,9 @@
                     } catch (e) {
                         console.error('Failed to load links:', e);
                     }
+                },
+                pageBands() {
+                    return (window.subspaceBands ? window.subspaceBands(this.items) : []);
                 },
                 tagColor(name) {
                     return (this.tags[name] && this.tags[name].Color) || 'var(--text-muted)';

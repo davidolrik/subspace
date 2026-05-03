@@ -12,10 +12,43 @@ import (
 )
 
 // PageConfig holds the parsed content of a page KDL file.
+//
+// Items preserves the original document order so the frontend can
+// interleave full-width markdown bands with grids of lists. Sections
+// is a derived links-only view kept for callers that don't care about
+// markdown blocks (search palette flattening, tag validation).
 type PageConfig struct {
 	Title    string        `json:"Title,omitempty"`
 	Footer   string        `json:"Footer,omitempty"`
+	Items    []TopItem     `json:"Items"`
 	Sections []ListSection `json:"Sections"`
+}
+
+// TopItem is one top-level entry in a page. Kind is "list" or
+// "markdown"; Section / Markdown carry the per-kind payload.
+type TopItem struct {
+	Kind     string       `json:"Kind"`
+	Section  *ListSection `json:"Section,omitempty"`
+	Markdown *MarkdownDoc `json:"Markdown,omitempty"`
+}
+
+// MarkdownDoc carries the rendered, sanitized HTML and the requested
+// grid span. When both Columns and Rows are zero the markdown is a
+// full-width band that breaks the surrounding grid. When either is
+// non-zero the markdown sits in the grid as a card spanning that many
+// columns × rows; the omitted dimension defaults to 1. Columns is
+// clamped to the current grid width by CSS at narrow viewports;
+// Rows is unclamped because the grid's row count is open-ended.
+//
+// Float controls horizontal placement of grid cards. "" / "left"
+// follow the natural left-to-right grid flow; "right" pins the card
+// to the right edge of the grid (clamped along with Columns at
+// narrow viewports). Float is ignored when the markdown is a band.
+type MarkdownDoc struct {
+	HTML    string `json:"HTML"`
+	Columns int    `json:"Columns,omitempty"`
+	Rows    int    `json:"Rows,omitempty"`
+	Float   string `json:"Float,omitempty"`
 }
 
 // ListSection is a named section within a page that contains an
@@ -86,18 +119,21 @@ func ParsePage(data []byte) (*PageConfig, []error) {
 	for _, node := range doc.Nodes {
 		switch node.Name.ValueString() {
 		case "title":
+			validateKnownProps(node, "title", nil, &errs)
 			if len(node.Arguments) < 1 {
 				errs = append(errs, fmt.Errorf("title requires a value argument"))
 				continue
 			}
 			cfg.Title = node.Arguments[0].ValueString()
 		case "footer":
+			validateKnownProps(node, "footer", nil, &errs)
 			if len(node.Arguments) < 1 {
 				errs = append(errs, fmt.Errorf("footer requires a value argument"))
 				continue
 			}
 			cfg.Footer = node.Arguments[0].ValueString()
 		case "list":
+			validateKnownProps(node, "list", []string{"tags", "color", "icon"}, &errs)
 			s, sectionErrs := parseListSection(node)
 			errs = append(errs, sectionErrs...)
 			// Drop sections whose name was missing — there's nothing
@@ -106,6 +142,15 @@ func ParsePage(data []byte) (*PageConfig, []error) {
 			// the partial section is kept.
 			if s.Name != "" {
 				cfg.Sections = append(cfg.Sections, s)
+				section := s
+				cfg.Items = append(cfg.Items, TopItem{Kind: "list", Section: &section})
+			}
+		case "markdown":
+			validateKnownProps(node, "markdown", []string{"columns", "rows", "float"}, &errs)
+			md, mdErrs := parseMarkdownNode(node, true)
+			errs = append(errs, mdErrs...)
+			if md != nil {
+				cfg.Items = append(cfg.Items, TopItem{Kind: "markdown", Markdown: md})
 			}
 		default:
 			errs = append(errs, fmt.Errorf("unknown node: %q", node.Name.ValueString()))
@@ -113,6 +158,107 @@ func ParsePage(data []byte) (*PageConfig, []error) {
 	}
 
 	return cfg, errs
+}
+
+// parseMarkdownNode handles a `markdown` element at either the top
+// level (allowGrid=true: respects optional columns=N / rows=N
+// properties) or inside a list (allowGrid=false: both properties
+// are silently ignored since the markdown becomes a list row, not a
+// grid cell). Returns nil for the doc when the node is too malformed
+// to render anything.
+func parseMarkdownNode(node *document.Node, allowGrid bool) (*MarkdownDoc, []error) {
+	if len(node.Arguments) < 1 {
+		return nil, []error{fmt.Errorf("markdown requires a value argument")}
+	}
+	src := node.Arguments[0].ValueString()
+
+	var errs []error
+	columns, rows := 0, 0
+	float := ""
+	if allowGrid {
+		columns = readPositiveIntProp(node, "columns", &errs)
+		rows = readPositiveIntProp(node, "rows", &errs)
+		float = readFloatProp(node, &errs)
+
+		// Either positioning property present implies "this is a
+		// grid card, not a band". Fill in the omitted dimension
+		// with 1 so the frontend bands() walker can treat it
+		// uniformly. A float= alone (without columns/rows) also
+		// becomes a 1×1 card at the requested edge.
+		if columns > 0 || rows > 0 || float != "" {
+			if columns == 0 {
+				columns = 1
+			}
+			if rows == 0 {
+				rows = 1
+			}
+		}
+	}
+
+	html, err := RenderMarkdown(src)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("rendering markdown: %w", err))
+		return nil, errs
+	}
+	return &MarkdownDoc{HTML: html, Columns: columns, Rows: rows, Float: float}, errs
+}
+
+// readFloatProp reads the optional float="left|right" property and
+// returns "" / "left" (default) or "right". Invalid values are
+// reported as a non-fatal error and treated as if the property was
+// absent (no float).
+func readFloatProp(node *document.Node, errs *[]error) string {
+	v, ok := node.Properties.Get("float")
+	if !ok || v == nil {
+		return ""
+	}
+	s := v.ValueString()
+	switch s {
+	case "left":
+		return "" // explicit "left" is the same as omitting the prop
+	case "right":
+		return "right"
+	default:
+		*errs = append(*errs, fmt.Errorf("markdown float=%q invalid (want \"left\" or \"right\"); ignoring", s))
+		return ""
+	}
+}
+
+// readPositiveIntProp returns the value of a positive-integer KDL
+// property, or 0 if the property is absent. Non-integer values and
+// values < 1 append a non-fatal error and return 0 so the caller can
+// treat them as if the property was omitted.
+func readPositiveIntProp(node *document.Node, name string, errs *[]error) int {
+	v, ok := node.Properties.Get(name)
+	if !ok || v == nil {
+		return 0
+	}
+	n, err := valueToInt(v)
+	switch {
+	case err != nil:
+		*errs = append(*errs, fmt.Errorf("markdown %s=%q invalid (want a positive integer); ignoring", name, v.ValueString()))
+		return 0
+	case n < 1:
+		*errs = append(*errs, fmt.Errorf("markdown %s=%d invalid (want >= 1); ignoring", name, n))
+		return 0
+	default:
+		return n
+	}
+}
+
+// valueToInt extracts a Go int from a kdl-go *Value via its
+// ResolvedValue() pathway. Non-numeric and non-integer numeric values
+// (floats, big.Float, strings, bools) all return an error so the
+// caller can build the right diagnostic.
+func valueToInt(v *document.Value) (int, error) {
+	switch n := v.ResolvedValue().(type) {
+	case int64:
+		return int(n), nil
+	case int:
+		return n, nil
+	default:
+		return 0, fmt.Errorf("not an integer (got %T)", n)
+	}
 }
 
 func parseListSection(node *document.Node) (ListSection, []error) {
@@ -164,6 +310,14 @@ func parseListSection(node *document.Node) (ListSection, []error) {
 				Kind: "subtitle",
 				Name: name,
 			})
+		case "markdown":
+			md, mdErrs := parseMarkdownNode(child, false)
+			for _, e := range mdErrs {
+				errs = append(errs, fmt.Errorf("list %q: %w", s.Name, e))
+			}
+			if md != nil {
+				s.Items = append(s.Items, ListItem{Kind: "markdown", HTML: md.HTML})
+			}
 		default:
 			errs = append(errs, fmt.Errorf("list %q: unknown node %q", s.Name, child.Name.ValueString()))
 		}
@@ -199,6 +353,34 @@ func parseLink(node *document.Node) (Link, error) {
 	l.Tags = parseTagsProperty(node)
 
 	return l, nil
+}
+
+// validateKnownProps emits a non-fatal error for every property on
+// `node` whose name is not in `allowed`. Used at the top level where
+// typos are worth flagging — inside a list we deliberately stay
+// lenient so an operator's experimental `link "x" url="..." note="..."`
+// or `markdown badge="ship" "..."` doesn't get rejected. `allowed`
+// may be nil, meaning the node accepts no properties.
+func validateKnownProps(node *document.Node, kind string, allowed []string, errs *[]error) {
+	for name := range node.Properties.Unordered() {
+		known := false
+		for _, a := range allowed {
+			if a == name {
+				known = true
+				break
+			}
+		}
+		if known {
+			continue
+		}
+		label := kind
+		if kind == "list" || kind == "markdown" {
+			if len(node.Arguments) > 0 {
+				label = fmt.Sprintf("%s %q", kind, node.Arguments[0].ValueString())
+			}
+		}
+		*errs = append(*errs, fmt.Errorf("%s: unknown property %q", label, name))
+	}
 }
 
 // parseTagsProperty reads the optional "tags" property and splits it

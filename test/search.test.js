@@ -17,6 +17,7 @@ import {
     keybindings,
     matchGlobal,
     groupBindingsForLegend,
+    bands,
 } from '../pages/frontend/search.js';
 
 const engines = [
@@ -786,5 +787,97 @@ describe('buildThemeCookie', () => {
 
     it('honours a custom Max-Age', () => {
         expect(buildThemeCookie('light', { maxAge: 60 })).toContain('Max-Age=60');
+    });
+});
+
+describe('bands', () => {
+    const list = (name) => ({ Kind: 'list', Section: { Name: name, Links: [], Items: [] } });
+    const md = (cols, rows, html, float = '') => ({ Kind: 'markdown', Markdown: { Columns: cols, Rows: rows, Float: float, HTML: html } });
+
+    it('returns an empty array for an empty input', () => {
+        expect(bands([])).toEqual([]);
+        expect(bands(undefined)).toEqual([]);
+    });
+
+    it('wraps a single band markdown into one band', () => {
+        const out = bands([md(0, 0, '<p>hi</p>')]);
+        expect(out).toEqual([{ kind: 'markdown', html: '<p>hi</p>' }]);
+    });
+
+    it('groups consecutive lists into one grid band', () => {
+        const out = bands([list('A'), list('B')]);
+        expect(out).toHaveLength(1);
+        expect(out[0].kind).toBe('grid');
+        expect(out[0].cells).toHaveLength(2);
+        expect(out[0].cells.map(c => c.kind)).toEqual(['list', 'list']);
+    });
+
+    it('splits the grid on a band markdown', () => {
+        const out = bands([
+            list('A'),
+            list('B'),
+            md(0, 0, '<p>break</p>'),
+            list('C'),
+        ]);
+        expect(out).toHaveLength(3);
+        expect(out[0]).toMatchObject({ kind: 'grid' });
+        expect(out[0].cells).toHaveLength(2);
+        expect(out[1]).toEqual({ kind: 'markdown', html: '<p>break</p>' });
+        expect(out[2]).toMatchObject({ kind: 'grid' });
+        expect(out[2].cells).toHaveLength(1);
+    });
+
+    it('keeps grid-card markdowns inside the surrounding grid', () => {
+        const out = bands([
+            list('A'),
+            md(2, 1, '<p>side</p>'),
+            md(0, 0, '<p>break</p>'),
+            list('B'),
+        ]);
+        expect(out).toHaveLength(3);
+        expect(out[0].cells.map(c => c.kind)).toEqual(['list', 'markdown']);
+        expect(out[0].cells[1]).toMatchObject({ kind: 'markdown', html: '<p>side</p>', columns: 2, rows: 1 });
+        expect(out[1]).toEqual({ kind: 'markdown', html: '<p>break</p>' });
+        expect(out[2].cells.map(c => c.kind)).toEqual(['list']);
+    });
+
+    it('carries columns and rows through on grid-card cells', () => {
+        const out = bands([md(1, 1, '<p>a</p>'), md(3, 2, '<p>b</p>')]);
+        expect(out).toHaveLength(1);
+        expect(out[0].cells).toHaveLength(2);
+        expect(out[0].cells[0]).toMatchObject({ kind: 'markdown', columns: 1, rows: 1 });
+        expect(out[0].cells[1]).toMatchObject({ kind: 'markdown', columns: 3, rows: 2 });
+    });
+
+    it('treats a rows-only markdown (server has filled in Columns=1) as a single-column tall card', () => {
+        const out = bands([md(1, 2, '<p>tall</p>')]);
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ kind: 'grid' });
+        expect(out[0].cells).toHaveLength(1);
+        expect(out[0].cells[0]).toMatchObject({ kind: 'markdown', columns: 1, rows: 2 });
+    });
+
+    it('carries float through on grid-card cells', () => {
+        const out = bands([md(2, 1, '<p>r</p>', 'right'), md(1, 1, '<p>l</p>')]);
+        expect(out).toHaveLength(1);
+        expect(out[0].cells[0]).toMatchObject({ kind: 'markdown', columns: 2, float: 'right' });
+        expect(out[0].cells[1]).toMatchObject({ kind: 'markdown', columns: 1, float: '' });
+    });
+
+    it('treats a markdown with only float=right as a 1×1 grid card, not a band', () => {
+        // The server normalises this case (Columns/Rows = 1), so the
+        // input that bands() sees here mirrors what the API emits.
+        const out = bands([md(1, 1, '<p>x</p>', 'right')]);
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ kind: 'grid' });
+        expect(out[0].cells[0]).toMatchObject({ kind: 'markdown', float: 'right' });
+    });
+
+    it('emits two consecutive band markdowns without an empty grid between', () => {
+        const out = bands([md(0, 0, '<p>a</p>'), md(0, 0, '<p>b</p>')]);
+        expect(out).toEqual([
+            { kind: 'markdown', html: '<p>a</p>' },
+            { kind: 'markdown', html: '<p>b</p>' },
+        ]);
     });
 });
