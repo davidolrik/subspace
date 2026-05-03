@@ -129,7 +129,7 @@ list "Observability" {
 }
 ```
 
-CommonMark plus GFM extensions (tables, strikethrough, autolinks, task lists) are supported. Use raw KDL strings (`r#"..."#`) to embed multi-line markdown without having to escape newlines or quotes. All links rendered from markdown open in a new tab.
+CommonMark plus GFM extensions (tables, strikethrough, autolinks, task lists) are supported. **Task list checkboxes are interactive** — click one to toggle it, and the state persists in your browser's localStorage so it survives reloads. State is keyed per (page, label hash), so two pages with identical task wording keep independent state, and renaming a task starts it fresh. Use raw KDL strings (`r#"..."#`) to embed multi-line markdown without having to escape newlines or quotes. All links rendered from markdown open in a new tab.
 
 Subspace strips a common leading indent from every line of a multi-line markdown source so you can keep your config file tidy. The first non-blank line determines the prefix — its leading tabs/spaces are removed from every following line, while lines indented more than the prefix keep their extra whitespace (so nested markdown lists still work). A heredoc-style leading newline is also trimmed.
 

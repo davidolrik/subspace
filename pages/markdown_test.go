@@ -228,6 +228,29 @@ func TestRenderMarkdownStripsIndent(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdownTaskListInteractive(t *testing.T) {
+	html, err := RenderMarkdown("- [ ] todo\n- [x] done\n")
+	if err != nil {
+		t.Fatalf("RenderMarkdown: %v", err)
+	}
+	// Both checkboxes survive sanitisation.
+	if strings.Count(html, "<input") != 2 {
+		t.Fatalf("expected two <input> elements, got: %q", html)
+	}
+	// `disabled` is removed so the checkboxes are clickable.
+	if strings.Contains(html, "disabled") {
+		t.Errorf("rendered task list must not carry disabled, got: %q", html)
+	}
+	// The checked state on `[x]` survives.
+	if !strings.Contains(html, "checked") {
+		t.Errorf("checked state should be preserved for [x] items, got: %q", html)
+	}
+	// The frontend uses .md-task on the <li> to address task rows.
+	if !strings.Contains(html, "md-task") {
+		t.Errorf("task <li> should be marked with the md-task class, got: %q", html)
+	}
+}
+
 func TestRenderMarkdownEmpty(t *testing.T) {
 	html, err := RenderMarkdown("")
 	if err != nil {

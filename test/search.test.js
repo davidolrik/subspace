@@ -18,6 +18,8 @@ import {
     matchGlobal,
     groupBindingsForLegend,
     bands,
+    hashTaskLabel,
+    taskStorageKey,
 } from '../pages/frontend/search.js';
 
 const engines = [
@@ -787,6 +789,42 @@ describe('buildThemeCookie', () => {
 
     it('honours a custom Max-Age', () => {
         expect(buildThemeCookie('light', { maxAge: 60 })).toContain('Max-Age=60');
+    });
+});
+
+describe('hashTaskLabel', () => {
+    it('returns a stable short string for the same input', () => {
+        const a = hashTaskLabel('Buy milk');
+        const b = hashTaskLabel('Buy milk');
+        expect(a).toBe(b);
+        expect(a.length).toBeGreaterThan(0);
+        expect(a.length).toBeLessThan(15);
+    });
+
+    it('produces different hashes for different labels', () => {
+        expect(hashTaskLabel('a')).not.toBe(hashTaskLabel('b'));
+    });
+
+    it('normalises whitespace so trailing spaces or newlines do not change the hash', () => {
+        // Surrounding whitespace, repeated spaces, and newlines all
+        // collapse to single spaces — task <li>s rendered by goldmark
+        // sometimes include trailing whitespace that we don't want
+        // forming a different identity.
+        expect(hashTaskLabel('  Buy   milk\n')).toBe(hashTaskLabel('Buy milk'));
+    });
+});
+
+describe('taskStorageKey', () => {
+    it('scopes the storage key per page so identical labels do not share state', () => {
+        const a = taskStorageKey('dev',  'Ship it');
+        const b = taskStorageKey('ops',  'Ship it');
+        expect(a).not.toBe(b);
+        expect(a.startsWith('subspace-task:dev:')).toBe(true);
+        expect(b.startsWith('subspace-task:ops:')).toBe(true);
+    });
+
+    it('returns the same key for the same (page, label) pair', () => {
+        expect(taskStorageKey('dev', 'Ship it')).toBe(taskStorageKey('dev', 'Ship it'));
     });
 });
 

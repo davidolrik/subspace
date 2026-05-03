@@ -888,6 +888,27 @@ export function parseCookies(cookieString) {
     return out;
 }
 
+// hashTaskLabel produces a short stable string from a task list item's
+// visible label. Used to key the persisted checked-state in
+// localStorage. djb2-style — no crypto needs since the input is a
+// short authored string and collisions only swap two operator-typed
+// labels (acceptable; renaming a task losing its state is OK).
+export function hashTaskLabel(text) {
+    let h = 5381;
+    const s = (text || '').replace(/\s+/g, ' ').trim();
+    for (let i = 0; i < s.length; i++) {
+        h = (((h << 5) + h) + s.charCodeAt(i)) | 0;
+    }
+    return (h >>> 0).toString(36);
+}
+
+// taskStorageKey returns the localStorage key used to remember the
+// checked state of a single task-list item, scoped per page so two
+// pages with identical task labels don't share state. Pure for tests.
+export function taskStorageKey(pageName, label) {
+    return 'subspace-task:' + (pageName || '') + ':' + hashTaskLabel(label);
+}
+
 // buildThemeCookie returns the Set-Cookie-style string written to
 // document.cookie when persisting a theme choice. Pure so it can be
 // asserted against in tests.
@@ -940,6 +961,29 @@ if (typeof document !== 'undefined') {
     // component in index.html can call it from Alpine without a
     // bundler step.
     window.subspaceBands = bands;
+
+    // Initialise (or re-initialise) every GFM task-list checkbox on
+    // the page: restore its checked state from localStorage and wire
+    // up an onchange handler that persists future flips. Idempotent
+    // — Alpine re-renders the markdown container on items reload, so
+    // we reattach via a `data-task-bound` flag.
+    window.subspaceInitTaskLists = function (pageName) {
+        const inputs = document.querySelectorAll('li.md-task > input[type="checkbox"]');
+        inputs.forEach((input) => {
+            if (input.dataset.taskBound === '1') return;
+            const label = (input.parentElement && input.parentElement.textContent) || '';
+            const key = taskStorageKey(pageName, label);
+            try {
+                const saved = localStorage.getItem(key);
+                if (saved === '1') input.checked = true;
+                else if (saved === '0') input.checked = false;
+            } catch (_) { /* private mode etc. */ }
+            input.addEventListener('change', () => {
+                try { localStorage.setItem(key, input.checked ? '1' : '0'); } catch (_) {}
+            });
+            input.dataset.taskBound = '1';
+        });
+    };
 
     // Expose a tiny global so the inline header button can call it
     // without needing Alpine state on every page.

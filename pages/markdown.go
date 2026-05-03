@@ -36,6 +36,11 @@ var markdownPolicy = func() *bluemonday.Policy {
 	p.AllowAttrs("target").OnElements("a")
 	p.AllowAttrs("rel").OnElements("a")
 	p.AllowAttrs("id").Matching(bluemonday.SpaceSeparatedTokens).OnElements("h1", "h2", "h3", "h4", "h5", "h6")
+	// GFM task-list checkboxes are clickable in the dashboard so
+	// state can be toggled and persisted client-side.
+	p.AllowAttrs("type").Matching(regexp.MustCompile(`^checkbox$`)).OnElements("input")
+	p.AllowAttrs("checked", "disabled").OnElements("input")
+	p.AllowAttrs("class").Matching(regexp.MustCompile(`^md-task$`)).OnElements("li")
 	return p
 }()
 
@@ -59,10 +64,38 @@ func RenderMarkdown(src string) (string, error) {
 	if err := markdownRenderer.Convert([]byte(src), &buf); err != nil {
 		return "", fmt.Errorf("rendering markdown: %w", err)
 	}
-	clean := markdownPolicy.SanitizeBytes(buf.Bytes())
+	// Tag GFM task-list <li>s and drop the `disabled` attribute
+	// BEFORE sanitising so the policy's class allowlist actually
+	// sees the class on the <li>. (Sanitising first would strip
+	// the attribute we're about to add.)
+	pre := transformTaskLists(buf.String())
+	clean := markdownPolicy.SanitizeBytes([]byte(pre))
 	out := transformAlerts(string(clean))
 	out = addLinkTarget(out)
 	return strings.TrimRight(out, "\n"), nil
+}
+
+// taskLiRegex finds a <li> whose first child is a task-list checkbox
+// (i.e. a goldmark-rendered `- [ ]` / `- [x]` item). Group 1 is the
+// existing space between `<li` and the rest of the tag (zero or
+// more characters); we use it to slot a `class="md-task"` in.
+var taskLiRegex = regexp.MustCompile(`(?s)<li(\s*)>(\s*<input[^>]*type="checkbox"[^>]*>)`)
+
+// taskInputRegex matches a task-list checkbox <input> tag in any
+// attribute order. Group 1 is the inside of the tag (every
+// attribute); we rebuild the tag without `disabled` so the checkbox
+// becomes clickable.
+var taskInputRegex = regexp.MustCompile(`<input([^>]*type="checkbox"[^>]*)>`)
+var disabledAttrRegex = regexp.MustCompile(`\s*disabled(="[^"]*")?`)
+
+func transformTaskLists(html string) string {
+	html = taskLiRegex.ReplaceAllString(html, `<li class="md-task">$2`)
+	html = taskInputRegex.ReplaceAllStringFunc(html, func(m string) string {
+		sub := taskInputRegex.FindStringSubmatch(m)
+		attrs := disabledAttrRegex.ReplaceAllString(sub[1], "")
+		return "<input" + attrs + ">"
+	})
+	return html
 }
 
 // stripCommonIndent trims a leading-whitespace prefix from every line

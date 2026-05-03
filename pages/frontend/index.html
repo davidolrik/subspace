@@ -273,6 +273,16 @@
                         this.tags = linksResp.Tags || {};
                         this.nav = navResp || [];
                         this.configErrors = (errorsResp && errorsResp.errors) || [];
+
+                        // Restore persisted task-list checkbox state on
+                        // the next tick so Alpine has finished rendering
+                        // the markdown content into the DOM. The page
+                        // path keys storage so two dashboards can keep
+                        // independent task state on the same browser.
+                        this.$nextTick(() => {
+                            const pageName = location.pathname.split('/').filter(Boolean)[0] || '';
+                            window.subspaceInitTaskLists && window.subspaceInitTaskLists(pageName);
+                        });
                     } catch (e) {
                         console.error('Failed to load links:', e);
                     }

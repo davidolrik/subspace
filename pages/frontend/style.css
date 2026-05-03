@@ -597,6 +597,32 @@ main > .md-band-wrap + .md-band-wrap {
     margin: 1.25rem 0;
 }
 
+/* Task-list rows. The default <ul> bullet is suppressed on these
+   <li>s because the checkbox itself is the row marker. The strike-
+   through on completed rows mirrors GitHub's rendering. */
+.md ul:has(> li.md-task) {
+    list-style: none;
+    padding-left: 0.25rem;
+}
+.md li.md-task {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin: 0.2rem 0;
+}
+.md li.md-task > input[type="checkbox"] {
+    cursor: pointer;
+    /* Pull the checkbox up so it visually centres on the first text
+       line; align-items: baseline alone makes it sit too low. */
+    transform: translateY(0.15em);
+    accent-color: var(--accent);
+}
+.md li.md-task:has(> input:checked) {
+    color: var(--text-muted);
+    text-decoration: line-through;
+    text-decoration-color: var(--border);
+}
+
 footer {
     padding: 2rem;
     text-align: center;
