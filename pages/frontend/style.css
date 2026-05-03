@@ -388,8 +388,34 @@ main > .md-band-wrap + .md-band-wrap {
        so prose reads at the same density as a list of links. */
     font-size: 0.9rem;
 }
-.md-card.md > *:first-child { margin-top: 0; }
-.md-card.md > *:last-child  { margin-bottom: 0; }
+
+/* Heading hierarchy inside markdown cards.
+   h1 is styled to match a list card's section title (.group h2 above)
+   so a markdown card's "title" reads identically to a list card's. h2
+   onwards are progressively smaller body-weight labels — the visual
+   distinction between h1 and h2..h6 comes from the uppercase tracking
+   on h1, not raw size. Outside .md-card (i.e. on .md-band), the
+   default .md h1..h6 sizes still apply. */
+.md-card.md h1 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin: 0 0 0.75rem;
+}
+.md-card.md h2 { font-size: 0.95rem; font-weight: 600; margin: 0.75rem 0 0.35rem; }
+.md-card.md h3 { font-size: 0.9rem;  font-weight: 600; margin: 0.6rem 0 0.3rem; }
+.md-card.md h4 { font-size: 0.85rem; font-weight: 600; margin: 0.5rem 0 0.25rem; }
+.md-card.md h5 { font-size: 0.8rem;  font-weight: 600; margin: 0.45rem 0 0.2rem; }
+.md-card.md h6 { font-size: 0.75rem; font-weight: 500; margin: 0.4rem 0 0.2rem; color: var(--text-muted); }
+
+/* The rendered markdown lives inside a wrapper <div class="md">; the
+   first/last child of THAT wrapper is what we want to flush against
+   the card's padding. Placing these rules after the heading block so
+   they override the heading top-margin when the heading is first. */
+.md-card .md > *:first-child { margin-top: 0; }
+.md-card .md > *:last-child  { margin-bottom: 0; }
 
 /* Column spans for markdown grid cards. Mirrors the grid's 4/3/2/1
    responsive breakpoints — at each step, larger spans clamp down to
