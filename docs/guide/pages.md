@@ -49,6 +49,23 @@ Links are displayed in a responsive grid of cards, one card per section. Each li
 | `icon`        | No       | Icon name — `si-*` for [Simple Icons](https://simpleicons.org), `fa-*` for [Font Awesome](https://fontawesome.com/icons), `mdi-*` for [Material Design Icons](https://pictogrammers.com/library/mdi/), `nf-*` for [Nerd Fonts](https://www.nerdfonts.com/) |
 | `description` | No       | Short description shown below the link name                                                                                                                                                                                                                |
 
+### Subtitles inside a list
+
+Inside a `list` block you can use a `title "..."` node to break the list into labelled groups. Subtitles render as small uppercase headers above the next group of links and preserve the order they appear in the KDL file:
+
+```kdl
+list "Repositories" {
+    title "GitHub"
+    link "subspace" url="https://github.com/davidolrik/subspace"
+    link "kdl-go"   url="https://github.com/sblinch/kdl-go"
+
+    title "GitLab"
+    link "internal" url="https://gitlab.example.com/team/internal"
+}
+```
+
+Subtitles are only used for visual grouping — they aren't included in search results, can't carry tags, and don't accept any properties beyond their name.
+
 ### Section colors and icons
 
 Sections can have an accent color that tints the card border and background, and an icon displayed in the top-right corner of the card:

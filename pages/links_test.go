@@ -49,6 +49,62 @@ list "Infrastructure" {
 	}
 }
 
+func TestParsePageListSubtitle(t *testing.T) {
+	input := []byte(`
+list "Repos" {
+	title "GitHub"
+	link "subspace" url="https://github.com/davidolrik/subspace"
+	link "kdl-go"   url="https://github.com/sblinch/kdl-go"
+	title "GitLab"
+	link "internal" url="https://gitlab.example.com/team/internal"
+}
+`)
+	cfg, err := ParsePage(input)
+	if err != nil {
+		t.Fatalf("ParsePage() error: %v", err)
+	}
+
+	if len(cfg.Sections) != 1 {
+		t.Fatalf("got %d sections, want 1", len(cfg.Sections))
+	}
+	s := cfg.Sections[0]
+
+	// Items preserve KDL order with subtitles interleaved.
+	if len(s.Items) != 5 {
+		t.Fatalf("got %d items, want 5: %+v", len(s.Items), s.Items)
+	}
+	wantKinds := []string{"subtitle", "link", "link", "subtitle", "link"}
+	wantNames := []string{"GitHub", "subspace", "kdl-go", "GitLab", "internal"}
+	for i, item := range s.Items {
+		if item.Kind != wantKinds[i] {
+			t.Errorf("Items[%d].Kind = %q, want %q", i, item.Kind, wantKinds[i])
+		}
+		if item.Name != wantNames[i] {
+			t.Errorf("Items[%d].Name = %q, want %q", i, item.Name, wantNames[i])
+		}
+	}
+
+	// Links is the flat link-only view. Subtitles are excluded.
+	if len(s.Links) != 3 {
+		t.Fatalf("got %d links, want 3 (subtitles excluded): %+v", len(s.Links), s.Links)
+	}
+	if s.Links[0].URL != "https://github.com/davidolrik/subspace" {
+		t.Errorf("Links[0].URL = %q", s.Links[0].URL)
+	}
+}
+
+func TestParsePageListSubtitleRequiresName(t *testing.T) {
+	_, err := ParsePage([]byte(`
+list "Repos" {
+	title
+	link "x" url="https://x.example"
+}
+`))
+	if err == nil {
+		t.Fatal("expected error for title with no argument")
+	}
+}
+
 func TestParsePageTitleAndFooter(t *testing.T) {
 	input := []byte(`
 title "My Links"

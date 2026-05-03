@@ -88,25 +88,30 @@
                     </template>
                     <h2 x-text="group.Name"></h2>
                     <ul>
-                        <template x-for="link in group.Links" :key="link.URL">
-                            <li>
-                                <a :href="link.URL">
-                                    <template x-if="link.Icon">
-                                        <i :class="iconClass(link.Icon)" class="link-icon"></i>
-                                    </template>
-                                    <template x-if="!link.Icon">
-                                        <span class="default-icon">&#x2022;</span>
-                                    </template>
-                                    <span class="link-text">
-                                        <span class="link-name" x-text="link.Name"></span>
-                                        <template x-if="link.Description">
-                                            <span class="link-desc" x-text="link.Description"></span>
+                        <template x-for="(item, idx) in (group.Items || group.Links || [])" :key="item.Kind + ':' + idx + ':' + (item.URL || item.Name)">
+                            <li :class="{ 'list-subtitle-item': item.Kind === 'subtitle' }">
+                                <template x-if="item.Kind === 'subtitle'">
+                                    <h3 class="list-subtitle" x-text="item.Name"></h3>
+                                </template>
+                                <template x-if="item.Kind !== 'subtitle'">
+                                    <a :href="item.URL">
+                                        <template x-if="item.Icon">
+                                            <i :class="iconClass(item.Icon)" class="link-icon"></i>
                                         </template>
-                                    </span>
-                                </a>
-                                <template x-if="link.Tags && link.Tags.length">
+                                        <template x-if="!item.Icon">
+                                            <span class="default-icon">&#x2022;</span>
+                                        </template>
+                                        <span class="link-text">
+                                            <span class="link-name" x-text="item.Name"></span>
+                                            <template x-if="item.Description">
+                                                <span class="link-desc" x-text="item.Description"></span>
+                                            </template>
+                                        </span>
+                                    </a>
+                                </template>
+                                <template x-if="item.Kind !== 'subtitle' && item.Tags && item.Tags.length">
                                     <span class="link-tags">
-                                        <template x-for="t in link.Tags" :key="t">
+                                        <template x-for="t in item.Tags" :key="t">
                                             <span class="tag-pill" :style="`--tag-color: ${tagColor(t)}`" x-text="tagLabel(t)"></span>
                                         </template>
                                     </span>

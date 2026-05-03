@@ -246,6 +246,28 @@ main {
     gap: 0.5rem;
 }
 
+.group li.list-subtitle-item {
+    padding-top: 0.85rem;
+    padding-bottom: 0.25rem;
+}
+
+/* The first in-list title shouldn't add space above itself — the
+   section header already provides that. */
+.group li.list-subtitle-item:first-child {
+    padding-top: 0;
+}
+
+.group .list-subtitle {
+    /* Match the section header (.group h2) so an in-list `title`
+       reads the same as the title at the top of the list box. */
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin: 0;
+}
+
 .link-tags {
     margin-left: auto;
     display: flex;

@@ -18,13 +18,31 @@ type PageConfig struct {
 	Sections []ListSection `json:"Sections"`
 }
 
-// ListSection is a named section within a page that contains a list of items.
+// ListSection is a named section within a page that contains an
+// ordered mix of links and inline subtitles. Items preserves the
+// original KDL order — subtitles are rendered as small headings
+// between groups of links. Links is a flat link-only view kept for
+// callers (search palette flattening, tag validation) that only care
+// about navigable items.
 type ListSection struct {
-	Name  string   `json:"Name"`
-	Color string   `json:"Color,omitempty"`
-	Icon  string   `json:"Icon,omitempty"`
-	Tags  []string `json:"Tags,omitempty"`
-	Links []Link   `json:"Links"`
+	Name  string     `json:"Name"`
+	Color string     `json:"Color,omitempty"`
+	Icon  string     `json:"Icon,omitempty"`
+	Tags  []string   `json:"Tags,omitempty"`
+	Items []ListItem `json:"Items"`
+	Links []Link     `json:"Links"`
+}
+
+// ListItem is one entry in a ListSection. Kind is either "link" or
+// "subtitle"; Name + URL + Icon + Description + Tags carry the
+// per-kind payload (subtitles only use Name).
+type ListItem struct {
+	Kind        string   `json:"Kind"`
+	Name        string   `json:"Name"`
+	URL         string   `json:"URL,omitempty"`
+	Icon        string   `json:"Icon,omitempty"`
+	Description string   `json:"Description,omitempty"`
+	Tags        []string `json:"Tags,omitempty"`
 }
 
 // Link is a single page link.
@@ -105,6 +123,26 @@ func parseListSection(node *document.Node) (ListSection, error) {
 				return ListSection{}, fmt.Errorf("list %q: %w", s.Name, err)
 			}
 			s.Links = append(s.Links, l)
+			s.Items = append(s.Items, ListItem{
+				Kind:        "link",
+				Name:        l.Name,
+				URL:         l.URL,
+				Icon:        l.Icon,
+				Description: l.Description,
+				Tags:        l.Tags,
+			})
+		case "title":
+			if len(child.Arguments) < 1 {
+				return ListSection{}, fmt.Errorf("list %q: title requires a value argument", s.Name)
+			}
+			name := child.Arguments[0].ValueString()
+			if name == "" {
+				return ListSection{}, fmt.Errorf("list %q: title requires a non-empty value", s.Name)
+			}
+			s.Items = append(s.Items, ListItem{
+				Kind: "subtitle",
+				Name: name,
+			})
 		default:
 			return ListSection{}, fmt.Errorf("list %q: unknown node %q", s.Name, child.Name.ValueString())
 		}
