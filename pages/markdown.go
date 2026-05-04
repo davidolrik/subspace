@@ -6,9 +6,11 @@ import (
 	"regexp"
 	"strings"
 
+	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
+	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer/html"
 )
@@ -17,8 +19,20 @@ import (
 // tables, strikethrough, autolinks, and task lists on top of CommonMark.
 // html.WithUnsafe lets raw HTML in the source pass through goldmark; the
 // bluemonday sanitizer downstream is what actually keeps us safe.
+// markdownRenderer parses CommonMark + GFM and runs fenced code
+// blocks through chroma for syntax highlighting. WithClasses(true)
+// emits class-based output (no inline styles) so the dashboard's
+// CSS can theme the colors and the dark/light toggle works without
+// re-rendering the markdown.
 var markdownRenderer = goldmark.New(
-	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithExtensions(
+		extension.GFM,
+		highlighting.NewHighlighting(
+			highlighting.WithFormatOptions(
+				chromahtml.WithClasses(true),
+			),
+		),
+	),
 	goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 	goldmark.WithRendererOptions(html.WithUnsafe()),
 )
@@ -41,6 +55,11 @@ var markdownPolicy = func() *bluemonday.Policy {
 	p.AllowAttrs("type").Matching(regexp.MustCompile(`^checkbox$`)).OnElements("input")
 	p.AllowAttrs("checked", "disabled").OnElements("input")
 	p.AllowAttrs("class").Matching(regexp.MustCompile(`^md-task$`)).OnElements("li")
+	// Chroma syntax highlighting emits class names on <pre>, <code>,
+	// and <span> tokens. Allow any whitespace-separated token list so
+	// every Chroma class is preserved through sanitisation. Chroma's
+	// class names are short and stable (e.g. "k", "kd", "s", "n").
+	p.AllowAttrs("class").OnElements("pre", "code", "span")
 	return p
 }()
 
@@ -75,11 +94,12 @@ func RenderMarkdown(src string) (string, error) {
 	return strings.TrimRight(out, "\n"), nil
 }
 
-// taskLiRegex finds a <li> whose first child is a task-list checkbox
-// (i.e. a goldmark-rendered `- [ ]` / `- [x]` item). Group 1 is the
-// existing space between `<li` and the rest of the tag (zero or
-// more characters); we use it to slot a `class="md-task"` in.
-var taskLiRegex = regexp.MustCompile(`(?s)<li(\s*)>(\s*<input[^>]*type="checkbox"[^>]*>)`)
+// taskLiRegex finds a <li> whose first effective child is a task-list
+// checkbox. Goldmark sometimes inlines the <input> directly under
+// the <li> and sometimes wraps it in a <p> (depends on whether
+// surrounding markdown forces loose-list rendering); both shapes must
+// match. The replacement injects `class="md-task"` on the <li> tag.
+var taskLiRegex = regexp.MustCompile(`(?s)<li>(\s*(?:<p>\s*)?<input[^>]*type="checkbox"[^>]*>)`)
 
 // taskInputRegex matches a task-list checkbox <input> tag in any
 // attribute order. Group 1 is the inside of the tag (every
@@ -89,7 +109,7 @@ var taskInputRegex = regexp.MustCompile(`<input([^>]*type="checkbox"[^>]*)>`)
 var disabledAttrRegex = regexp.MustCompile(`\s*disabled(="[^"]*")?`)
 
 func transformTaskLists(html string) string {
-	html = taskLiRegex.ReplaceAllString(html, `<li class="md-task">$2`)
+	html = taskLiRegex.ReplaceAllString(html, `<li class="md-task">$1`)
 	html = taskInputRegex.ReplaceAllStringFunc(html, func(m string) string {
 		sub := taskInputRegex.FindStringSubmatch(m)
 		attrs := disabledAttrRegex.ReplaceAllString(sub[1], "")

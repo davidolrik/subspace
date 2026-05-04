@@ -545,6 +545,72 @@ main > .md-band-wrap + .md-band-wrap {
     padding: 0;
     font-size: 0.85rem;
 }
+
+/* Chroma syntax-highlighting theme. Class names follow chroma's
+   short-form convention (k=keyword, s=string, c=comment, etc.).
+   Colours are sourced from the dashboard accent palette via CSS
+   variables so the dark/light toggle re-themes the code blocks
+   without re-rendering them. */
+:root {
+    --code-keyword:  #ff7eb6;
+    --code-type:     #4a9eff;
+    --code-string:   #00d18f;
+    --code-number:   #ffb84a;
+    --code-comment:  var(--text-muted);
+    --code-name:     var(--text);
+    --code-funcname: #b478ff;
+    --code-builtin:  #4a9eff;
+    --code-operator: var(--text);
+    --code-punct:    var(--text-muted);
+    --code-tag:      #ff7eb6;
+    --code-attr:     #ffb84a;
+    --code-error:    #ff5a6e;
+}
+[data-theme="light"] {
+    --code-keyword:  #c026d3;
+    --code-type:     #1d4ed8;
+    --code-string:   #047857;
+    --code-number:   #b45309;
+    --code-funcname: #6d28d9;
+    --code-builtin:  #1d4ed8;
+    --code-tag:      #c026d3;
+    --code-attr:     #b45309;
+    --code-error:    #b91c1c;
+}
+
+.md .chroma .line, .md .chroma .cl { display: block; }
+
+/* Keywords */
+.md .chroma .k,  .md .chroma .kc, .md .chroma .kd, .md .chroma .kn,
+.md .chroma .kp, .md .chroma .kr  { color: var(--code-keyword); }
+.md .chroma .kt                    { color: var(--code-type); }
+
+/* Names */
+.md .chroma .n,  .md .chroma .na, .md .chroma .nl, .md .chroma .nv,
+.md .chroma .nx                    { color: var(--code-name); }
+.md .chroma .nf, .md .chroma .nc, .md .chroma .nn { color: var(--code-funcname); }
+.md .chroma .nb, .md .chroma .bp  { color: var(--code-builtin); }
+.md .chroma .nt                    { color: var(--code-tag); }
+.md .chroma .na                    { color: var(--code-attr); }
+
+/* Literals */
+.md .chroma .s,  .md .chroma .s1, .md .chroma .s2, .md .chroma .sb,
+.md .chroma .sc, .md .chroma .sd, .md .chroma .se, .md .chroma .sh,
+.md .chroma .si, .md .chroma .sx, .md .chroma .sr,
+.md .chroma .ss                    { color: var(--code-string); }
+.md .chroma .m,  .md .chroma .mb, .md .chroma .mf, .md .chroma .mh,
+.md .chroma .mi, .md .chroma .mo, .md .chroma .il { color: var(--code-number); }
+
+/* Comments */
+.md .chroma .c,  .md .chroma .c1, .md .chroma .cm, .md .chroma .cs,
+.md .chroma .cp, .md .chroma .cpf { color: var(--code-comment); font-style: italic; }
+
+/* Operators / punctuation */
+.md .chroma .o,  .md .chroma .ow  { color: var(--code-operator); }
+.md .chroma .p                     { color: var(--code-punct); }
+
+/* Errors */
+.md .chroma .err                   { color: var(--code-error); }
 .md blockquote {
     border-left: 3px solid var(--accent);
     margin: 0.75rem 0;
@@ -601,27 +667,42 @@ main > .md-band-wrap + .md-band-wrap {
     margin: 1.25rem 0;
 }
 
-/* Task-list rows. The default <ul> bullet is suppressed on these
-   <li>s because the checkbox itself is the row marker. The strike-
-   through on completed rows mirrors GitHub's rendering. */
-.md ul:has(> li.md-task) {
-    list-style: none;
-    padding-left: 0.25rem;
-}
+/* Task-list rows. The checkbox itself is the row marker, so the <li>
+   uses `display: flex` (which inherently hides the list-item marker)
+   instead of `list-style: none` on the parent <ul>. That matters
+   when a task list and a plain unordered list are written back-to-
+   back: CommonMark merges them into a single <ul> because they share
+   the same `-` marker, and we still want the non-task siblings to
+   show their bullets. The strike-through on completed rows mirrors
+   GitHub's rendering. */
 .md li.md-task {
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
     margin: 0.2rem 0;
+    /* Hide the bullet on task rows specifically — leaving the parent
+       <ul>'s `list-style: disc` intact so any non-task siblings (e.g.
+       a plain unordered list that CommonMark merged into the same ul
+       because both used the same `-` marker) still show their
+       bullets. */
+    list-style: none;
 }
-.md li.md-task > input[type="checkbox"] {
+.md li.md-task::marker { content: ''; }
+.md li.md-task input[type="checkbox"] {
     cursor: pointer;
     /* Pull the checkbox up so it visually centres on the first text
        line; align-items: baseline alone makes it sit too low. */
     transform: translateY(0.15em);
     accent-color: var(--accent);
 }
-.md li.md-task:has(> input:checked) {
+/* Goldmark wraps the task content in a <p> when the surrounding
+   markdown is a loose list. Collapse that paragraph's margins so the
+   row reads as a single line. */
+.md li.md-task > p {
+    margin: 0;
+    display: inline;
+}
+.md li.md-task:has(input:checked) {
     color: var(--text-muted);
     text-decoration: line-through;
     text-decoration-color: var(--border);

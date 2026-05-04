@@ -251,6 +251,51 @@ func TestRenderMarkdownTaskListInteractive(t *testing.T) {
 	}
 }
 
+func TestRenderMarkdownFencedCodeWithLanguage(t *testing.T) {
+	src := "```go\nfunc Hello() string { return \"hi\" }\n```\n"
+	html, err := RenderMarkdown(src)
+	if err != nil {
+		t.Fatalf("RenderMarkdown error: %v", err)
+	}
+	// Chroma class-based highlighting wraps tokens in <span class="...">.
+	// Specific class names depend on the lexer, but the wrapper always
+	// has a `chroma` class so the dashboard's CSS can target it.
+	if !strings.Contains(html, "chroma") {
+		t.Errorf("expected chroma class on rendered code block, got: %q", html)
+	}
+	// Keyword tokens for Go ("func", "return") should be emitted as
+	// <span> elements (not plain text), so the class survives sanitisation.
+	if strings.Count(html, "<span") < 2 {
+		t.Errorf("expected several <span> tokens for highlighted Go code, got: %q", html)
+	}
+}
+
+func TestRenderMarkdownFencedCodeUnknownLanguage(t *testing.T) {
+	// An unknown language must not break rendering — chroma falls back
+	// to a plain-text lexer.
+	src := "```not-a-real-lang\nhello\n```\n"
+	html, err := RenderMarkdown(src)
+	if err != nil {
+		t.Fatalf("RenderMarkdown error: %v", err)
+	}
+	if !strings.Contains(html, "hello") {
+		t.Errorf("body content lost: %q", html)
+	}
+}
+
+func TestRenderMarkdownInlineCodeUnchanged(t *testing.T) {
+	// Inline `code` should not be highlighted (chroma only fires on
+	// fenced blocks). Sanity check so we don't accidentally syntax-
+	// highlight prose.
+	html, err := RenderMarkdown("Use `make build` to compile.")
+	if err != nil {
+		t.Fatalf("RenderMarkdown error: %v", err)
+	}
+	if !strings.Contains(html, "<code>make build</code>") {
+		t.Errorf("inline code should render as a plain <code>, got: %q", html)
+	}
+}
+
 func TestRenderMarkdownEmpty(t *testing.T) {
 	html, err := RenderMarkdown("")
 	if err != nil {
