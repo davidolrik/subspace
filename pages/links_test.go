@@ -773,6 +773,53 @@ markdown include="./missing.md" "fallback"
 	}
 }
 
+func TestParsePageMarkdownTopLevelColor(t *testing.T) {
+	cfg, errs := ParsePage([]byte(`markdown columns=2 color="#ff6b6b" "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Color != "#ff6b6b" {
+		t.Errorf("expected Color=#ff6b6b, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownTopLevelColorOmitted(t *testing.T) {
+	cfg, errs := ParsePage([]byte(`markdown columns=2 "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Color != "" {
+		t.Errorf("expected empty Color when omitted, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownInsideListIgnoresColor(t *testing.T) {
+	// color= on an in-list markdown is silently ignored — the row is
+	// inline prose with no card chrome to tint, so accepting the
+	// property without erroring keeps configs forwards-compatible
+	// when a row is later promoted to a top-level grid card.
+	input := []byte(`
+list "Dev" {
+	link "GitHub" url="https://github.com"
+	markdown color="#ff0000" "_inline note_"
+}
+`)
+	cfg, errs := ParsePage(input)
+	if len(errs) > 0 {
+		t.Errorf("expected no errors for in-list markdown color, got %v", errs)
+	}
+	if len(cfg.Sections) != 1 {
+		t.Fatalf("expected one section, got %+v", cfg)
+	}
+	// ListItem doesn't carry a Color field — the data model already
+	// enforces that there's nothing to apply the color to.
+	if len(cfg.Sections[0].Items) != 2 || cfg.Sections[0].Items[1].Kind != "markdown" {
+		t.Fatalf("expected link + markdown items, got %+v", cfg.Sections[0].Items)
+	}
+}
+
 func TestParsePageMarkdownInsideListIgnoresGridProps(t *testing.T) {
 	input := []byte(`
 list "Dev" {

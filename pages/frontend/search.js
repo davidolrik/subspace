@@ -184,6 +184,7 @@ export function bands(items) {
                 columns: md.Columns || 1,
                 rows:    md.Rows    || 1,
                 float:   md.Float   || '',
+                color:   md.Color   || '',
                 key:     'md:' + pending.cells.length,
             });
         }

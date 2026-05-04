@@ -90,7 +90,10 @@
                                  :class="cell.kind === 'markdown'
                                     ? ['md', 'md-card', 'md-cols-' + (cell.columns || 1), 'md-rows-' + (cell.rows || 1), cell.float === 'right' ? 'md-right' : '']
                                     : ''"
-                                 :style="cell.kind === 'list' && cell.section.Color ? `border-top: 2px solid ${cell.section.Color}; box-shadow: 0 0 12px ${cell.section.Color}15; background: linear-gradient(180deg, ${cell.section.Color}1a, transparent)` : ''">
+                                 :style="(() => {
+                                    const c = cell.kind === 'list' ? cell.section.Color : (cell.kind === 'markdown' ? cell.color : '');
+                                    return c ? `border-top: 2px solid ${c}; box-shadow: 0 0 12px ${c}15; background: linear-gradient(180deg, ${c}1a, transparent)` : '';
+                                 })()">
                             <template x-if="cell.kind === 'markdown'">
                                 <div class="md" x-html="cell.html"></div>
                             </template>

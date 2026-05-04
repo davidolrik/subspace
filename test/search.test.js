@@ -830,7 +830,7 @@ describe('taskStorageKey', () => {
 
 describe('bands', () => {
     const list = (name) => ({ Kind: 'list', Section: { Name: name, Links: [], Items: [] } });
-    const md = (cols, rows, html, float = '') => ({ Kind: 'markdown', Markdown: { Columns: cols, Rows: rows, Float: float, HTML: html } });
+    const md = (cols, rows, html, float = '', color = '') => ({ Kind: 'markdown', Markdown: { Columns: cols, Rows: rows, Float: float, Color: color, HTML: html } });
 
     it('returns an empty array for an empty input', () => {
         expect(bands([])).toEqual([]);
@@ -893,6 +893,13 @@ describe('bands', () => {
         expect(out[0]).toMatchObject({ kind: 'grid' });
         expect(out[0].cells).toHaveLength(1);
         expect(out[0].cells[0]).toMatchObject({ kind: 'markdown', columns: 1, rows: 2 });
+    });
+
+    it('carries color through on grid-card cells', () => {
+        const out = bands([md(2, 1, '<p>x</p>', '', '#ff6b6b'), md(1, 1, '<p>y</p>')]);
+        expect(out).toHaveLength(1);
+        expect(out[0].cells[0]).toMatchObject({ kind: 'markdown', columns: 2, color: '#ff6b6b' });
+        expect(out[0].cells[1]).toMatchObject({ kind: 'markdown', columns: 1, color: '' });
     });
 
     it('carries float through on grid-card cells', () => {

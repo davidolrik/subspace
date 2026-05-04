@@ -81,6 +81,8 @@ Markdown can appear in two places:
 
 `float="left"` (default) places the card in the natural left-to-right flow of the grid; `float="right"` pins it to the right edge instead — handy for "owners" or "see also" sidebars. The card width still follows `columns` and clamps the same way at narrow viewports, just anchored to the right.
 
+`color="#hex"` tints a markdown grid card with the same colored top border, glow, and gradient background that `list color="..."` produces — handy when you want a status callout or "owners" card that visually matches one of your section accents. The property is silently ignored on bands (which span the full width and have no card chrome) and on in-list markdown rows (which are inline prose). Omitting `color` keeps the default chrome.
+
 `include="./notes.md"` loads the markdown source from a separate file instead of inline content. Paths are resolved relative to the page's `.kdl` file; absolute paths and `~/`-prefixed paths also work. Included files are watched, so editing them triggers the same hot reload as editing the `.kdl` itself. If both `include=` and an inline value are set, the file is preferred and the inline value is used as a fallback when the file can't be read. If the file is missing and there's no fallback, the dashboard renders a visible "include failed" placeholder card naming the missing path so the problem is impossible to miss.
 
 ```kdl
@@ -109,11 +111,10 @@ list "Auth" {
     link "Legacy proxy" url="https://old-auth.example.com"
 }
 
-// columns=2 → 2-wide × 1-tall grid card.
-markdown columns=2 r#"
-### Owners
-- Platform team
-- On-call: `#oncall-platform`
+// columns=2 → 2-wide × 1-tall grid card, tinted red.
+markdown columns=2 color="#ff375f" r#"
+### Heads up
+The legacy auth proxy goes away soon — start migrating now.
 "#
 
 // rows=2 → 1-wide × 2-tall grid card.

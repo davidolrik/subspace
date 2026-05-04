@@ -57,6 +57,7 @@ type MarkdownDoc struct {
 	Columns     int    `json:"Columns,omitempty"`
 	Rows        int    `json:"Rows,omitempty"`
 	Float       string `json:"Float,omitempty"`
+	Color       string `json:"Color,omitempty"`
 	IncludePath string `json:"IncludePath,omitempty"`
 }
 
@@ -167,7 +168,7 @@ func ParsePageWithBase(data []byte, baseDir string) (*PageConfig, []error) {
 				cfg.Items = append(cfg.Items, TopItem{Kind: "list", Section: &section})
 			}
 		case "markdown":
-			validateKnownProps(node, "markdown", []string{"columns", "rows", "float", "include"}, &errs)
+			validateKnownProps(node, "markdown", []string{"columns", "rows", "float", "color", "include"}, &errs)
 			md, mdErrs := parseMarkdownNode(node, true, baseDir)
 			errs = append(errs, mdErrs...)
 			if md != nil {
@@ -193,10 +194,14 @@ func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*Ma
 	var errs []error
 	columns, rows := 0, 0
 	float := ""
+	color := ""
 	if allowGrid {
 		columns = readPositiveIntProp(node, "columns", &errs)
 		rows = readPositiveIntProp(node, "rows", &errs)
 		float = readFloatProp(node, &errs)
+		if v, ok := node.Properties.Get("color"); ok && v != nil {
+			color = v.ValueString()
+		}
 
 		// Either positioning property present implies "this is a
 		// grid card, not a band". Fill in the omitted dimension
@@ -252,6 +257,7 @@ func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*Ma
 			Columns:     columns,
 			Rows:        rows,
 			Float:       float,
+			Color:       color,
 			IncludePath: includePath,
 		}, errs
 	}
@@ -266,6 +272,7 @@ func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*Ma
 		Columns:     columns,
 		Rows:        rows,
 		Float:       float,
+		Color:       color,
 		IncludePath: includePath,
 	}, errs
 }
