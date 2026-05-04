@@ -508,11 +508,15 @@ main > .md-band-wrap + .md-band-wrap {
 .md h2 { font-size: 1.25rem; }
 .md h3 { font-size: 1.05rem; }
 .md h4, .md h5, .md h6 { font-size: 1rem; }
-.md ul, .md ol {
-    margin: 0.5rem 0;
-    padding-left: 1.5rem;
-}
-.md li { margin: 0.15rem 0; }
+/* The dashboard's `.group ul { list-style: none }` and `.group li {
+   display: flex }` would otherwise eat the bullets and line breaks of
+   any list rendered inside a markdown card (which sits inside a
+   <section class="group">). Restore the defaults explicitly so prose
+   lists render as authored. Task lists override `list-style` and
+   `display` again further down. */
+.md ul { list-style: disc; margin: 0.5rem 0; padding-left: 1.5rem; }
+.md ol { list-style: decimal; margin: 0.5rem 0; padding-left: 1.5rem; }
+.md li { display: list-item; padding: 0; margin: 0.15rem 0; }
 .md a {
     color: var(--accent);
     text-decoration: underline;
