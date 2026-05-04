@@ -85,6 +85,8 @@ Markdown can appear in two places:
 
 `color="#hex"` tints a markdown grid card with the same colored top border, glow, and gradient background that `list color="..."` produces — handy when you want a status callout or "owners" card that visually matches one of your section accents. The property is silently ignored on bands (which span the full width and have no card chrome) and on in-list markdown rows (which are inline prose). Omitting `color` keeps the default chrome.
 
+`icon="fa-..."` (or `si-`, `mdi-`, `nf-`) places a section icon in the top-right corner of a markdown grid card, exactly like `list icon=...` does. The icon picks up the card's `color=` for tinting and glow when both are set. Like `color`, `icon` is ignored on bands and in-list rows.
+
 `include="./notes.md"` loads the markdown source from a separate file instead of inline content. Paths are resolved relative to the page's `.kdl` file; absolute paths and `~/`-prefixed paths also work. Included files are watched, so editing them triggers the same hot reload as editing the `.kdl` itself. If both `include=` and an inline value are set, the file is preferred and the inline value is used as a fallback when the file can't be read. If the file is missing and there's no fallback, the dashboard renders a visible "include failed" placeholder card naming the missing path so the problem is impossible to miss.
 
 ```kdl

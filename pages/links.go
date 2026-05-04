@@ -59,6 +59,7 @@ type MarkdownDoc struct {
 	RowsAuto    bool   `json:"RowsAuto,omitempty"`
 	Float       string `json:"Float,omitempty"`
 	Color       string `json:"Color,omitempty"`
+	Icon        string `json:"Icon,omitempty"`
 	IncludePath string `json:"IncludePath,omitempty"`
 }
 
@@ -169,7 +170,7 @@ func ParsePageWithBase(data []byte, baseDir string) (*PageConfig, []error) {
 				cfg.Items = append(cfg.Items, TopItem{Kind: "list", Section: &section})
 			}
 		case "markdown":
-			validateKnownProps(node, "markdown", []string{"columns", "rows", "float", "color", "include"}, &errs)
+			validateKnownProps(node, "markdown", []string{"columns", "rows", "float", "color", "icon", "include"}, &errs)
 			md, mdErrs := parseMarkdownNode(node, true, baseDir)
 			errs = append(errs, mdErrs...)
 			if md != nil {
@@ -197,6 +198,7 @@ func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*Ma
 	rowsAuto := false
 	float := ""
 	color := ""
+	icon := ""
 	if allowGrid {
 		columns = readPositiveIntProp(node, "columns", &errs)
 		// rows accepts an integer or the literal string "auto" (case-
@@ -212,6 +214,9 @@ func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*Ma
 		float = readFloatProp(node, &errs)
 		if v, ok := node.Properties.Get("color"); ok && v != nil {
 			color = v.ValueString()
+		}
+		if v, ok := node.Properties.Get("icon"); ok && v != nil {
+			icon = v.ValueString()
 		}
 
 		// Either positioning property present implies "this is a
@@ -287,6 +292,7 @@ func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*Ma
 		RowsAuto:    rowsAuto,
 		Float:       float,
 		Color:       color,
+		Icon:        icon,
 		IncludePath: includePath,
 	}, errs
 }

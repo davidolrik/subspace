@@ -888,6 +888,28 @@ func TestParsePageMarkdownRowsAutoSerialised(t *testing.T) {
 	}
 }
 
+func TestParsePageMarkdownTopLevelIcon(t *testing.T) {
+	cfg, errs := ParsePage([]byte(`markdown columns=2 icon="fa-star" "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Icon != "fa-star" {
+		t.Errorf("expected Icon=fa-star, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownTopLevelIconOmitted(t *testing.T) {
+	cfg, errs := ParsePage([]byte(`markdown columns=2 "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Icon != "" {
+		t.Errorf("expected empty Icon when omitted, got %+v", md)
+	}
+}
+
 func TestParsePageMarkdownInsideListIgnoresGridProps(t *testing.T) {
 	input := []byte(`
 list "Dev" {

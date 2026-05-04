@@ -190,6 +190,7 @@ export function bands(items) {
                 rowsAuto: !!md.RowsAuto,
                 float:    md.Float   || '',
                 color:    md.Color   || '',
+                icon:     md.Icon    || '',
                 key:      'md:' + pending.cells.length,
             });
         }

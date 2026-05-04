@@ -97,6 +97,10 @@
                                     const c = cell.kind === 'list' ? cell.section.Color : (cell.kind === 'markdown' ? cell.color : '');
                                     return c ? `border-top: 2px solid ${c}; box-shadow: 0 0 12px ${c}15; background: linear-gradient(180deg, ${c}1a, transparent)` : '';
                                  })()">
+                            <template x-if="cell.kind === 'markdown' && cell.icon">
+                                <i :class="iconClass(cell.icon)" class="group-icon"
+                                   :style="cell.color ? `color: ${cell.color}; text-shadow: 0 0 8px ${cell.color}` : ''"></i>
+                            </template>
                             <template x-if="cell.kind === 'markdown'">
                                 <div class="md" x-html="cell.html"></div>
                             </template>
