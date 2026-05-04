@@ -179,18 +179,51 @@ export function bands(items) {
             });
         } else if (item.Kind === 'markdown' && md) {
             pending.cells.push({
-                kind:    'markdown',
-                html:    md.HTML,
-                columns: md.Columns || 1,
-                rows:    md.Rows    || 1,
-                float:   md.Float   || '',
-                color:   md.Color   || '',
-                key:     'md:' + pending.cells.length,
+                kind:     'markdown',
+                html:     md.HTML,
+                columns:  md.Columns || 1,
+                // RowsAuto means "let the post-render pass pick the
+                // span"; emit rows: 0 so the template doesn't apply
+                // an md-rows-N class that would override the inline
+                // grid-row style we set after measurement.
+                rows:     md.RowsAuto ? 0 : (md.Rows || 1),
+                rowsAuto: !!md.RowsAuto,
+                float:    md.Float   || '',
+                color:    md.Color   || '',
+                key:      'md:' + pending.cells.length,
             });
         }
     }
     flush();
     return out;
+}
+
+// autoRowSpan picks the integer `grid-row: span N` that minimises
+// superfluous whitespace in both the markdown card and its neighbours.
+//
+// `cardHeight` is what the card actually rendered as when given a 1-row
+// span — which is `max(content, tallestNeighbour)` because CSS grid
+// sizes the row track to its tallest cell and stretches every cell to
+// fit. So when the markdown content is shorter than its neighbours,
+// `cardHeight === tallestNeighbour` and span=1 is correct. When the
+// markdown content is taller, `cardHeight > tallestNeighbour` and the
+// row currently bloats every neighbour with empty space; spanning more
+// rows lets each track size to the neighbour height while accommodating
+// the card's content across the spanned tracks:
+//
+//   N tracks × neighbour_h + (N-1) × gap ≈ card_h
+//   N ≈ (card_h + gap) / (neighbour_h + gap)
+//
+// We use Math.ceil so that any genuinely-taller card bumps the span
+// (vs. round, which leaves a marginally-taller card at span=1 and
+// bloats every neighbour). A 1.5% tolerance absorbs floating-point
+// jitter and single-pixel layout slop so a card that's the same
+// height as its neighbours stays at span=1.
+export function autoRowSpan(cardHeight, tallestNeighbourHeight, rowGap) {
+    if (cardHeight <= 0 || tallestNeighbourHeight <= 0) return 1;
+    const ratio = (cardHeight + rowGap) / (tallestNeighbourHeight + rowGap);
+    if (ratio <= 1.015) return 1;
+    return Math.max(1, Math.ceil(ratio));
 }
 
 // buildResults assembles the rows shown in the search palette from the
@@ -962,6 +995,70 @@ if (typeof document !== 'undefined') {
     // component in index.html can call it from Alpine without a
     // bundler step.
     window.subspaceBands = bands;
+
+    // Resolve every `<section data-rows-auto>` inside a `.grid` band
+    // by measuring the heights of its sibling cards and computing the
+    // matching row span. Runs after Alpine renders the dashboard, and
+    // again on resize so the span tracks viewport breakpoints.
+    //
+    // The measurement is two-pass:
+    //
+    // 1. Hide the auto card(s) and force a layout. With them out of
+    //    the way, each row track sizes to its actual neighbour cards;
+    //    we read `tallest` as the largest neighbour height. This pass
+    //    is essential — measuring with the auto card present causes
+    //    the row to stretch to fit it, and `align-self: stretch`
+    //    pulls every neighbour up to that bloated height, so we'd
+    //    measure `tallest === card_h` and never bump the span.
+    //
+    // 2. Restore the auto card(s), measure each one's natural height
+    //    (which is `max(content, tallest)` because the row stretches
+    //    again), and pick a span via autoRowSpan().
+    function applyAutoRowsToGrid(grid) {
+        const cards = Array.from(grid.querySelectorAll('section[data-rows-auto]'));
+        if (!cards.length) return;
+        const others = Array.from(grid.children).filter(el => !el.matches('[data-rows-auto]'));
+        if (!others.length) return;
+
+        const gap = parseFloat(getComputedStyle(grid).rowGap) || 0;
+
+        // Snapshot prior styles so we can restore them — the grid may
+        // already have spans applied from a previous run (e.g. on
+        // resize) that we want to recompute from scratch.
+        const snapshots = cards.map(c => ({ c, gridRow: c.style.gridRow, display: c.style.display }));
+
+        // Pass 1: hide auto cards, force layout, read tallest neighbour.
+        cards.forEach(c => { c.style.gridRow = ''; c.style.display = 'none'; });
+        void grid.offsetHeight; // force reflow
+
+        let tallest = 0;
+        for (const el of others) {
+            const h = el.getBoundingClientRect().height;
+            if (h > tallest) tallest = h;
+        }
+
+        // Pass 2: restore the cards (without their old spans) and
+        // measure each one's natural single-row height.
+        snapshots.forEach(s => { s.c.style.display = s.display || ''; });
+        void grid.offsetHeight;
+
+        cards.forEach(card => {
+            const single = card.getBoundingClientRect().height;
+            card.style.gridRow = 'span ' + autoRowSpan(single, tallest, gap);
+        });
+    }
+
+    window.subspaceApplyAutoRows = function () {
+        document.querySelectorAll('main > .grid').forEach(applyAutoRowsToGrid);
+    };
+
+    // Re-run on resize so the span adapts as the grid breakpoints
+    // change. Debounced so we don't thrash mid-resize.
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => window.subspaceApplyAutoRows(), 100);
+    });
 
     // Initialise (or re-initialise) every GFM task-list checkbox on
     // the page: restore its checked state from localStorage and wire

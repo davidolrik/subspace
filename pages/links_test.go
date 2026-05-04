@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -462,10 +463,11 @@ func TestParsePageMarkdownTopLevelColumnsValid(t *testing.T) {
 		if md == nil || md.Columns != n {
 			t.Errorf("columns=%d: Columns = %v, want %d", n, md, n)
 		}
-		// Setting columns alone forces Rows = 1 so the markdown is
-		// addressable as a grid cell rather than a band.
-		if md != nil && md.Rows != 1 {
-			t.Errorf("columns=%d: Rows = %d, want 1 (default when columns is set)", n, md.Rows)
+		// Setting columns alone defaults rows to "auto" so the
+		// markdown card sizes itself to its neighbours' heights at
+		// render time. The card stays a grid cell (not a band).
+		if md != nil && (md.Rows != 0 || !md.RowsAuto) {
+			t.Errorf("columns=%d: expected Rows=0 RowsAuto=true (auto default), got Rows=%d RowsAuto=%v", n, md.Rows, md.RowsAuto)
 		}
 	}
 }
@@ -551,8 +553,8 @@ func TestParsePageMarkdownTopLevelFloatRight(t *testing.T) {
 	if md == nil || md.Float != "right" {
 		t.Errorf("expected Float=\"right\", got %+v", md)
 	}
-	if md.Columns != 2 || md.Rows != 1 {
-		t.Errorf("expected Columns=2 Rows=1, got %+v", md)
+	if md.Columns != 2 || md.Rows != 0 || !md.RowsAuto {
+		t.Errorf("expected Columns=2 with auto rows, got %+v", md)
 	}
 }
 
@@ -572,13 +574,14 @@ func TestParsePageMarkdownTopLevelFloatLeftIsDefault(t *testing.T) {
 func TestParsePageMarkdownTopLevelFloatAlonePromotesToCard(t *testing.T) {
 	// float= without columns/rows still produces a grid card (not a
 	// band) — otherwise "float right" on a band would be meaningless.
+	// Rows defaults to "auto" so the card sizes itself.
 	cfg, errs := ParsePage([]byte(`markdown float="right" "x"`))
 	if len(errs) > 0 {
 		t.Fatalf("errors: %v", errs)
 	}
 	md := cfg.Items[0].Markdown
-	if md == nil || md.Columns != 1 || md.Rows != 1 || md.Float != "right" {
-		t.Errorf("expected 1×1 grid card floated right, got %+v", md)
+	if md == nil || md.Columns != 1 || md.Rows != 0 || !md.RowsAuto || md.Float != "right" {
+		t.Errorf("expected 1-col auto-row grid card floated right, got %+v", md)
 	}
 }
 
@@ -820,11 +823,76 @@ list "Dev" {
 	}
 }
 
+func TestParsePageMarkdownRowsAuto(t *testing.T) {
+	cfg, errs := ParsePage([]byte(`markdown columns=2 rows="auto" "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil {
+		t.Fatal("expected a markdown item")
+	}
+	if !md.RowsAuto {
+		t.Errorf("expected RowsAuto = true, got %+v", md)
+	}
+	if md.Rows != 0 {
+		t.Errorf("expected Rows = 0 when RowsAuto is set, got %d", md.Rows)
+	}
+	if md.Columns != 2 {
+		t.Errorf("expected Columns = 2, got %d", md.Columns)
+	}
+}
+
+func TestParsePageMarkdownRowsAutoCaseInsensitive(t *testing.T) {
+	for _, v := range []string{"auto", "AUTO", "Auto"} {
+		src := []byte(fmt.Sprintf(`markdown rows=%q "x"`, v))
+		cfg, errs := ParsePage(src)
+		if len(errs) > 0 {
+			t.Fatalf("rows=%q: errors: %v", v, errs)
+		}
+		if md := cfg.Items[0].Markdown; md == nil || !md.RowsAuto {
+			t.Errorf("rows=%q: expected RowsAuto, got %+v", v, md)
+		}
+	}
+}
+
+func TestParsePageMarkdownRowsAutoAlonePromotesToCard(t *testing.T) {
+	// rows="auto" by itself is a positioning property — it should
+	// turn the markdown into a grid card (Columns=1) rather than a
+	// page-spanning band.
+	cfg, errs := ParsePage([]byte(`markdown rows="auto" "x"`))
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || md.Columns != 1 || md.Rows != 0 || !md.RowsAuto {
+		t.Errorf("expected 1-col grid card with RowsAuto, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownRowsAutoSerialised(t *testing.T) {
+	// Frontend Vitest tests assume a stable JSON shape: when RowsAuto
+	// is true, Rows should be omitted (omitempty).
+	cfg, _ := ParsePage([]byte(`markdown rows="auto" "x"`))
+	md := cfg.Items[0].Markdown
+	b, err := json.Marshal(md)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(b)
+	if !strings.Contains(got, `"RowsAuto":true`) {
+		t.Errorf("missing RowsAuto:true in %q", got)
+	}
+	if strings.Contains(got, `"Rows":`) {
+		t.Errorf("Rows should be omitted when zero, got %q", got)
+	}
+}
+
 func TestParsePageMarkdownInsideListIgnoresGridProps(t *testing.T) {
 	input := []byte(`
 list "Dev" {
 	link "GitHub" url="https://github.com"
-	markdown columns=2 rows=3 float="right" "_inline note_"
+	markdown columns=2 rows="auto" float="right" "_inline note_"
 }
 `)
 	cfg, errs := ParsePage(input)

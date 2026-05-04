@@ -20,6 +20,7 @@ import {
     bands,
     hashTaskLabel,
     taskStorageKey,
+    autoRowSpan,
 } from '../pages/frontend/search.js';
 
 const engines = [
@@ -830,7 +831,10 @@ describe('taskStorageKey', () => {
 
 describe('bands', () => {
     const list = (name) => ({ Kind: 'list', Section: { Name: name, Links: [], Items: [] } });
-    const md = (cols, rows, html, float = '', color = '') => ({ Kind: 'markdown', Markdown: { Columns: cols, Rows: rows, Float: float, Color: color, HTML: html } });
+    const md = (cols, rows, html, float = '', color = '', rowsAuto = false) => ({
+        Kind: 'markdown',
+        Markdown: { Columns: cols, Rows: rows, Float: float, Color: color, RowsAuto: rowsAuto, HTML: html },
+    });
 
     it('returns an empty array for an empty input', () => {
         expect(bands([])).toEqual([]);
@@ -924,5 +928,59 @@ describe('bands', () => {
             { kind: 'markdown', html: '<p>a</p>' },
             { kind: 'markdown', html: '<p>b</p>' },
         ]);
+    });
+
+    it('flags rowsAuto cells and zeros Rows on the cell', () => {
+        // Server normalises a rows="auto" markdown to {Rows: 0, RowsAuto: true};
+        // bands() should pass those through so the template knows to skip
+        // the md-rows-N class and add data-rows-auto for the post-render
+        // measurement pass.
+        const out = bands([md(2, 0, '<p>x</p>', '', '', true)]);
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ kind: 'grid' });
+        expect(out[0].cells[0]).toMatchObject({
+            kind: 'markdown',
+            columns: 2,
+            rows: 0,
+            rowsAuto: true,
+        });
+    });
+});
+
+describe('autoRowSpan', () => {
+    it('returns 1 when the card matches the tallest neighbour', () => {
+        // The grid stretches the card to fit the row, so when the
+        // card's content is <= neighbour the rendered card height
+        // equals the neighbour height — and span=1 is correct.
+        expect(autoRowSpan(200, 200, 16)).toBe(1);
+    });
+
+    it('bumps the span when the card is taller than its neighbours', () => {
+        // card=400, neighbour=200, gap=16: (416)/(216) = 1.93 → ceil = 2.
+        expect(autoRowSpan(400, 200, 16)).toBe(2);
+        // card=600, neighbour=200, gap=16: (616)/(216) = 2.85 → ceil = 3.
+        expect(autoRowSpan(600, 200, 16)).toBe(3);
+    });
+
+    it('bumps the span even for marginally taller cards', () => {
+        // The user-visible bug: a card just slightly taller than its
+        // neighbours stretched the row and left empty space below
+        // each neighbour. Any meaningful overflow should bump the
+        // span so the next row can share the load.
+        // card=240, neighbour=200, gap=16: (256)/(216) = 1.185 → ceil = 2.
+        expect(autoRowSpan(240, 200, 16)).toBe(2);
+    });
+
+    it('absorbs sub-pixel jitter at the equal-height boundary', () => {
+        // 1.5% tolerance — guards against measurement noise where a
+        // card and its neighbour are visually the same height but
+        // getBoundingClientRect returns slightly different floats.
+        expect(autoRowSpan(202, 200, 16)).toBe(1);
+    });
+
+    it('returns 1 defensively when inputs are zero or negative', () => {
+        expect(autoRowSpan(0, 200, 16)).toBe(1);
+        expect(autoRowSpan(-10, 200, 16)).toBe(1);
+        expect(autoRowSpan(200, 0, 16)).toBe(1);
     });
 });

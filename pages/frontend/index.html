@@ -88,8 +88,11 @@
                     <template x-for="cell in band.cells" :key="cell.key">
                         <section class="group"
                                  :class="cell.kind === 'markdown'
-                                    ? ['md', 'md-card', 'md-cols-' + (cell.columns || 1), 'md-rows-' + (cell.rows || 1), cell.float === 'right' ? 'md-right' : '']
+                                    ? ['md', 'md-card', 'md-cols-' + (cell.columns || 1),
+                                       cell.rowsAuto ? '' : 'md-rows-' + (cell.rows || 1),
+                                       cell.float === 'right' ? 'md-right' : '']
                                     : ''"
+                                 :data-rows-auto="cell.kind === 'markdown' && cell.rowsAuto ? 'true' : null"
                                  :style="(() => {
                                     const c = cell.kind === 'list' ? cell.section.Color : (cell.kind === 'markdown' ? cell.color : '');
                                     return c ? `border-top: 2px solid ${c}; box-shadow: 0 0 12px ${c}15; background: linear-gradient(180deg, ${c}1a, transparent)` : '';
@@ -285,6 +288,9 @@
                         this.$nextTick(() => {
                             const pageName = location.pathname.split('/').filter(Boolean)[0] || '';
                             window.subspaceInitTaskLists && window.subspaceInitTaskLists(pageName);
+                            // Resolve `rows="auto"` markdown cards by
+                            // measuring their grid-band neighbours.
+                            window.subspaceApplyAutoRows && window.subspaceApplyAutoRows();
                         });
                     } catch (e) {
                         console.error('Failed to load links:', e);

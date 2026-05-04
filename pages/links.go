@@ -56,6 +56,7 @@ type MarkdownDoc struct {
 	HTML        string `json:"HTML"`
 	Columns     int    `json:"Columns,omitempty"`
 	Rows        int    `json:"Rows,omitempty"`
+	RowsAuto    bool   `json:"RowsAuto,omitempty"`
 	Float       string `json:"Float,omitempty"`
 	Color       string `json:"Color,omitempty"`
 	IncludePath string `json:"IncludePath,omitempty"`
@@ -193,27 +194,39 @@ func ParsePageWithBase(data []byte, baseDir string) (*PageConfig, []error) {
 func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*MarkdownDoc, []error) {
 	var errs []error
 	columns, rows := 0, 0
+	rowsAuto := false
 	float := ""
 	color := ""
 	if allowGrid {
 		columns = readPositiveIntProp(node, "columns", &errs)
-		rows = readPositiveIntProp(node, "rows", &errs)
+		// rows accepts an integer or the literal string "auto" (case-
+		// insensitive). "auto" defers the row count to the client,
+		// which measures sibling card heights post-render.
+		if v, ok := node.Properties.Get("rows"); ok && v != nil {
+			if s := v.ValueString(); strings.EqualFold(s, "auto") {
+				rowsAuto = true
+			} else {
+				rows = readPositiveIntProp(node, "rows", &errs)
+			}
+		}
 		float = readFloatProp(node, &errs)
 		if v, ok := node.Properties.Get("color"); ok && v != nil {
 			color = v.ValueString()
 		}
 
 		// Either positioning property present implies "this is a
-		// grid card, not a band". Fill in the omitted dimension
-		// with 1 so the frontend bands() walker can treat it
-		// uniformly. A float= alone (without columns/rows) also
-		// becomes a 1×1 card at the requested edge.
-		if columns > 0 || rows > 0 || float != "" {
+		// grid card, not a band". Fill in the omitted dimensions:
+		//   - columns defaults to 1 (a single grid cell wide).
+		//   - rows defaults to "auto" — let the post-render measure
+		//     pass pick a span so the card visually fills the same
+		//     vertical space as its tallest neighbour. An explicit
+		//     `rows=N` on the same node still wins.
+		if columns > 0 || rows > 0 || rowsAuto || float != "" {
 			if columns == 0 {
 				columns = 1
 			}
-			if rows == 0 {
-				rows = 1
+			if rows == 0 && !rowsAuto {
+				rowsAuto = true
 			}
 		}
 	}
@@ -271,6 +284,7 @@ func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*Ma
 		HTML:        rendered,
 		Columns:     columns,
 		Rows:        rows,
+		RowsAuto:    rowsAuto,
 		Float:       float,
 		Color:       color,
 		IncludePath: includePath,

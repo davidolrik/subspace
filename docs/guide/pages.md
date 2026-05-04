@@ -79,6 +79,8 @@ Markdown can appear in two places:
 
 `columns` is clamped to whatever the grid currently shows (4 cards on desktop, 3 / 2 / 1 at narrower widths) so a `columns=4` card on a phone collapses to one column wide instead of overflowing. `rows` is not clamped — the grid's row count is open-ended.
 
+`rows` defaults to `"auto"` — subspace picks the row span at render time by measuring the heights of the card's neighbours in the same grid band and picking the span that makes the markdown card visually as tall as its tallest sibling. The measurement re-runs on viewport resize, so the span tracks the responsive breakpoints automatically. Set an explicit `rows=N` to override and pin the card to a fixed integer span instead.
+
 `float="left"` (default) places the card in the natural left-to-right flow of the grid; `float="right"` pins it to the right edge instead — handy for "owners" or "see also" sidebars. The card width still follows `columns` and clamps the same way at narrow viewports, just anchored to the right.
 
 `color="#hex"` tints a markdown grid card with the same colored top border, glow, and gradient background that `list color="..."` produces — handy when you want a status callout or "owners" card that visually matches one of your section accents. The property is silently ignored on bands (which span the full width and have no card chrome) and on in-list markdown rows (which are inline prose). Omitting `color` keeps the default chrome.
@@ -117,8 +119,9 @@ markdown columns=2 color="#ff375f" r#"
 The legacy auth proxy goes away soon — start migrating now.
 "#
 
-// rows=2 → 1-wide × 2-tall grid card.
-markdown rows=2 r#"
+// rows defaults to "auto" so this card sizes itself to its
+// neighbours' heights at render time — no explicit rows= needed.
+markdown columns=1 r#"
 ### Quick links
 - [Runbook](https://runbook.example.com)
 - [Dashboards](https://grafana.example.com)
