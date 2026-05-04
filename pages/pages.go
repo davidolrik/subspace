@@ -323,6 +323,29 @@ func (h *Handler) ReloadPages(pages []PageInfo) {
 	h.buildMux(pages)
 }
 
+// IncludedFiles returns the absolute paths of every file pulled in by
+// a `markdown include="..."` across all currently loaded pages. Used
+// by the config watcher so editing an included markdown file triggers
+// a page reload. Paths for missing includes are returned too — the
+// file might appear later, and the watcher subscribes to its parent
+// directory regardless.
+func (h *Handler) IncludedFiles() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var out []string
+	for _, lp := range h.pageList {
+		if lp.Page == nil {
+			continue
+		}
+		for _, item := range lp.Page.Items {
+			if item.Markdown != nil && item.Markdown.IncludePath != "" {
+				out = append(out, item.Markdown.IncludePath)
+			}
+		}
+	}
+	return out
+}
+
 // ServeHTTP handles an internal page request by writing the HTTP
 // response directly to the connection.
 func (h *Handler) ServeHTTP(conn net.Conn, req *http.Request) {

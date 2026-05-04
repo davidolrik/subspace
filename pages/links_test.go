@@ -2,6 +2,8 @@ package pages
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -638,6 +640,136 @@ list "Dev" {
 	}
 	if len(cfg.Sections) != 1 || len(cfg.Sections[0].Links) != 1 {
 		t.Fatalf("page should still render, got %+v", cfg)
+	}
+}
+
+func TestParsePageMarkdownInclude(t *testing.T) {
+	dir := t.TempDir()
+	mdPath := filepath.Join(dir, "notes.md")
+	if err := os.WriteFile(mdPath, []byte("## From file\nBody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := []byte(`markdown include="./notes.md"`)
+	cfg, errs := ParsePageWithBase(src, dir)
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil {
+		t.Fatal("expected a markdown item")
+	}
+	if !strings.Contains(md.HTML, "From file</h2>") {
+		t.Errorf("expected included content rendered, got: %q", md.HTML)
+	}
+	abs, _ := filepath.Abs(mdPath)
+	if md.IncludePath != abs {
+		t.Errorf("IncludePath = %q, want %q", md.IncludePath, abs)
+	}
+}
+
+func TestParsePageMarkdownIncludeMissingFallsBackToInline(t *testing.T) {
+	dir := t.TempDir()
+	src := []byte(`markdown include="./gone.md" "Hello **fallback**"`)
+	cfg, errs := ParsePageWithBase(src, dir)
+	if len(errs) == 0 {
+		t.Fatal("expected an error for missing include")
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || !strings.Contains(md.HTML, "<strong>fallback</strong>") {
+		t.Errorf("expected fallback rendered, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownIncludeMissingNoFallbackPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	src := []byte(`markdown include="./gone.md"`)
+	cfg, errs := ParsePageWithBase(src, dir)
+	if len(errs) == 0 {
+		t.Fatal("expected an error for missing include")
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil {
+		t.Fatal("expected a placeholder markdown item")
+	}
+	if !strings.Contains(md.HTML, "md-alert") {
+		t.Errorf("placeholder should render as an alert, got: %q", md.HTML)
+	}
+	if !strings.Contains(md.HTML, "gone.md") {
+		t.Errorf("placeholder should mention the failed path, got: %q", md.HTML)
+	}
+}
+
+func TestParsePageMarkdownIncludeAbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	mdPath := filepath.Join(dir, "abs.md")
+	if err := os.WriteFile(mdPath, []byte("absolute"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := []byte(fmt.Sprintf(`markdown include=%q`, mdPath))
+	// baseDir intentionally empty — absolute paths must work without it.
+	cfg, errs := ParsePageWithBase(src, "")
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || !strings.Contains(md.HTML, "absolute") {
+		t.Errorf("expected absolute include resolved, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownIncludeTildePath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir: %v", err)
+	}
+	mdPath := filepath.Join(home, ".subspace_markdown_include_test.md")
+	if err := os.WriteFile(mdPath, []byte("tilde works"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(mdPath)
+
+	src := []byte(`markdown include="~/.subspace_markdown_include_test.md"`)
+	cfg, errs := ParsePageWithBase(src, "")
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	md := cfg.Items[0].Markdown
+	if md == nil || !strings.Contains(md.HTML, "tilde works") {
+		t.Errorf("expected tilde include resolved, got %+v", md)
+	}
+}
+
+func TestParsePageMarkdownIncludeWatchedPaths(t *testing.T) {
+	dir := t.TempDir()
+	mdPath := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(mdPath, []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := []byte(fmt.Sprintf(`markdown include="./a.md"
+markdown include="./missing.md" "fallback"
+`))
+	cfg, _ := ParsePageWithBase(src, dir)
+	abs, _ := filepath.Abs(mdPath)
+	want := abs
+	gotFound := false
+	for _, item := range cfg.Items {
+		if item.Markdown != nil && item.Markdown.IncludePath == want {
+			gotFound = true
+		}
+	}
+	if !gotFound {
+		t.Errorf("expected IncludePath=%q on the resolved include", want)
+	}
+	// The missing include's resolved path should also be exposed so
+	// the watcher can subscribe and reload when the file appears.
+	missingFound := false
+	for _, item := range cfg.Items {
+		if item.Markdown != nil && strings.HasSuffix(item.Markdown.IncludePath, "missing.md") {
+			missingFound = true
+		}
+	}
+	if !missingFound {
+		t.Errorf("expected IncludePath set even when include is missing")
 	}
 }
 

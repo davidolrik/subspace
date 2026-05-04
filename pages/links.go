@@ -3,7 +3,9 @@ package pages
 import (
 	"bytes"
 	"fmt"
+	"html"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -44,11 +46,18 @@ type TopItem struct {
 // follow the natural left-to-right grid flow; "right" pins the card
 // to the right edge of the grid (clamped along with Columns at
 // narrow viewports). Float is ignored when the markdown is a band.
+//
+// IncludePath is the absolute path of the file the markdown was
+// loaded from when `include="..."` was used (regardless of whether
+// the file actually existed at parse time — the path is recorded so
+// the config watcher can reload the page if the file is created or
+// modified later). Empty when the source is inline.
 type MarkdownDoc struct {
-	HTML    string `json:"HTML"`
-	Columns int    `json:"Columns,omitempty"`
-	Rows    int    `json:"Rows,omitempty"`
-	Float   string `json:"Float,omitempty"`
+	HTML        string `json:"HTML"`
+	Columns     int    `json:"Columns,omitempty"`
+	Rows        int    `json:"Rows,omitempty"`
+	Float       string `json:"Float,omitempty"`
+	IncludePath string `json:"IncludePath,omitempty"`
 }
 
 // ListSection is a named section within a page that contains an
@@ -97,17 +106,29 @@ type Link struct {
 // dashboard banner instead of being redirected to the troubleshooting
 // docs. When the KDL is well-formed but individual nodes are
 // malformed, the bad nodes are skipped and the rest is kept.
+//
+// Markdown `include="..."` paths are resolved relative to the
+// directory of `path`.
 func ParsePageFile(path string) (*PageConfig, []error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return &PageConfig{}, []error{fmt.Errorf("reading page file: %w", err)}
 	}
-	return ParsePage(data)
+	return ParsePageWithBase(data, filepath.Dir(path))
 }
 
 // ParsePage parses a page configuration from KDL data. See
-// ParsePageFile for the error-collection contract.
+// ParsePageFile for the error-collection contract. Equivalent to
+// ParsePageWithBase with no base directory: relative include paths
+// are resolved against the current working directory.
 func ParsePage(data []byte) (*PageConfig, []error) {
+	return ParsePageWithBase(data, "")
+}
+
+// ParsePageWithBase parses a page configuration from KDL data and
+// resolves any `markdown include="..."` paths relative to baseDir.
+// Absolute paths and paths starting with `~/` ignore baseDir.
+func ParsePageWithBase(data []byte, baseDir string) (*PageConfig, []error) {
 	doc, err := kdl.Parse(bytes.NewReader(data))
 	if err != nil {
 		return &PageConfig{}, []error{fmt.Errorf("parsing KDL: %w", err)}
@@ -134,7 +155,7 @@ func ParsePage(data []byte) (*PageConfig, []error) {
 			cfg.Footer = node.Arguments[0].ValueString()
 		case "list":
 			validateKnownProps(node, "list", []string{"tags", "color", "icon"}, &errs)
-			s, sectionErrs := parseListSection(node)
+			s, sectionErrs := parseListSection(node, baseDir)
 			errs = append(errs, sectionErrs...)
 			// Drop sections whose name was missing — there's nothing
 			// to render and no way to address it from the search
@@ -146,8 +167,8 @@ func ParsePage(data []byte) (*PageConfig, []error) {
 				cfg.Items = append(cfg.Items, TopItem{Kind: "list", Section: &section})
 			}
 		case "markdown":
-			validateKnownProps(node, "markdown", []string{"columns", "rows", "float"}, &errs)
-			md, mdErrs := parseMarkdownNode(node, true)
+			validateKnownProps(node, "markdown", []string{"columns", "rows", "float", "include"}, &errs)
+			md, mdErrs := parseMarkdownNode(node, true, baseDir)
 			errs = append(errs, mdErrs...)
 			if md != nil {
 				cfg.Items = append(cfg.Items, TopItem{Kind: "markdown", Markdown: md})
@@ -164,14 +185,11 @@ func ParsePage(data []byte) (*PageConfig, []error) {
 // level (allowGrid=true: respects optional columns=N / rows=N
 // properties) or inside a list (allowGrid=false: both properties
 // are silently ignored since the markdown becomes a list row, not a
-// grid cell). Returns nil for the doc when the node is too malformed
-// to render anything.
-func parseMarkdownNode(node *document.Node, allowGrid bool) (*MarkdownDoc, []error) {
-	if len(node.Arguments) < 1 {
-		return nil, []error{fmt.Errorf("markdown requires a value argument")}
-	}
-	src := node.Arguments[0].ValueString()
-
+// grid cell). baseDir is used to resolve relative `include="..."`
+// paths. Returns nil for the doc only when the node is too malformed
+// to render anything; a missing include with no fallback still
+// returns a placeholder doc so the page renders.
+func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*MarkdownDoc, []error) {
 	var errs []error
 	columns, rows := 0, 0
 	float := ""
@@ -195,12 +213,108 @@ func parseMarkdownNode(node *document.Node, allowGrid bool) (*MarkdownDoc, []err
 		}
 	}
 
-	html, err := RenderMarkdown(src)
+	// Source resolution:
+	//   include="..." → try the file. If it loads, that's the source.
+	//   If it fails AND there's an inline value arg, fall back to it.
+	//   If it fails with no fallback, render a placeholder card with
+	//   the error message so the operator sees what's wrong.
+	src := ""
+	includePath := ""
+	if v, ok := node.Properties.Get("include"); ok && v != nil {
+		raw := v.ValueString()
+		resolved, rerr := resolveIncludePath(raw, baseDir)
+		includePath = resolved // record for the watcher even on failure
+		if rerr != nil {
+			errs = append(errs, fmt.Errorf("markdown include=%q: %w", raw, rerr))
+		} else if data, ferr := os.ReadFile(resolved); ferr == nil {
+			src = string(data)
+		} else {
+			errs = append(errs, fmt.Errorf("markdown include=%q: %w", raw, ferr))
+			// Try the inline value as a fallback. Otherwise we'll
+			// render a placeholder below.
+			if len(node.Arguments) >= 1 {
+				src = node.Arguments[0].ValueString()
+			}
+		}
+	} else {
+		if len(node.Arguments) < 1 {
+			return nil, []error{fmt.Errorf("markdown requires a value argument or include=")}
+		}
+		src = node.Arguments[0].ValueString()
+	}
+
+	if src == "" && includePath != "" {
+		// Include failed and there was no usable fallback — show a
+		// visible placeholder instead of silently rendering an empty
+		// card the operator might miss.
+		return &MarkdownDoc{
+			HTML:        includePlaceholderHTML(includePath),
+			Columns:     columns,
+			Rows:        rows,
+			Float:       float,
+			IncludePath: includePath,
+		}, errs
+	}
+
+	rendered, err := RenderMarkdown(src)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("rendering markdown: %w", err))
 		return nil, errs
 	}
-	return &MarkdownDoc{HTML: html, Columns: columns, Rows: rows, Float: float}, errs
+	return &MarkdownDoc{
+		HTML:        rendered,
+		Columns:     columns,
+		Rows:        rows,
+		Float:       float,
+		IncludePath: includePath,
+	}, errs
+}
+
+// resolveIncludePath turns the raw include= value into an absolute
+// path. Absolute paths and ~/-prefixed paths ignore baseDir; everything
+// else is resolved relative to baseDir. Returns the cleaned absolute
+// path even when the file doesn't exist (so the watcher can subscribe
+// in case it appears later).
+func resolveIncludePath(raw, baseDir string) (string, error) {
+	if raw == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	p := raw
+	if strings.HasPrefix(p, "~/") || p == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("expanding ~: %w", err)
+		}
+		if p == "~" {
+			p = home
+		} else {
+			p = filepath.Join(home, p[2:])
+		}
+	} else if !filepath.IsAbs(p) {
+		if baseDir == "" {
+			abs, err := filepath.Abs(p)
+			if err != nil {
+				return "", err
+			}
+			return abs, nil
+		}
+		p = filepath.Join(baseDir, p)
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
+// includePlaceholderHTML produces a "this include couldn't be loaded"
+// alert that fits the dashboard's existing markdown alert style. The
+// path is HTML-escaped so a malicious filename can't inject markup.
+func includePlaceholderHTML(path string) string {
+	return `<blockquote class="md-alert md-alert-caution">` +
+		`<p class="md-alert-title">Include failed</p>` +
+		`<p>Could not load <code>` + html.EscapeString(path) + `</code>.</p>` +
+		`</blockquote>`
 }
 
 // readFloatProp reads the optional float="left|right" property and
@@ -261,7 +375,7 @@ func valueToInt(v *document.Value) (int, error) {
 	}
 }
 
-func parseListSection(node *document.Node) (ListSection, []error) {
+func parseListSection(node *document.Node, baseDir string) (ListSection, []error) {
 	if len(node.Arguments) < 1 {
 		return ListSection{}, []error{fmt.Errorf("list requires a name argument")}
 	}
@@ -311,7 +425,7 @@ func parseListSection(node *document.Node) (ListSection, []error) {
 				Name: name,
 			})
 		case "markdown":
-			md, mdErrs := parseMarkdownNode(child, false)
+			md, mdErrs := parseMarkdownNode(child, false, baseDir)
 			for _, e := range mdErrs {
 				errs = append(errs, fmt.Errorf("list %q: %w", s.Name, e))
 			}

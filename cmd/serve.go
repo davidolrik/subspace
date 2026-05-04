@@ -251,18 +251,28 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 	}
 	defer watcher.Close()
 
-	// Build the set of watched files and their directories
+	// Build the set of watched files and their directories. The set
+	// is the union of:
+	//   - main config + transitively included KDL files
+	//   - any markdown `include="..."` files referenced by pages.
 	watchedFiles := make(map[string]bool)
 	watchedDirs := make(map[string]bool)
-	for _, f := range currentCfg.IncludedFiles {
+	addWatch := func(f string) {
 		watchedFiles[f] = true
 		dir := filepath.Dir(f)
 		if !watchedDirs[dir] {
 			if err := watcher.Add(dir); err != nil {
 				slog.Error("config watcher add failed", "path", dir, "error", err)
-				return
 			}
 			watchedDirs[dir] = true
+		}
+	}
+	for _, f := range currentCfg.IncludedFiles {
+		addWatch(f)
+	}
+	if pagesHandler != nil {
+		for _, f := range pagesHandler.IncludedFiles() {
+			addWatch(f)
 		}
 	}
 
@@ -285,9 +295,15 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 				continue
 			}
 
-			// Ignore non-KDL files (e.g. stats.db, WAL/SHM files)
-			if ext := filepath.Ext(eventAbs); ext != ".kdl" {
-				continue
+			// Ignore files we don't actually care about — stats.db,
+			// WAL/SHM files, the operator's editor swap files, etc.
+			// Markdown includes are watched explicitly: only trigger
+			// a reload for KDL config or for files in the watched
+			// includes set.
+			if !watchedFiles[eventAbs] {
+				if ext := filepath.Ext(eventAbs); ext != ".kdl" {
+					continue
+				}
 			}
 
 			newCfg, newMonitor, newDialers := reloadConfig(currentCfg, srv, ctrlSrv, pagesHandler, currentMonitor, currentDialers)
@@ -297,12 +313,19 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 			currentMonitor = newMonitor
 			currentDialers = newDialers
 
-			// Update watched file set — includes may have changed
+			// Update watched file set — KDL includes and markdown
+			// include= files may have changed.
 			newFiles := make(map[string]bool)
 			newDirs := make(map[string]bool)
 			for _, f := range newCfg.IncludedFiles {
 				newFiles[f] = true
 				newDirs[filepath.Dir(f)] = true
+			}
+			if pagesHandler != nil {
+				for _, f := range pagesHandler.IncludedFiles() {
+					newFiles[f] = true
+					newDirs[filepath.Dir(f)] = true
+				}
 			}
 
 			// Watch new directories
