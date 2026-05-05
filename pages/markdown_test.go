@@ -305,3 +305,119 @@ func TestRenderMarkdownEmpty(t *testing.T) {
 		t.Errorf("empty input should produce empty output, got: %q", html)
 	}
 }
+
+func TestExpandVarsCases(t *testing.T) {
+	lookup := func(name string) (string, bool) {
+		switch name {
+		case "USER":
+			return "mandse", true
+		case "PUBLIC_IP":
+			return "1.2.3.4", true
+		case "EMPTY":
+			return "", true
+		}
+		return "", false
+	}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"single substitution", "Hi ${USER}", "Hi mandse"},
+		{"multiple substitutions on one line", "${USER}@${PUBLIC_IP}", "mandse@1.2.3.4"},
+		{"bare dollar untouched", "It costs $50.", "It costs $50."},
+		{"dollar before letters untouched", "Use $PATH like a shell pro.", "Use $PATH like a shell pro."},
+		{"escape leaves literal token", "Literal: $${USER}", "Literal: ${USER}"},
+		{"undefined left as token", "Greetings ${MISSING}", "Greetings ${MISSING}"},
+		{"empty value substitutes empty string", "Value=[${EMPTY}]", "Value=[]"},
+		{"empty braces left as-is", "${} should not match", "${} should not match"},
+		{"name starting with digit not matched", "${1FOO}", "${1FOO}"},
+		{"underscore-only name allowed", "${_X}", "${_X}"}, // _X undefined → token preserved
+		{"adjacent substitutions", "${USER}${USER}", "mandsemandse"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := expandVars(tc.in, lookup)
+			if got != tc.want {
+				t.Errorf("expandVars(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExpandVarsNilLookup(t *testing.T) {
+	// A nil lookup means "no env wired up" — every token should be
+	// left as-is so the rendered card visibly shows the missing
+	// reference instead of silently blanking out.
+	got := expandVars("Hi ${USER}!", nil)
+	if got != "Hi ${USER}!" {
+		t.Errorf("nil lookup should preserve tokens, got %q", got)
+	}
+}
+
+func TestCollectVarRefs(t *testing.T) {
+	src := "Hi ${USER} from ${HOST}, again ${USER}. Cost: $50. Escaped: $${SKIP}."
+	refs := collectVarRefs(src)
+	for _, want := range []string{"USER", "HOST"} {
+		if _, ok := refs[want]; !ok {
+			t.Errorf("expected %q in refs, got %v", want, refs)
+		}
+	}
+	if _, ok := refs["SKIP"]; ok {
+		t.Errorf("$${SKIP} is escaped, must not appear in refs: %v", refs)
+	}
+	if len(refs) != 2 {
+		t.Errorf("expected exactly 2 refs (USER, HOST), got %v", refs)
+	}
+}
+
+func TestRenderMarkdownWithEnvSubstitutes(t *testing.T) {
+	lookup := func(name string) (string, bool) {
+		if name == "USER" {
+			return "mandse", true
+		}
+		return "", false
+	}
+	html, err := RenderMarkdownWithEnv("Hello, **${USER}**!", lookup)
+	if err != nil {
+		t.Fatalf("RenderMarkdownWithEnv error: %v", err)
+	}
+	if !strings.Contains(html, "<strong>mandse</strong>") {
+		t.Errorf("expected substituted bold value, got: %q", html)
+	}
+}
+
+func TestRenderMarkdownWithEnvCodeFence(t *testing.T) {
+	// Inside fenced code blocks, ${VAR} should still expand —
+	// otherwise users couldn't show, say, a current PUBLIC_IP value
+	// in a `code` callout. Chroma highlighting should still apply.
+	lookup := func(name string) (string, bool) {
+		if name == "PUBLIC_IP" {
+			return "10.0.0.1", true
+		}
+		return "", false
+	}
+	src := "```\nip=${PUBLIC_IP}\n```"
+	html, err := RenderMarkdownWithEnv(src, lookup)
+	if err != nil {
+		t.Fatalf("RenderMarkdownWithEnv error: %v", err)
+	}
+	if !strings.Contains(html, "10.0.0.1") {
+		t.Errorf("expected substituted IP inside code block, got: %q", html)
+	}
+}
+
+func TestRenderMarkdownWithEnvNilLookupMatchesPlain(t *testing.T) {
+	// Confirms the wrapper degrades to RenderMarkdown's behaviour when
+	// no env is wired. The unsubstituted token should land in the
+	// rendered output verbatim (HTML-escaped where goldmark sees fit).
+	html, err := RenderMarkdownWithEnv("token: ${USER}", nil)
+	if err != nil {
+		t.Fatalf("RenderMarkdownWithEnv error: %v", err)
+	}
+	if !strings.Contains(html, "${USER}") {
+		t.Errorf("nil lookup should preserve tokens in rendered output, got: %q", html)
+	}
+}

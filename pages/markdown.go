@@ -75,8 +75,26 @@ var markdownPolicy = func() *bluemonday.Policy {
 // a custom title (`> [!NOTE] Custom title`); otherwise the type's name
 // is used as the title.
 func RenderMarkdown(src string) (string, error) {
+	return RenderMarkdownWithEnv(src, nil)
+}
+
+// RenderMarkdownWithEnv is the env-aware variant of RenderMarkdown.
+// Before parsing, every `${NAME}` token in src is replaced with the
+// value returned by lookup. Unknown vars and the literal escape form
+// `$${NAME}` are documented in expandVars below. A nil lookup is the
+// "no env configured" path: tokens are passed through unchanged so
+// the rendered card visibly shows the missing reference.
+func RenderMarkdownWithEnv(src string, lookup func(string) (string, bool)) (string, error) {
 	if strings.TrimSpace(src) == "" {
 		return "", nil
+	}
+	if lookup != nil {
+		src = expandVars(src, lookup)
+	} else {
+		// Even without a lookup, `$${NAME}` should collapse to the
+		// literal `${NAME}`. expandVars with a nil-safe path handles
+		// both: escapes always collapse, normal tokens are left intact.
+		src = expandVars(src, nil)
 	}
 	src = stripCommonIndent(src)
 	var buf bytes.Buffer
@@ -92,6 +110,63 @@ func RenderMarkdown(src string) (string, error) {
 	out := transformAlerts(string(clean))
 	out = addLinkTarget(out)
 	return strings.TrimRight(out, "\n"), nil
+}
+
+// varTokenRegex matches `${NAME}` and `$${NAME}` tokens. Group 1 is
+// the leading extra `$` for the escape form (`$${...}` → literal
+// `${...}`); group 2 is the variable name. Names follow shell-style
+// identifier rules: a leading letter or underscore, then any number of
+// letters/digits/underscores. `${}` and `${1FOO}` therefore don't
+// match and are left in the source as authored.
+var varTokenRegex = regexp.MustCompile(`\$(\$?)\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// expandVars replaces `${NAME}` tokens in src with the value returned
+// by lookup. Behaviour:
+//   - `${NAME}` with a defined value → substituted with the value.
+//   - `${NAME}` with no defined value (or lookup == nil) → left as the
+//     literal token `${NAME}` so the operator can see what's missing.
+//   - `$${NAME}` → literal `${NAME}` (escape; useful when authoring
+//     docs that reference shell variables verbatim).
+//   - `$50`, `$PATH` (no curly braces) → untouched.
+func expandVars(src string, lookup func(string) (string, bool)) string {
+	if !strings.Contains(src, "${") {
+		return src
+	}
+	return varTokenRegex.ReplaceAllStringFunc(src, func(match string) string {
+		sub := varTokenRegex.FindStringSubmatch(match)
+		if sub[1] == "$" {
+			return "${" + sub[2] + "}"
+		}
+		if lookup == nil {
+			return match
+		}
+		if v, ok := lookup(sub[2]); ok {
+			return v
+		}
+		return match
+	})
+}
+
+// collectVarRefs returns the set of variable names referenced by
+// `${NAME}` tokens in src, ignoring escaped `$${NAME}` forms. Returns
+// nil when src contains no references — callers can range over a nil
+// map without a guard, and the union helper in cmd/serve.go uses nil
+// as a no-op shortcut.
+func collectVarRefs(src string) map[string]struct{} {
+	if !strings.Contains(src, "${") {
+		return nil
+	}
+	var refs map[string]struct{}
+	for _, m := range varTokenRegex.FindAllStringSubmatch(src, -1) {
+		if m[1] == "$" {
+			continue
+		}
+		if refs == nil {
+			refs = make(map[string]struct{})
+		}
+		refs[m[2]] = struct{}{}
+	}
+	return refs
 }
 
 // taskLiRegex finds a <li> whose first effective child is a task-list

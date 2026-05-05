@@ -1083,6 +1083,70 @@ list "Ops" {
 	}
 }
 
+func TestParsePageCollectsEnvRefs(t *testing.T) {
+	// EnvRefs should be the union of `${NAME}` tokens across every
+	// markdown source on the page — top-level cards and list-embedded
+	// markdown alike — with escaped `$${...}` excluded. Used by the
+	// env-tick callback in cmd/serve.go to know which vars actually
+	// matter when deciding whether to re-render.
+	input := []byte(`
+markdown "IP: ${PUBLIC_IP}"
+
+list "Dev" {
+	link "GitHub" url="https://github.com"
+	markdown "User ${USER} on ${PUBLIC_IP}"
+}
+
+markdown r#"
+Escaped: $${IGNORE_ME}
+Real: ${HOSTNAME}
+"#
+`)
+	cfg, _ := ParsePage(input)
+	if cfg == nil {
+		t.Fatal("expected PageConfig")
+	}
+	for _, want := range []string{"PUBLIC_IP", "USER", "HOSTNAME"} {
+		if _, ok := cfg.EnvRefs[want]; !ok {
+			t.Errorf("EnvRefs missing %q, got %v", want, cfg.EnvRefs)
+		}
+	}
+	if _, ok := cfg.EnvRefs["IGNORE_ME"]; ok {
+		t.Errorf("escaped $${IGNORE_ME} must not appear in EnvRefs: %v", cfg.EnvRefs)
+	}
+	if len(cfg.EnvRefs) != 3 {
+		t.Errorf("expected exactly 3 refs, got %v", cfg.EnvRefs)
+	}
+}
+
+func TestParsePageMarkdownUsesEnvLookup(t *testing.T) {
+	// Pages parsed while pages.EnvLookup is set should have their
+	// markdown rendered with the substituted values. Restore the
+	// previous value on cleanup so other tests in this package that
+	// run after this one don't see a stale lookup.
+	prev := EnvLookup
+	t.Cleanup(func() { EnvLookup = prev })
+	EnvLookup = func(name string) (string, bool) {
+		if name == "USER" {
+			return "mandse", true
+		}
+		return "", false
+	}
+
+	input := []byte(`markdown "Hello, **${USER}**!"`)
+	cfg, errs := ParsePage(input)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errs: %v", errs)
+	}
+	if len(cfg.Items) != 1 || cfg.Items[0].Markdown == nil {
+		t.Fatalf("expected one markdown item, got %+v", cfg.Items)
+	}
+	html := cfg.Items[0].Markdown.HTML
+	if !strings.Contains(html, "<strong>mandse</strong>") {
+		t.Errorf("expected substituted bold value, got %q", html)
+	}
+}
+
 // Lenient parse: a top-level unknown node skips itself but the rest of
 // the document (other lists, footer, title) still parses.
 func TestParsePageLenientUnknownTopLevelKeepsLists(t *testing.T) {

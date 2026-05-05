@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.olrik.dev/subspace/config"
 	"go.olrik.dev/subspace/control"
+	"go.olrik.dev/subspace/env"
 	"go.olrik.dev/subspace/internal/style"
 	"go.olrik.dev/subspace/pages"
 	"go.olrik.dev/subspace/proxy"
@@ -21,6 +23,13 @@ import (
 	"go.olrik.dev/subspace/route"
 	"go.olrik.dev/subspace/upstream"
 )
+
+// defaultEnvRefreshInterval is the cadence used when no explicit
+// `env { refresh "..." }` is configured. Picked to match the
+// operator-facing reference: noticeable enough that ${PUBLIC_IP}
+// converges on a real network change within a minute, low enough
+// that one shell spawn per minute is invisible on the CPU graph.
+const defaultEnvRefreshInterval = 60 * time.Second
 
 func newServeCommand(configFile *string) *cobra.Command {
 	return &cobra.Command{
@@ -87,15 +96,46 @@ func newServeCommand(configFile *string) *cobra.Command {
 			go recorder.Run()
 			defer recorder.Stop()
 
+			// Bootstrap the environment snapshot before parsing pages
+			// so the first render of every markdown card already has
+			// `${...}` tokens resolved. Capture is best-effort: any
+			// shell error falls back to os.Environ() so the dashboard
+			// still gets a usable environment. References aren't
+			// registered yet, so this initial Replace can never report
+			// a change — that's deliberate; we don't want the env tick
+			// to mistake "snapshot was empty" for "operator just
+			// changed PUBLIC_IP".
+			envShell := env.ResolveShell(cfg.EnvShell)
+			envSnap := env.NewSnapshot()
+			initialEnv, _ := env.Capture(context.Background(), envShell)
+			envSnap.Replace(initialEnv)
+			pages.EnvLookup = envSnap.Lookup
+
 			// Set up internal pages (link pages, statistics, error pages).
 			// Pages that fail to load are skipped and their errors
 			// joined into cfg.Errors.
 			pageInfos := loadPages(cfg)
+			envSnap.SetReferences(unionEnvRefs(pageInfos))
 			pagesHandler := pages.New(pageInfos, srv.Stats, statsStore)
 			pagesHandler.SetTags(tagDefs(cfg))
 			pagesHandler.SetSearchEngines(engineDefs(cfg), cfg.DefaultSearchEngine)
 			cfg.Errors = append(cfg.Errors, pagesHandler.ValidateTagReferences()...)
 			srv.Pages = pagesHandler
+
+			// Start the env refresher. The onChange callback re-
+			// renders pages with the new values; it's gated by the
+			// snapshot's referenced-vars-only change detection so
+			// $RANDOM/PID churn from each shell spawn never triggers
+			// a re-render.
+			envInterval := cfg.EnvRefreshInterval
+			if envInterval == 0 {
+				envInterval = defaultEnvRefreshInterval
+			}
+			refresher := env.NewRefresher(envSnap, envInterval, env.CaptureWith(envShell), func() {
+				reloadPagesForEnv(cfg, pagesHandler, envSnap)
+			})
+			go refresher.Run()
+			defer refresher.Stop()
 
 			// Ensure the control socket directory exists
 			if err := os.MkdirAll(filepath.Dir(cfg.ControlSocket), 0700); err != nil {
@@ -132,7 +172,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			)
 
 			// Watch config files for changes (main config + included files)
-			go watchConfig(cfg, srv, ctrlSrv, pagesHandler, monitor, dialers)
+			go watchConfig(cfg, srv, ctrlSrv, pagesHandler, monitor, dialers, envSnap)
 
 			// Graceful shutdown
 			sigCh := make(chan os.Signal, 1)
@@ -243,7 +283,7 @@ func buildMonitorTargets(cfg *config.Config, dialers map[string]upstream.Dialer)
 
 // watchConfig watches the main config file and all included files for changes,
 // reloading the proxy server's routing when any of them are modified.
-func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor, currentDialers map[string]upstream.Dialer) {
+func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor, currentDialers map[string]upstream.Dialer, envSnap *env.Snapshot) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		slog.Error("config watcher setup failed", "error", err)
@@ -306,7 +346,7 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 				}
 			}
 
-			newCfg, newMonitor, newDialers := reloadConfig(currentCfg, srv, ctrlSrv, pagesHandler, currentMonitor, currentDialers)
+			newCfg, newMonitor, newDialers := reloadConfig(currentCfg, srv, ctrlSrv, pagesHandler, currentMonitor, currentDialers, envSnap)
 			if newCfg == nil {
 				continue
 			}
@@ -361,7 +401,7 @@ func watchConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.
 // success, or nil if the reload failed. Per-item validation errors
 // during reload follow the same model as startup: collected, logged,
 // and surfaced via the internal-pages banner.
-func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor, currentDialers map[string]upstream.Dialer) (*config.Config, *upstream.Monitor, map[string]upstream.Dialer) {
+func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control.Server, pagesHandler *pages.Handler, currentMonitor *upstream.Monitor, currentDialers map[string]upstream.Dialer, envSnap *env.Snapshot) (*config.Config, *upstream.Monitor, map[string]upstream.Dialer) {
 	// The main config file is always the first in IncludedFiles
 	mainFile := currentCfg.IncludedFiles[0]
 
@@ -405,6 +445,11 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 		pagesHandler.SetTags(tagDefs(newCfg))
 		pagesHandler.SetSearchEngines(engineDefs(newCfg), newCfg.DefaultSearchEngine)
 		newCfg.Errors = append(newCfg.Errors, pagesHandler.ValidateTagReferences()...)
+		if envSnap != nil {
+			// Page set may have new (or fewer) `${NAME}` references;
+			// keep the env refresher's change-detection accurate.
+			envSnap.SetReferences(unionEnvRefs(pageInfos))
+		}
 	}
 
 	for _, msg := range newCfg.Errors {
@@ -423,6 +468,46 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	)
 
 	return newCfg, newMonitor, dialers
+}
+
+// unionEnvRefs returns the union of `${NAME}` references across
+// every loaded page. Used to tell the env snapshot which variables
+// matter, so the refresher's change-detection skips $RANDOM and
+// other per-spawn churn.
+func unionEnvRefs(infos []pages.PageInfo) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, info := range infos {
+		if info.Page == nil {
+			continue
+		}
+		for k := range info.Page.EnvRefs {
+			out[k] = struct{}{}
+		}
+	}
+	return out
+}
+
+// reloadPagesForEnv is the env-refresher's onChange callback. It re-
+// parses page KDL files (so `${NAME}` tokens pick up fresh values
+// from the new snapshot) and rebuilds the pages mux without
+// disturbing upstream routing or the dialer set — both heavy and
+// unrelated to env churn. Page-parse errors discovered here are
+// dropped on the floor: anything systemic (a missing include, bad
+// KDL) was already surfaced by the most recent file-watcher reload
+// or startup, and rendering keeps working via the include-failed
+// placeholder cards.
+func reloadPagesForEnv(cfg *config.Config, pagesHandler *pages.Handler, envSnap *env.Snapshot) {
+	infos := make([]pages.PageInfo, 0, len(cfg.Pages))
+	for _, pg := range cfg.Pages {
+		pageCfg, _ := pages.ParsePageFile(pg.File)
+		infos = append(infos, pages.PageInfo{
+			Name:  pg.Name,
+			Alias: pg.Alias,
+			Page:  pageCfg,
+		})
+	}
+	pagesHandler.ReloadPages(infos)
+	envSnap.SetReferences(unionEnvRefs(infos))
 }
 
 // loadPages parses all configured link page files into PageInfo

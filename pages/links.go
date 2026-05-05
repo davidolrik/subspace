@@ -24,7 +24,22 @@ type PageConfig struct {
 	Footer   string        `json:"Footer,omitempty"`
 	Items    []TopItem     `json:"Items"`
 	Sections []ListSection `json:"Sections"`
+	// EnvRefs is the union of `${NAME}` tokens across every markdown
+	// source on the page (top-level cards and list-embedded markdown,
+	// excluding escaped `$${...}`). Populated at parse time and read by
+	// the env refresher in cmd/serve.go to decide whether a captured
+	// environment change should trigger a re-render. Internal — the
+	// dashboard frontend has no use for it.
+	EnvRefs map[string]struct{} `json:"-"`
 }
+
+// EnvLookup, when non-nil, is consulted by parseMarkdownNode at page
+// (re)load to substitute `${NAME}` tokens before goldmark sees them.
+// Set by cmd/serve.go after building the env snapshot; left nil during
+// validation, tests, and any consumer that doesn't want substitution
+// (the renderer treats nil as "no env wired up" and leaves tokens as
+// authored so the missing reference is visible).
+var EnvLookup func(string) (string, bool)
 
 // TopItem is one top-level entry in a page. Kind is "list" or
 // "markdown"; Section / Markdown carry the per-kind payload.
@@ -158,7 +173,7 @@ func ParsePageWithBase(data []byte, baseDir string) (*PageConfig, []error) {
 			cfg.Footer = node.Arguments[0].ValueString()
 		case "list":
 			validateKnownProps(node, "list", []string{"tags", "color", "icon"}, &errs)
-			s, sectionErrs := parseListSection(node, baseDir)
+			s, sectionErrs := parseListSection(node, baseDir, &cfg.EnvRefs)
 			errs = append(errs, sectionErrs...)
 			// Drop sections whose name was missing — there's nothing
 			// to render and no way to address it from the search
@@ -171,7 +186,7 @@ func ParsePageWithBase(data []byte, baseDir string) (*PageConfig, []error) {
 			}
 		case "markdown":
 			validateKnownProps(node, "markdown", []string{"columns", "rows", "float", "color", "icon", "include"}, &errs)
-			md, mdErrs := parseMarkdownNode(node, true, baseDir)
+			md, mdErrs := parseMarkdownNode(node, true, baseDir, &cfg.EnvRefs)
 			errs = append(errs, mdErrs...)
 			if md != nil {
 				cfg.Items = append(cfg.Items, TopItem{Kind: "markdown", Markdown: md})
@@ -189,10 +204,13 @@ func ParsePageWithBase(data []byte, baseDir string) (*PageConfig, []error) {
 // properties) or inside a list (allowGrid=false: both properties
 // are silently ignored since the markdown becomes a list row, not a
 // grid cell). baseDir is used to resolve relative `include="..."`
-// paths. Returns nil for the doc only when the node is too malformed
+// paths. envRefs, when non-nil, is populated with the set of
+// `${NAME}` tokens found in this markdown's source so the env-tick
+// callback knows which variables actually warrant a re-render.
+// Returns nil for the doc only when the node is too malformed
 // to render anything; a missing include with no fallback still
 // returns a placeholder doc so the page renders.
-func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*MarkdownDoc, []error) {
+func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string, envRefs *map[string]struct{}) (*MarkdownDoc, []error) {
 	var errs []error
 	columns, rows := 0, 0
 	rowsAuto := false
@@ -280,7 +298,20 @@ func parseMarkdownNode(node *document.Node, allowGrid bool, baseDir string) (*Ma
 		}, errs
 	}
 
-	rendered, err := RenderMarkdown(src)
+	// Collect env refs from the resolved source (post-include) so the
+	// caller sees a single page-level set covering both inline and
+	// included markdown. Skipped when the caller didn't pass an
+	// accumulator (validation tooling, ad-hoc parses).
+	if envRefs != nil {
+		for name := range collectVarRefs(src) {
+			if *envRefs == nil {
+				*envRefs = make(map[string]struct{})
+			}
+			(*envRefs)[name] = struct{}{}
+		}
+	}
+
+	rendered, err := RenderMarkdownWithEnv(src, EnvLookup)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("rendering markdown: %w", err))
 		return nil, errs
@@ -402,7 +433,7 @@ func valueToInt(v *document.Value) (int, error) {
 	}
 }
 
-func parseListSection(node *document.Node, baseDir string) (ListSection, []error) {
+func parseListSection(node *document.Node, baseDir string, envRefs *map[string]struct{}) (ListSection, []error) {
 	if len(node.Arguments) < 1 {
 		return ListSection{}, []error{fmt.Errorf("list requires a name argument")}
 	}
@@ -452,7 +483,7 @@ func parseListSection(node *document.Node, baseDir string) (ListSection, []error
 				Name: name,
 			})
 		case "markdown":
-			md, mdErrs := parseMarkdownNode(child, false, baseDir)
+			md, mdErrs := parseMarkdownNode(child, false, baseDir, envRefs)
 			for _, e := range mdErrs {
 				errs = append(errs, fmt.Errorf("list %q: %w", s.Name, e))
 			}

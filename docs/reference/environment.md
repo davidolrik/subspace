@@ -1,5 +1,18 @@
 # Environment
 
+## Markdown Card Variable Capture
+
+Markdown cards can reference shell variables with `${NAME}`. Subspace resolves them by spawning the configured shell as a **login but non-interactive** shell (`<shell> -lc env`), parsing its output, and substituting the values into rendered cards.
+
+Because the spawn is non-interactive, **`.zshrc` / `.bashrc` are not sourced**. Any variable you want subspace to see must be exported from a login init file:
+
+| Shell | Put exports in                                   |
+| ----- | ------------------------------------------------ |
+| zsh   | `~/.zprofile`, `~/.zlogin`, or `~/.zshenv`       |
+| bash  | `~/.bash_profile`, `~/.bash_login`, `~/.profile` |
+
+Interactive shells are deliberately avoided: they take over the controlling terminal (job control, `/dev/tty`, terminal mode setup), which would leave the terminal hosting `subspace serve` in a state where ctrl-c no longer reaches the process.
+
 ## Proxy Variables
 
 Subspace clears all proxy-related environment variables on startup:

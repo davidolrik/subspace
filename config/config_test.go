@@ -1507,6 +1507,72 @@ route ".half.com" via="good" fallback="missing"
 	}
 }
 
+func TestParseEnvBlockShellAndRefresh(t *testing.T) {
+	cfg, err := Parse([]byte("env {\nshell \"/bin/zsh\"\nrefresh \"30s\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.EnvShell != "/bin/zsh" {
+		t.Errorf("EnvShell = %q, want %q", cfg.EnvShell, "/bin/zsh")
+	}
+	if cfg.EnvRefreshInterval != 30*time.Second {
+		t.Errorf("EnvRefreshInterval = %v, want 30s", cfg.EnvRefreshInterval)
+	}
+}
+
+func TestParseEnvBlockUnsetDefaults(t *testing.T) {
+	// No `env` block → both fields stay zero so cmd/serve.go can apply
+	// its own defaults.
+	cfg, err := Parse([]byte(`listen ":8080"`))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.EnvShell != "" {
+		t.Errorf("EnvShell = %q, want empty when unset", cfg.EnvShell)
+	}
+	if cfg.EnvRefreshInterval != 0 {
+		t.Errorf("EnvRefreshInterval = %v, want 0 when unset", cfg.EnvRefreshInterval)
+	}
+}
+
+func TestParseEnvBlockRefreshTooShort(t *testing.T) {
+	// Refresh below the 10s minimum should be reported as a non-fatal
+	// error and the field cleared so the runtime applies its default.
+	cfg, err := Parse([]byte("env {\nrefresh \"1s\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.EnvRefreshInterval != 0 {
+		t.Errorf("EnvRefreshInterval = %v, want 0 after sub-minimum value", cfg.EnvRefreshInterval)
+	}
+	if !hasErrorContaining(cfg.Errors, "refresh") {
+		t.Errorf("Errors = %v, want one mentioning refresh minimum", cfg.Errors)
+	}
+}
+
+func TestParseEnvBlockInvalidRefresh(t *testing.T) {
+	cfg, err := Parse([]byte("env {\nrefresh \"not-a-duration\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.EnvRefreshInterval != 0 {
+		t.Errorf("EnvRefreshInterval = %v, want 0 after invalid value", cfg.EnvRefreshInterval)
+	}
+	if !hasErrorContaining(cfg.Errors, "refresh") {
+		t.Errorf("Errors = %v, want one mentioning the bad refresh value", cfg.Errors)
+	}
+}
+
+func TestParseEnvBlockUnknownChild(t *testing.T) {
+	cfg, err := Parse([]byte("env {\nwidget \"x\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if !hasErrorContaining(cfg.Errors, "widget") {
+		t.Errorf("Errors = %v, want one mentioning the unknown child", cfg.Errors)
+	}
+}
+
 func TestParseFatalOnKDLSyntaxError(t *testing.T) {
 	// Unclosed brace — KDL parse should fail and we return a real error.
 	input := `

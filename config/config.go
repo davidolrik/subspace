@@ -100,7 +100,16 @@ type Config struct {
 	// configured default in cmd/serve.go applies when the user hasn't
 	// set a value).
 	StatsRetention time.Duration
-	IncludedFiles  []string // absolute paths of all files parsed (main + includes)
+	// EnvShell is the shell to spawn for env capture. Empty means
+	// cmd/serve.go falls back to $SHELL (or /bin/sh as a last resort).
+	EnvShell string
+	// EnvRefreshInterval is how often subspace re-reads the operator's
+	// environment so markdown cards can pick up new values for tokens
+	// like ${PUBLIC_IP}. Zero means cmd/serve.go applies its default.
+	// The parser enforces a 10s minimum so a config typo can't turn
+	// the refresher into a fork bomb.
+	EnvRefreshInterval time.Duration
+	IncludedFiles      []string // absolute paths of all files parsed (main + includes)
 	// Errors holds non-fatal config problems collected during parsing
 	// and finalization (e.g. a route that refers to an unknown
 	// upstream). Subspace skips the offending item and continues so the
@@ -255,6 +264,11 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 
 		case "stats":
 			for _, msg := range parseStatsBlock(node, &p.cfg.StatsRetention) {
+				p.collect(currentFile, msg)
+			}
+
+		case "env":
+			for _, msg := range parseEnvBlock(node, &p.cfg.EnvShell, &p.cfg.EnvRefreshInterval) {
 				p.collect(currentFile, msg)
 			}
 
@@ -647,6 +661,51 @@ func parseStatsBlock(node *document.Node, retention *time.Duration) []string {
 			*retention = d
 		default:
 			errs = append(errs, fmt.Sprintf("stats block: unknown node %q", child.Name.ValueString()))
+		}
+	}
+	return errs
+}
+
+// EnvMinimumRefresh is the lowest refresh interval the parser will
+// accept. Below this we'd be re-spawning the operator's shell often
+// enough to be noticeable; the value matches what's documented in
+// the operator-facing reference.
+const EnvMinimumRefresh = 10 * time.Second
+
+// parseEnvBlock walks `env { ... }` nodes. Recognised children are
+// `shell "<path>"` and `refresh "<duration>"`; anything else is a
+// non-fatal error so the block can grow without breaking older
+// configs. Refresh values that fail to parse, or that fall below
+// EnvMinimumRefresh, are reported and the field is left at zero so
+// cmd/serve.go applies its own default.
+func parseEnvBlock(node *document.Node, shell *string, refresh *time.Duration) []string {
+	var errs []string
+	for _, child := range node.Children {
+		switch child.Name.ValueString() {
+		case "shell":
+			if len(child.Arguments) < 1 {
+				errs = append(errs, "env shell requires a path argument")
+				continue
+			}
+			*shell = child.Arguments[0].ValueString()
+		case "refresh":
+			if len(child.Arguments) < 1 {
+				errs = append(errs, "env refresh requires a duration argument")
+				continue
+			}
+			val := child.Arguments[0].ValueString()
+			d, err := time.ParseDuration(val)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("env refresh %q: %v", val, err))
+				continue
+			}
+			if d < EnvMinimumRefresh {
+				errs = append(errs, fmt.Sprintf("env refresh %q below %s minimum; using default", val, EnvMinimumRefresh))
+				continue
+			}
+			*refresh = d
+		default:
+			errs = append(errs, fmt.Sprintf("env block: unknown node %q", child.Name.ValueString()))
 		}
 	}
 	return errs
