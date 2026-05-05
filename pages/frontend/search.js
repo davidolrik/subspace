@@ -206,25 +206,35 @@ export function bands(items) {
 // span — which is `max(content, tallestNeighbour)` because CSS grid
 // sizes the row track to its tallest cell and stretches every cell to
 // fit. So when the markdown content is shorter than its neighbours,
-// `cardHeight === tallestNeighbour` and span=1 is correct. When the
-// markdown content is taller, `cardHeight > tallestNeighbour` and the
-// row currently bloats every neighbour with empty space; spanning more
-// rows lets each track size to the neighbour height while accommodating
-// the card's content across the spanned tracks:
+// `cardHeight === tallestNeighbour` and span=1 is correct.
 //
-//   N tracks × neighbour_h + (N-1) × gap ≈ card_h
-//   N ≈ (card_h + gap) / (neighbour_h + gap)
+// When the markdown content is taller, the choice is between two
+// asymmetries: row stretch (every neighbour in s rows pads out from
+// its natural height to c/s) versus card whitespace (the card sits in
+// tracks sized to t while content < (s+1)·t). Total visible empty
+// area at the boundary balances when:
+//   (cols - 1) · (c - s·t)   =   (s+1)·t - c
+//   c/t                       =   s + 1 / cols
+// (cols-1) is the number of list neighbours per row that get stretched
+// at span s — so adding a row of span pulls in a whole row's worth of
+// extra bloat, which is why the threshold sits just past s rather
+// than near s+1. With cols=4 (the desktop default and the only
+// breakpoint where multi-row spans matter), the boundaries land at
+//   1 → 2 at 5/4 = 1.25
+//   2 → 3 at 9/4 = 2.25
+//   3 → 4 at 13/4 = 3.25
+// — fractionally closer to the integer below as s grows (25%, 12.5%,
+// 8.3%). A 1.5% tolerance absorbs sub-pixel jitter so a card visually
+// equal to its neighbours stays at span=1.
 //
-// We use Math.ceil so that any genuinely-taller card bumps the span
-// (vs. round, which leaves a marginally-taller card at span=1 and
-// bloats every neighbour). A 1.5% tolerance absorbs floating-point
-// jitter and single-pixel layout slop so a card that's the same
-// height as its neighbours stays at span=1.
+// The caller is expected to cap the returned span by the band's
+// natural row count: spanning into rows that have no other cells just
+// produces phantom empty bands.
 export function autoRowSpan(cardHeight, tallestNeighbourHeight, rowGap) {
     if (cardHeight <= 0 || tallestNeighbourHeight <= 0) return 1;
     const ratio = (cardHeight + rowGap) / (tallestNeighbourHeight + rowGap);
     if (ratio <= 1.015) return 1;
-    return Math.max(1, Math.ceil(ratio));
+    return Math.max(1, Math.ceil(ratio - 0.25));
 }
 
 // buildResults assembles the rows shown in the search palette from the
@@ -1006,15 +1016,19 @@ if (typeof document !== 'undefined') {
     //
     // 1. Hide the auto card(s) and force a layout. With them out of
     //    the way, each row track sizes to its actual neighbour cards;
-    //    we read `tallest` as the largest neighbour height. This pass
-    //    is essential — measuring with the auto card present causes
-    //    the row to stretch to fit it, and `align-self: stretch`
-    //    pulls every neighbour up to that bloated height, so we'd
-    //    measure `tallest === card_h` and never bump the span.
+    //    we read `tallest` as the largest neighbour height and count
+    //    the distinct row positions to get the band's natural row
+    //    count. This pass is essential — measuring with the auto card
+    //    present causes the row to stretch to fit it, and
+    //    `align-self: stretch` pulls every neighbour up to that
+    //    bloated height, so we'd measure `tallest === card_h` and
+    //    never bump the span.
     //
     // 2. Restore the auto card(s), measure each one's natural height
     //    (which is `max(content, tallest)` because the row stretches
-    //    again), and pick a span via autoRowSpan().
+    //    again), and pick a span via autoRowSpan() — capped by the
+    //    natural row count so we never span into rows where the auto
+    //    card has no list-card siblings to anchor the row track.
     function applyAutoRowsToGrid(grid) {
         const cards = Array.from(grid.querySelectorAll('section[data-rows-auto]'));
         if (!cards.length) return;
@@ -1028,15 +1042,21 @@ if (typeof document !== 'undefined') {
         // resize) that we want to recompute from scratch.
         const snapshots = cards.map(c => ({ c, gridRow: c.style.gridRow, display: c.style.display }));
 
-        // Pass 1: hide auto cards, force layout, read tallest neighbour.
+        // Pass 1: hide auto cards, force layout, read tallest neighbour
+        // and the number of distinct rows the natural layout occupies.
         cards.forEach(c => { c.style.gridRow = ''; c.style.display = 'none'; });
         void grid.offsetHeight; // force reflow
 
         let tallest = 0;
+        const rowTops = new Set();
         for (const el of others) {
-            const h = el.getBoundingClientRect().height;
-            if (h > tallest) tallest = h;
+            const rect = el.getBoundingClientRect();
+            if (rect.height > tallest) tallest = rect.height;
+            // Round to absorb sub-pixel layout drift between cells
+            // that share a row but report fractionally different tops.
+            rowTops.add(Math.round(rect.top));
         }
+        const naturalRows = Math.max(1, rowTops.size);
 
         // Pass 2: restore the cards (without their old spans) and
         // measure each one's natural single-row height.
@@ -1045,7 +1065,8 @@ if (typeof document !== 'undefined') {
 
         cards.forEach(card => {
             const single = card.getBoundingClientRect().height;
-            card.style.gridRow = 'span ' + autoRowSpan(single, tallest, gap);
+            const span = Math.min(autoRowSpan(single, tallest, gap), naturalRows);
+            card.style.gridRow = 'span ' + span;
         });
     }
 

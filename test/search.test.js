@@ -955,20 +955,46 @@ describe('autoRowSpan', () => {
         expect(autoRowSpan(200, 200, 16)).toBe(1);
     });
 
-    it('bumps the span when the card is taller than its neighbours', () => {
-        // card=400, neighbour=200, gap=16: (416)/(216) = 1.93 → ceil = 2.
-        expect(autoRowSpan(400, 200, 16)).toBe(2);
-        // card=600, neighbour=200, gap=16: (616)/(216) = 2.85 → ceil = 3.
-        expect(autoRowSpan(600, 200, 16)).toBe(3);
+    it('keeps span=1 for marginally taller cards so the row stretches', () => {
+        // Below the 1→2 boundary at ratio = 5/4 the row stretches a
+        // little and the extra space lands as a small even pad below
+        // each neighbour — easier on the eye than a big gap inside the
+        // markdown card.
+        // card=240, neighbour=200, gap=16: (256)/(216) = 1.185 → 1.
+        expect(autoRowSpan(240, 200, 16)).toBe(1);
+        // card=254, neighbour=200, gap=16: (270)/(216) = 1.25 → 1
+        // (exact boundary; equality stays at the lower span).
+        expect(autoRowSpan(254, 200, 16)).toBe(1);
     });
 
-    it('bumps the span even for marginally taller cards', () => {
-        // The user-visible bug: a card just slightly taller than its
-        // neighbours stretched the row and left empty space below
-        // each neighbour. Any meaningful overflow should bump the
-        // span so the next row can share the load.
-        // card=240, neighbour=200, gap=16: (256)/(216) = 1.185 → ceil = 2.
-        expect(autoRowSpan(240, 200, 16)).toBe(2);
+    it('bumps to span=2 once the card crosses the 5/4 boundary', () => {
+        // 1→2 transition lands at ratio = s + 1/cols = 1 + 1/4 = 1.25
+        // (4-column desktop grid, 1-column markdown card). Above that,
+        // total card whitespace at span=2 is smaller than total
+        // neighbour stretch at span=1.
+        // card=275, neighbour=200, gap=16: (291)/(216) = 1.347 → 2.
+        expect(autoRowSpan(275, 200, 16)).toBe(2);
+        // card=300, neighbour=200, gap=16: (316)/(216) = 1.463 → 2.
+        expect(autoRowSpan(300, 200, 16)).toBe(2);
+        // card=400, neighbour=200, gap=16: (416)/(216) = 1.926 → 2.
+        expect(autoRowSpan(400, 200, 16)).toBe(2);
+        // card=470, neighbour=200, gap=16: (486)/(216) = 2.25 → 2
+        // (exact boundary; equality stays at the lower span).
+        expect(autoRowSpan(470, 200, 16)).toBe(2);
+    });
+
+    it('bumps to span=3 once the card crosses the 9/4 boundary', () => {
+        // 2→3 transition at ratio = 2 + 1/cols = 2.25. Each successive
+        // boundary sits closer (in fractional terms) to the integer
+        // below it: 25% above 1, 12.5% above 2, 8.3% above 3 — adding
+        // a row brings in another full neighbour-height of card render
+        // but only a fractional improvement in fit.
+        // card=475, neighbour=200, gap=16: (491)/(216) = 2.273 → 3.
+        expect(autoRowSpan(475, 200, 16)).toBe(3);
+        // card=525, neighbour=200, gap=16: (541)/(216) = 2.505 → 3.
+        expect(autoRowSpan(525, 200, 16)).toBe(3);
+        // card=600, neighbour=200, gap=16: (616)/(216) = 2.852 → 3.
+        expect(autoRowSpan(600, 200, 16)).toBe(3);
     });
 
     it('absorbs sub-pixel jitter at the equal-height boundary', () => {
