@@ -48,6 +48,16 @@ route "fd00::/8" via="internal6"
 
 The host is parsed as an IP address and checked against the CIDR range. Non-IP hostnames never match CIDR rules.
 
+### Catch-All
+
+Use `.` (the DNS root) or `*` to match every host. This is useful for sending all traffic through a single upstream and then carving out exceptions with more specific rules.
+
+```kdl
+route "." via="hq"
+```
+
+`.` and `*` are equivalent here — pick whichever reads better in your config.
+
 ### Direct
 
 The built-in upstream `direct` bypasses all proxying. Use it to exempt specific hosts from a broader rule.
@@ -88,9 +98,10 @@ In this example, `secret.corp.internal` matches both `.corp.internal` and the ex
 
 Subspace determines the pattern type automatically:
 
-| Contains | Interpreted as |
-|---|---|
-| `/` (and valid CIDR) | CIDR subnet |
-| `*` or `?` | Glob pattern |
-| Leading `.` | Domain suffix |
-| Otherwise | Exact match |
+| Contains             | Interpreted as         |
+| -------------------- | ---------------------- |
+| `/` (and valid CIDR) | CIDR subnet            |
+| `*` or `?`           | Glob pattern           |
+| Exactly `.`          | Catch-all (every host) |
+| Leading `.`          | Domain suffix          |
+| Otherwise            | Exact match            |

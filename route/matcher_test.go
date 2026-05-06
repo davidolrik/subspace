@@ -37,6 +37,26 @@ func TestMatcherDomainMatch(t *testing.T) {
 	}
 }
 
+func TestMatcherDotIsCatchAll(t *testing.T) {
+	// "." represents the DNS root — every hostname is conceptually a
+	// subdomain of it. As a route pattern it should behave as a
+	// catch-all, equivalent to "*".
+	m := NewMatcher([]Rule{
+		{Pattern: ".", Upstream: "hq"},
+	})
+
+	for _, h := range []string{
+		"example.com",
+		"foo.bar.example.com",
+		"localhost",
+		"10.1.2.3",
+	} {
+		if got := m.Match(h); got != "hq" {
+			t.Errorf("Match(%q) = %q, want %q", h, got, "hq")
+		}
+	}
+}
+
 func TestMatcherLastMatchWins(t *testing.T) {
 	m := NewMatcher([]Rule{
 		{Pattern: ".example.com", Upstream: "first"},

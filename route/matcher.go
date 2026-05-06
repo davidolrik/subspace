@@ -21,6 +21,7 @@ const (
 	kindDomain             // ".example.com"
 	kindGlob               // contains * or ?
 	kindCIDR               // "10.0.0.0/8"
+	kindAll                // "." — DNS root, matches every host
 )
 
 type compiledRule struct {
@@ -70,6 +71,12 @@ func compileRule(r Rule) compiledRule {
 	// Glob: contains * or ?
 	if strings.ContainsAny(pattern, "*?") {
 		base.kind = kindGlob
+		return base
+	}
+
+	// "." is the DNS root and acts as a catch-all (equivalent to "*").
+	if pattern == "." {
+		base.kind = kindAll
 		return base
 	}
 
@@ -139,6 +146,8 @@ func ruleFromCompiled(cr *compiledRule) *Rule {
 
 func (r *compiledRule) match(host string) bool {
 	switch r.kind {
+	case kindAll:
+		return true
 	case kindCIDR:
 		ip := net.ParseIP(host)
 		return ip != nil && r.cidr.Contains(ip)
