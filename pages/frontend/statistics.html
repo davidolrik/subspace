@@ -531,17 +531,48 @@
     <script src="/static/chart.min.js"></script>
     <script src="/static/alpine.min.js" defer></script>
     <script>
-        const chartColors = {
-            cyan:   'rgba(0, 255, 234, 0.8)',
-            pink:   'rgba(255, 41, 117, 0.8)',
-            green:  'rgba(0, 255, 136, 0.8)',
-            blue:   'rgba(30, 144, 255, 0.8)',
-            amber:  'rgba(255, 183, 0, 0.8)',
-            violet: 'rgba(187, 134, 252, 0.8)',
-            red:    'rgba(255, 55, 95, 0.8)',
-            yellow: 'rgba(255, 234, 0, 0.8)',
+        // Per-theme chart palettes. Dark uses neon-bright shades that
+        // pop against the near-black background; light uses darker,
+        // saturated shades that stay readable against white. Datasets
+        // are tagged with _paletteKey or _paletteIdx so onThemeChange
+        // can recolor in place without re-fetching data.
+        const chartPalettes = {
+            dark: {
+                cyan:   'rgba(0, 255, 234, 0.8)',
+                pink:   'rgba(255, 41, 117, 0.8)',
+                green:  'rgba(0, 255, 136, 0.8)',
+                blue:   'rgba(30, 144, 255, 0.8)',
+                amber:  'rgba(255, 183, 0, 0.8)',
+                violet: 'rgba(187, 134, 252, 0.8)',
+                red:    'rgba(255, 55, 95, 0.8)',
+                yellow: 'rgba(255, 234, 0, 0.8)',
+            },
+            light: {
+                cyan:   'rgba(10, 125, 142, 1)',
+                pink:   'rgba(176, 23, 80, 1)',
+                green:  'rgba(22, 101, 52, 1)',
+                blue:   'rgba(30, 58, 138, 1)',
+                amber:  'rgba(146, 64, 14, 1)',
+                violet: 'rgba(91, 33, 182, 1)',
+                red:    'rgba(153, 27, 27, 1)',
+                yellow: 'rgba(133, 77, 14, 1)',
+            },
         };
-        const colorList = Object.values(chartColors);
+
+        function currentChartTheme() {
+            return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        }
+        function chartColors() {
+            return chartPalettes[currentChartTheme()];
+        }
+        function chartColorList() {
+            return Object.values(chartColors());
+        }
+        // Translucent fill derived from a palette color (for the
+        // shaded area under line charts).
+        function chartFill(key, alpha) {
+            return chartColors()[key].replace(/[\d.]+\)$/, alpha + ')');
+        }
 
         // Read chart-relevant CSS variables so charts pick up the
         // current theme on each (re)build. Called when constructing
@@ -748,10 +779,28 @@
                                 Object.assign(opts.plugins.tooltip, buildTooltipStyle().tooltip);
                             }
                         }
+                        // Recolor series using the per-theme palette.
+                        // Each dataset is tagged at construction time
+                        // with one of:
+                        //   _paletteKey   — named palette slot (line charts)
+                        //   _paletteIdx   — single index into the cycling list (bar charts)
+                        //   _paletteIdxList — array of indices, one per slice (pie charts)
+                        const palette = chartColors();
+                        const palList = Object.values(palette);
+                        for (const ds of chart.data.datasets || []) {
+                            if (ds._paletteKey) {
+                                ds.borderColor = palette[ds._paletteKey];
+                                if (ds._fillAlpha !== undefined) {
+                                    ds.backgroundColor = chartFill(ds._paletteKey, ds._fillAlpha);
+                                }
+                            } else if (ds._paletteIdxList) {
+                                ds.backgroundColor = ds._paletteIdxList.map(i => palList[i % palList.length]);
+                            } else if (ds._paletteIdx !== undefined) {
+                                ds.backgroundColor = palList[ds._paletteIdx % palList.length];
+                            }
+                        }
                         // Pie chart slices use the surface color as the
                         // separator between segments — refresh that too.
-                        // Other chart types' borderColor encodes the
-                        // line/series color and must not be touched.
                         if (key === 'protocol') {
                             for (const ds of chart.data.datasets || []) {
                                 ds.borderColor = chartTheme().bg;
@@ -860,8 +909,10 @@
                             {
                                 label: 'New',
                                 data: newConns,
-                                borderColor: chartColors.cyan,
-                                backgroundColor: 'rgba(0, 255, 234, 0.1)',
+                                borderColor: chartColors().cyan,
+                                backgroundColor: chartFill('cyan', 0.1),
+                                _paletteKey: 'cyan',
+                                _fillAlpha: 0.1,
                                 fill: true,
                                 tension: 0.3,
                                 pointRadius: 0,
@@ -869,8 +920,10 @@
                             {
                                 label: 'Active',
                                 data: points.map(p => p.active),
-                                borderColor: chartColors.green,
-                                backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                                borderColor: chartColors().green,
+                                backgroundColor: chartFill('green', 0.1),
+                                _paletteKey: 'green',
+                                _fillAlpha: 0.1,
                                 fill: true,
                                 tension: 0.3,
                                 pointRadius: 0,
@@ -878,8 +931,10 @@
                             {
                                 label: 'Errors',
                                 data: errorDeltas,
-                                borderColor: chartColors.red,
-                                backgroundColor: 'rgba(255, 55, 95, 0.1)',
+                                borderColor: chartColors().red,
+                                backgroundColor: chartFill('red', 0.1),
+                                _paletteKey: 'red',
+                                _fillAlpha: 0.1,
                                 fill: true,
                                 tension: 0.3,
                                 pointRadius: 0,
@@ -902,6 +957,7 @@
                     const upstreamNames = new Set();
                     points.forEach(p => Object.keys(p.upstreams || {}).forEach(n => upstreamNames.add(n)));
 
+                    const palette = chartColorList();
                     const datasets = [...upstreamNames].map((name, i) => {
                         // Compute per-interval throughput (delta of cumulative bytes)
                         const totals = points.map(p => {
@@ -916,8 +972,9 @@
                         return {
                             label: name,
                             data: deltas,
-                            backgroundColor: colorList[i % colorList.length],
+                            backgroundColor: palette[i % palette.length],
                             borderColor: 'transparent',
+                            _paletteIdx: i,
                         };
                     });
 
@@ -963,13 +1020,15 @@
                     const protocols = this.live.protocols || {};
                     const protoNames = Object.keys(protocols).filter(k => protocols[k] > 0);
 
+                    const palette = chartColorList();
                     const data = {
                         labels: protoNames,
                         datasets: [{
                             data: protoNames.map(k => protocols[k]),
-                            backgroundColor: protoNames.map((_, i) => colorList[i % colorList.length]),
+                            backgroundColor: protoNames.map((_, i) => palette[i % palette.length]),
                             borderColor: chartTheme().bg,
                             borderWidth: 2,
+                            _paletteIdxList: protoNames.map((_, i) => i),
                         }]
                     };
 
