@@ -2,9 +2,10 @@
 
 ## Global Flags
 
-| Flag       | Description         | Default                         |
-| ---------- | ------------------- | ------------------------------- |
-| `--config` | Path to config file | `~/.config/subspace/config.kdl` |
+| Flag       | Description                                                                                                                              | Default                         |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `--config` | Path to config file                                                                                                                      | `~/.config/subspace/config.kdl` |
+| `--theme`  | CLI color theme override. Built-ins: `dark`, `light`. Any other value loads `~/.config/subspace/themes/<name>.kdl`. See `subspace theme`. | (uses `theme` from config)      |
 
 ## `subspace serve`
 
@@ -149,6 +150,58 @@ A failing example:
 ```
 
 Wire it into CI as `subspace validate --config path/to/config.kdl`; the non-zero exit on failure is enough to fail the job.
+
+## `subspace theme`
+
+Manages the CLI color theme. The active theme is selected by the [`theme` config key](/reference/configuration#theme) or the `--theme` global flag (the flag wins). Built-ins are `dark` (default) and `light`. Any other name resolves to a file at `~/.config/subspace/themes/<name>.kdl`.
+
+A broken or unresolvable theme never blocks `subspace serve` — it falls back to the dark palette and prints a `theme:` warning under the banner. `subspace validate` surfaces the same warnings as configuration errors.
+
+### `subspace theme export`
+
+Writes a starter theme file to `~/.config/subspace/themes/<name>.kdl`. Edit the file, then reference it from your config with `theme "<name>"`.
+
+```sh
+subspace theme export mytheme                        # base on the active palette
+subspace theme export --from light pastel            # base on the light built-in
+subspace theme export --from dark --force neon       # overwrite an existing file
+```
+
+| Flag       | Description                                                | Default                |
+| ---------- | ---------------------------------------------------------- | ---------------------- |
+| `--from`   | Base palette to copy from. One of `dark`, `light`.         | the active theme       |
+| `--force`  | Overwrite an existing file at the destination path.        | `false`                |
+
+The file contains the full palette with one role-named key per line and a comment for each. All keys are optional; missing keys inherit from the dark built-in. Colors use `#rrggbb` (or `#rgb`).
+
+```kdl
+// subspace theme file
+heading    "#0a7178"  // section headers, labels, banner accent
+success    "#207040"  // OK / healthy / direct
+error      "#c24050"  // failures, error markers
+// …
+
+bg-success "#dff5e8"  // success badge background
+bg-error   "#fde0e6"  // error badge background
+// …
+```
+
+The full set of role keys is:
+
+| Role                                                                       | Where it appears                                |
+| -------------------------------------------------------------------------- | ----------------------------------------------- |
+| `heading`                                                                  | section headers, labels, banner accent          |
+| `success`                                                                  | OK / healthy / `direct` route / success counts  |
+| `error`                                                                    | failures, error markers                         |
+| `warning`                                                                  | soft warnings (e.g. fallback notes)             |
+| `caution`                                                                  | log `WRN` badge                                 |
+| `info`                                                                     | log `INF` badge text                            |
+| `notice`, `highlight`                                                      | reserved for future use                         |
+| `strong`                                                                   | bold high-contrast emphasis (banner)            |
+| `faint`                                                                    | barely-visible structural (`=`, separators)     |
+| `muted`                                                                    | secondary text (log keys, descriptions)         |
+| `body`                                                                     | quiet readable body text                        |
+| `bg-success`, `bg-error`, `bg-info`, `bg-warning`, `bg-debug`              | log level badge backgrounds                     |
 
 ## `subspace logs`
 

@@ -38,6 +38,24 @@ control_socket "/run/subspace/control.sock"
 Changing the control socket path requires a restart.
 :::
 
+### `theme`
+
+Selects the CLI color theme. Built-in values are `dark` (the default) and `light` (a darker-on-white palette tuned for light terminals). Any other value resolves to a custom theme file at `~/.config/subspace/themes/<name>.kdl`.
+
+```kdl
+theme "light"
+```
+
+The `--theme` CLI flag overrides this key for a single invocation. A broken or missing theme never blocks startup — subspace falls back to the dark palette and prints a `theme:` warning. `subspace validate` reports the same warnings as configuration errors.
+
+Bootstrap a custom theme with [`subspace theme export`](/guide/commands#subspace-theme-export):
+
+```sh
+subspace theme export --from light mytheme   # writes ~/.config/subspace/themes/mytheme.kdl
+```
+
+Then edit the generated file and reference it from your config with `theme "mytheme"`. See [`subspace theme`](/guide/commands#subspace-theme) for the full palette key reference.
+
 ### `upstream`
 
 Defines a named upstream proxy. Supported types: `http`, `socks5`, `wireguard`.

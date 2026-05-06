@@ -189,9 +189,9 @@ func FormatEntry(e LogEntry, color bool) string {
 	lvl := levelTag(e.Level)
 	msg := e.Message
 	if color {
-		ts = style.ForceColorize(style.Ghost, ts)
+		ts = style.ForceColorize(style.Faint, ts)
 		lvl = style.ForceColorLevel(e.Level)
-		msg = style.ForceBoldC(style.Steel, msg)
+		msg = style.ForceBoldC(style.Body, msg)
 	}
 
 	line := fmt.Sprintf("%s %s %s", ts, lvl, msg)
@@ -226,9 +226,9 @@ func colorAttrs(attrs string) string {
 		if eq := strings.IndexByte(pair, '='); eq >= 0 {
 			key := pair[:eq]
 			val := pair[eq+1:]
-			colored := style.ForceColorize(style.Smoke, key) +
-				style.ForceColorize(style.Ghost, "=") +
-				style.ForceColorize(style.Green, val)
+			colored := style.ForceColorize(style.Muted, key) +
+				style.ForceColorize(style.Faint, "=") +
+				style.ForceColorize(style.Success, val)
 			parts = append(parts, colored)
 		} else {
 			parts = append(parts, pair)

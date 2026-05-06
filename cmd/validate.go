@@ -43,8 +43,14 @@ anything is wrong, so it's safe to wire into CI for a config repo.`,
 			h.SetTags(tagDefs(cfg))
 			cfg.Errors = append(cfg.Errors, h.ValidateTagReferences()...)
 
+			// Surface theme-resolution problems so a typo in `theme`
+			// or a malformed theme file shows up in CI alongside other
+			// config errors. Built-in names produce no warnings.
+			_, themeWarns := style.ResolveTheme(cfg.Theme, ConfigDir())
+			cfg.Errors = append(cfg.Errors, themeWarns...)
+
 			fmt.Fprintln(out)
-			fmt.Fprintf(out, "  %s   %s\n", style.Colorize(style.Cyan, "config       "), style.Colorize(style.Steel, *configFile))
+			fmt.Fprintf(out, "  %s   %s\n", style.Colorize(style.Heading, "config       "), style.Colorize(style.Body, *configFile))
 			summarise(out, "files included", len(cfg.IncludedFiles))
 			summarise(out, "upstreams     ", len(cfg.Upstreams))
 			summarise(out, "routes        ", len(cfg.Routes))
@@ -54,15 +60,15 @@ anything is wrong, so it's safe to wire into CI for a config repo.`,
 
 			if len(cfg.Errors) == 0 {
 				fmt.Fprintln(out)
-				fmt.Fprintf(out, "  %s\n", style.BoldC(style.Green, "OK"))
+				fmt.Fprintf(out, "  %s\n", style.BoldC(style.Success, "OK"))
 				fmt.Fprintln(out)
 				return nil
 			}
 
 			fmt.Fprintln(out)
-			fmt.Fprintf(out, "  %s\n", style.BoldC(style.Red, fmt.Sprintf("%d error(s):", len(cfg.Errors))))
+			fmt.Fprintf(out, "  %s\n", style.BoldC(style.Error, fmt.Sprintf("%d error(s):", len(cfg.Errors))))
 			for _, e := range cfg.Errors {
-				fmt.Fprintf(out, "    %s %s\n", style.Colorize(style.Red, "•"), style.Colorize(style.Steel, e))
+				fmt.Fprintf(out, "    %s %s\n", style.Colorize(style.Error, "•"), style.Colorize(style.Body, e))
 			}
 			fmt.Fprintln(out)
 
@@ -73,7 +79,7 @@ anything is wrong, so it's safe to wire into CI for a config repo.`,
 
 func summarise(w interface{ Write([]byte) (int, error) }, label string, n int) {
 	fmt.Fprintf(w, "  %s   %s\n",
-		style.Colorize(style.Cyan, label),
-		style.Colorize(style.Green, fmt.Sprintf("%d", n)),
+		style.Colorize(style.Heading, label),
+		style.Colorize(style.Success, fmt.Sprintf("%d", n)),
 	)
 }

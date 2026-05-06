@@ -25,34 +25,38 @@ func bg(r, g, b int) string {
 	return fmt.Sprintf("\033[48;2;%d;%d;%dm", r, g, b)
 }
 
-// Retro cyber palette — high-saturation neons on dark backgrounds
+// Theme-driven color escapes. Initialized from DarkPalette() in init();
+// reassigned by ApplyPalette when a different theme loads. Consumers
+// read these directly (e.g. style.Heading) and pick up the active
+// palette on the next read.
 var (
-	// Primary neons
-	Cyan   = fg(0, 255, 234)   // Tron-style cyan
-	Pink   = fg(255, 41, 117)  // Cyberpunk hot pink
-	Green  = fg(0, 255, 136)   // Matrix phosphor green
-	Blue   = fg(30, 144, 255)  // Electric blue
-	Amber  = fg(255, 183, 0)   // Warm amber / CRT phosphor
-	Violet = fg(187, 134, 252) // Synthwave purple
-	Red    = fg(255, 55, 95)   // Alarm red
-	Yellow = fg(255, 234, 0)   // Warning yellow
+	// Foregrounds — primary roles
+	Heading   string
+	Success   string
+	Error     string
+	Warning   string
+	Caution   string
+	Info      string
+	Notice    string
+	Highlight string
 
-	White = fg(255, 255, 255) // Bright white
+	// Foregrounds — text weight / contrast
+	Strong string
+	Faint  string
+	Muted  string
+	Body   string
 
-	// Muted / structural
-	Ghost = fg(88, 91, 112)   // Barely visible, structural
-	Smoke = fg(140, 143, 161) // Muted text
-	Steel = fg(180, 190, 210) // Readable but quiet
-
-	// Level badge backgrounds
-	BgOk  = bg(0, 60, 55)  // Dark teal
-	BgErr = bg(70, 10, 20) // Dark crimson
-
-	bgInfo = BgOk
-	bgWarn = bg(70, 50, 0)  // Dark amber
-	bgErr  = BgErr
-	bgDbg  = bg(35, 35, 45) // Dark slate
+	// Badge backgrounds
+	BgSuccess string
+	BgError   string
+	BgInfo    string
+	BgWarning string
+	BgDebug   string
 )
+
+func init() {
+	ApplyPalette(DarkPalette())
+}
 
 // Colorize wraps text in a foreground color and reset.
 func Colorize(c, text string) string {
@@ -83,7 +87,7 @@ func Separator(width int) string {
 	if !enabled {
 		return ""
 	}
-	s := Ghost
+	s := Faint
 	for i := 0; i < width; i++ {
 		s += "─"
 	}
@@ -95,12 +99,12 @@ func SectionHeader(text string) string {
 	if !enabled {
 		return text
 	}
-	return BoldC(Cyan, text)
+	return BoldC(Heading, text)
 }
 
 // KeyVal formats a key=value pair with cyber styling.
 func KeyVal(key, val string) string {
-	return Colorize(Smoke, key) + Colorize(Ghost, "=") + val
+	return Colorize(Muted, key) + Colorize(Faint, "=") + val
 }
 
 // upstreamColors — vivid neons avoiding red and green (reserved for status indicators).
@@ -142,7 +146,7 @@ var upstreamColors = []string{
 // UpstreamColor returns a deterministic color for an upstream name.
 func UpstreamColor(name string) string {
 	if name == "direct" {
-		return Green
+		return Success
 	}
 	var h uint32
 	for _, c := range name {

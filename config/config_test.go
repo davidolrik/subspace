@@ -1586,3 +1586,62 @@ upstream "x" {
 		t.Fatal("expected fatal error for KDL syntax error")
 	}
 }
+
+func TestParseConfigThemeDefault(t *testing.T) {
+	cfg, err := Parse([]byte(`listen ":8080"`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Theme != "" {
+		t.Errorf("Theme = %q, want empty (defaults to dark)", cfg.Theme)
+	}
+}
+
+func TestParseConfigThemeBuiltin(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen ":8080"
+theme "light"
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Theme != "light" {
+		t.Errorf("Theme = %q, want %q", cfg.Theme, "light")
+	}
+}
+
+func TestParseConfigThemeCustomName(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen ":8080"
+theme "solarized"
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Theme != "solarized" {
+		t.Errorf("Theme = %q, want %q", cfg.Theme, "solarized")
+	}
+}
+
+func TestParseConfigThemeMissingArgument(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen ":8080"
+theme
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Theme != "" {
+		t.Errorf("Theme should remain empty on missing arg, got %q", cfg.Theme)
+	}
+	found := false
+	for _, e := range cfg.Errors {
+		if strings.Contains(e, "theme") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a non-fatal error mentioning theme, got %v", cfg.Errors)
+	}
+}

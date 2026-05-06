@@ -44,25 +44,25 @@ func newResolveCommand(configFile *string) *cobra.Command {
 			// Try to fetch live health data from the running server
 			health := fetchHealth(cfg.ControlSocket)
 
-			lbl := func(s string) string { return style.Colorize(style.Cyan, s) }
+			lbl := func(s string) string { return style.Colorize(style.Heading, s) }
 
 			fmt.Println()
-			fmt.Printf("  %s  %s\n", lbl("url     "), style.Colorize(style.Steel, rawURL))
-			fmt.Printf("  %s  %s\n", lbl("hostname"), style.Colorize(style.Green, hostname))
+			fmt.Printf("  %s  %s\n", lbl("url     "), style.Colorize(style.Body, rawURL))
+			fmt.Printf("  %s  %s\n", lbl("hostname"), style.Colorize(style.Success, hostname))
 
 			matches := matcher.ResolveAll(hostname)
 
 			if len(matches) == 0 {
 				fmt.Println()
-				fmt.Printf("  %s  %s\n", lbl("route   "), style.Colorize(style.Smoke, "no matching route"))
-				fmt.Printf("  %s  %s\n", lbl("action  "), style.Colorize(style.Green, "direct connection"))
+				fmt.Printf("  %s  %s\n", lbl("route   "), style.Colorize(style.Muted, "no matching route"))
+				fmt.Printf("  %s  %s\n", lbl("action  "), style.Colorize(style.Success, "direct connection"))
 				fmt.Println()
 				return nil
 			}
 
 			// Print all matching rules
 			fmt.Println()
-			fmt.Printf("  %s\n", style.BoldC(style.Cyan, "rules"))
+			fmt.Printf("  %s\n", style.BoldC(style.Heading, "rules"))
 
 			// Calculate column widths for alignment
 			var maxPattern, maxUpstream, maxFallback int
@@ -88,7 +88,7 @@ func newResolveCommand(configFile *string) *cobra.Command {
 				var fb string
 				if m.Fallback != "" {
 					fbText := fmt.Sprintf("%-*s", maxFallback, m.Fallback)
-					fb = "  " + style.Colorize(style.Smoke, "fallback=") + style.Colorize(style.UpstreamColor(m.Fallback), fbText)
+					fb = "  " + style.Colorize(style.Muted, "fallback=") + style.Colorize(style.UpstreamColor(m.Fallback), fbText)
 				} else if maxFallback > 0 {
 					fb = "  " + strings.Repeat(" ", maxFallback+len("fallback="))
 				}
@@ -97,16 +97,16 @@ func newResolveCommand(configFile *string) *cobra.Command {
 
 				marker := "  "
 				if isActive {
-					marker = style.Colorize(style.Green, "→ ")
+					marker = style.Colorize(style.Success, "→ ")
 				}
 
 				fmt.Printf("    %s%s %s %s%s  %s\n",
 					marker,
-					style.Colorize(style.Steel, pattern),
-					style.Colorize(style.Smoke, "→"),
+					style.Colorize(style.Body, pattern),
+					style.Colorize(style.Muted, "→"),
 					style.Colorize(style.UpstreamColor(m.Upstream), upstream),
 					fb,
-					style.Colorize(style.Ghost, file),
+					style.Colorize(style.Faint, file),
 				)
 			}
 
@@ -129,7 +129,7 @@ func newResolveCommand(configFile *string) *cobra.Command {
 
 			fallbackNote := ""
 			if fellBack {
-				fallbackNote = " " + style.Colorize(style.Amber, "(fallback — "+active.Upstream+" is down)")
+				fallbackNote = " " + style.Colorize(style.Warning, "(fallback — "+active.Upstream+" is down)")
 			}
 
 			if effectiveUpstream == "direct" {
@@ -147,7 +147,7 @@ func newResolveCommand(configFile *string) *cobra.Command {
 				fmt.Printf("  %s  %s %s\n",
 					lbl("upstream"),
 					style.Colorize(style.UpstreamColor(effectiveUpstream), effectiveUpstream),
-					style.BoldC(style.Red, "(not found in config!)"),
+					style.BoldC(style.Error, "(not found in config!)"),
 				)
 				fmt.Println()
 				return nil
@@ -156,12 +156,12 @@ func newResolveCommand(configFile *string) *cobra.Command {
 			fmt.Printf("  %s  %s %s %s%s\n",
 				lbl("upstream"),
 				style.Colorize(style.UpstreamColor(effectiveUpstream), effectiveUpstream),
-				style.Colorize(style.Smoke, u.Type),
-				style.Colorize(style.Green, u.Address),
+				style.Colorize(style.Muted, u.Type),
+				style.Colorize(style.Success, u.Address),
 				fallbackNote,
 			)
 			if u.Username != "" {
-				fmt.Printf("  %s  %s\n", lbl("auth    "), style.Colorize(style.Green, u.Username))
+				fmt.Printf("  %s  %s\n", lbl("auth    "), style.Colorize(style.Success, u.Username))
 			}
 			fmt.Println()
 

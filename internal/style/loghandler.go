@@ -32,9 +32,9 @@ func (h *LogHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 func (h *LogHandler) Handle(_ context.Context, r slog.Record) error {
-	ts := Colorize(Ghost, r.Time.Format(time.DateTime))
+	ts := Colorize(Faint, r.Time.Format(time.DateTime))
 	lvl := ColorLevel(r.Level)
-	msg := BoldC(Steel, r.Message)
+	msg := BoldC(Body, r.Message)
 
 	line := fmt.Sprintf("%s %s %s", ts, lvl, msg)
 
@@ -84,24 +84,24 @@ func ForceColorLevel(level slog.Level) string {
 func colorLevel(level slog.Level, badge func(string, string, string) string) string {
 	switch {
 	case level >= slog.LevelError:
-		return badge(Red, bgErr, "ERR")
+		return badge(Error, BgError, "ERR")
 	case level >= slog.LevelWarn:
-		return badge(Yellow, bgWarn, "WRN")
+		return badge(Caution, BgWarning, "WRN")
 	case level >= slog.LevelInfo:
-		return badge(Cyan, bgInfo, "INF")
+		return badge(Heading, BgInfo, "INF")
 	default:
-		return badge(Ghost, bgDbg, "DBG")
+		return badge(Faint, BgDebug, "DBG")
 	}
 }
 
 // FormatAttr formats a key=value pair with cyber styling.
 func FormatAttr(prefix string, a slog.Attr) string {
-	key := Colorize(Smoke, prefix+a.Key)
+	key := Colorize(Muted, prefix+a.Key)
 	val := a.Value.String()
 	if a.Key == "via" {
 		val = BoldC(UpstreamColor(val), val)
 	} else {
-		val = Colorize(Green, val)
+		val = Colorize(Success, val)
 	}
-	return key + Colorize(Ghost, "=") + val
+	return key + Colorize(Faint, "=") + val
 }

@@ -160,3 +160,46 @@ func TestValidateMissingFileFails(t *testing.T) {
 		t.Fatal("expected validate to fail when the config file is missing")
 	}
 }
+
+func TestValidateReportsUnresolvableTheme(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	dir := filepath.Join(tmp, "subspace")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := writeConfig(t, dir, map[string]string{
+		"config.kdl": `
+listen ":8080"
+theme "doesnotexist"
+`,
+	})
+
+	stdout, _, err := runValidate(t, configPath)
+	if err == nil {
+		t.Fatal("expected validate to fail when theme can't be resolved")
+	}
+	if !strings.Contains(stdout, "doesnotexist") {
+		t.Errorf("stdout should mention the unresolvable theme, got:\n%s", stdout)
+	}
+}
+
+func TestValidateBuiltinThemeIsClean(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	dir := filepath.Join(tmp, "subspace")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := writeConfig(t, dir, map[string]string{
+		"config.kdl": `
+listen ":8080"
+theme "light"
+`,
+	})
+
+	_, _, err := runValidate(t, configPath)
+	if err != nil {
+		t.Fatalf("validate should pass for built-in theme, got: %v", err)
+	}
+}

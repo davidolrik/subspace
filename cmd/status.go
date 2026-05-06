@@ -74,11 +74,11 @@ func printStatusOutput(status control.StatusResponse) {
 
 			var badge string
 			if name == "direct" {
-				badge = style.Badge(style.Steel, style.BgOk, " -- ")
+				badge = style.Badge(style.Body, style.BgSuccess, " -- ")
 			} else if us.Healthy {
-				badge = style.Badge(style.Green, style.BgOk, " OK ")
+				badge = style.Badge(style.Success, style.BgSuccess, " OK ")
 			} else {
-				badge = style.Badge(style.Red, style.BgErr, "FAIL")
+				badge = style.Badge(style.Error, style.BgError, "FAIL")
 			}
 
 			if us.Address != "" {
@@ -86,7 +86,7 @@ func printStatusOutput(status control.StatusResponse) {
 				fmt.Printf("  %s %s (%s)\n",
 					badge,
 					style.Colorize(style.UpstreamColor(name), name),
-					style.Colorize(style.Steel, detail),
+					style.Colorize(style.Body, detail),
 				)
 			} else {
 				fmt.Printf("  %s %s\n",
@@ -100,14 +100,14 @@ func printStatusOutput(status control.StatusResponse) {
 				s = *us.Stats
 			}
 			fmt.Printf("         %s ok, %s fail, %s in, %s out\n",
-				style.Colorize(style.Green, fmt.Sprintf("%d", s.Success)),
+				style.Colorize(style.Success, fmt.Sprintf("%d", s.Success)),
 				colorFailures(s.Failures),
-				style.Colorize(style.Cyan, formatBytes(s.BytesIn)),
-				style.Colorize(style.Cyan, formatBytes(s.BytesOut)),
+				style.Colorize(style.Heading, formatBytes(s.BytesIn)),
+				style.Colorize(style.Heading, formatBytes(s.BytesOut)),
 			)
 		}
 	} else {
-		fmt.Printf("  %s\n", style.Colorize(style.Ghost, "(none)"))
+		fmt.Printf("  %s\n", style.Colorize(style.Faint, "(none)"))
 	}
 
 	// Connections
@@ -148,19 +148,19 @@ func sortedUpstreamNames(m map[string]control.UpstreamStatus) []string {
 }
 
 func section(name string) {
-	fmt.Printf("\n%s\n", style.BoldC(style.Cyan, name+":"))
+	fmt.Printf("\n%s\n", style.BoldC(style.Heading, name+":"))
 }
 
 func kv(key, val string) {
-	fmt.Printf("  %s: %s\n", style.Colorize(style.Steel, key), val)
+	fmt.Printf("  %s: %s\n", style.Colorize(style.Body, key), val)
 }
 
 func colorFailures(n int64) string {
 	s := fmt.Sprintf("%d", n)
 	if n > 0 {
-		return style.Colorize(style.Red, s)
+		return style.Colorize(style.Error, s)
 	}
-	return style.Colorize(style.Ghost, s)
+	return style.Colorize(style.Faint, s)
 }
 
 func formatBytes(b int64) string {

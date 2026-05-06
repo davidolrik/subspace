@@ -36,6 +36,11 @@ document {
         value type="string"
     }
 
+    node "theme" max=1 {
+        description "CLI color theme. Built-ins: \"dark\" (default), \"light\". Any other value loads <configdir>/themes/<name>.kdl. Run `subspace theme export --help` to bootstrap a custom theme."
+        value type="string"
+    }
+
     // -- upstreams ----------------------------------------------------
 
     node "upstream" {

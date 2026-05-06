@@ -117,11 +117,11 @@ func topByKind(store *stats.Store, kind string, from, to time.Time, metric strin
 func printTopReport(kind string, top []stats.TopEntry, metric string, window time.Duration) {
 	header := fmt.Sprintf("Top %d %s by %s over %s", len(top), kind, metric, window)
 	fmt.Println()
-	fmt.Printf("  %s\n", style.BoldC(style.Cyan, header))
+	fmt.Printf("  %s\n", style.BoldC(style.Heading, header))
 	fmt.Println()
 
 	if len(top) == 0 {
-		fmt.Printf("  %s\n\n", style.Colorize(style.Ghost, "(no activity recorded in this window)"))
+		fmt.Printf("  %s\n\n", style.Colorize(style.Faint, "(no activity recorded in this window)"))
 		return
 	}
 
@@ -137,14 +137,14 @@ func printTopReport(kind string, top []stats.TopEntry, metric string, window tim
 		rank := fmt.Sprintf("%2d.", i+1)
 		name := fmt.Sprintf("%-*s", maxName, e.Name)
 		value := formatMetricValue(metric, e.Value)
-		nameColor := style.Steel
+		nameColor := style.Body
 		if kind == "upstreams" {
 			nameColor = style.UpstreamColor(e.Name)
 		}
 		fmt.Printf("  %s  %s  %s\n",
-			style.Colorize(style.Ghost, rank),
+			style.Colorize(style.Faint, rank),
 			style.Colorize(nameColor, name),
-			style.Colorize(style.Green, value),
+			style.Colorize(style.Success, value),
 		)
 	}
 	fmt.Println()

@@ -109,6 +109,12 @@ type Config struct {
 	// The parser enforces a 10s minimum so a config typo can't turn
 	// the refresher into a fork bomb.
 	EnvRefreshInterval time.Duration
+	// Theme names the CLI color theme. Empty means "dark" (the default).
+	// Built-in values "dark" and "light" short-circuit; any other name
+	// resolves to <configdir>/themes/<name>.kdl. The actual resolution
+	// and palette application happens in cmd/, not here — config just
+	// surfaces the operator's choice.
+	Theme              string
 	IncludedFiles      []string // absolute paths of all files parsed (main + includes)
 	// Errors holds non-fatal config problems collected during parsing
 	// and finalization (e.g. a route that refers to an unknown
@@ -229,6 +235,13 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 				continue
 			}
 			p.cfg.ControlSocket = node.Arguments[0].ValueString()
+
+		case "theme":
+			if len(node.Arguments) < 1 {
+				p.collect(currentFile, "theme requires a name argument")
+				continue
+			}
+			p.cfg.Theme = node.Arguments[0].ValueString()
 
 		case "page":
 			pg, err := parsePage(node, baseDir)
