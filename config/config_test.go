@@ -135,6 +135,102 @@ route "bypass.corp.com" via="direct"
 	}
 }
 
+func TestParseConfigBlackholeRouteAllowed(t *testing.T) {
+	// "blackhole" is a built-in pseudo-upstream like "direct" — no
+	// upstream block needs to be declared.
+	input := `
+listen ":8080"
+
+route ".ads.example.com" via="blackhole"
+route "*.telemetry.com"  via="blackhole"
+route "10.0.0.0/8"       via="blackhole"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v (via=\"blackhole\" should be allowed without an upstream block)", err)
+	}
+	if len(cfg.Routes) != 3 {
+		t.Fatalf("got %d routes, want 3 (errors: %v)", len(cfg.Routes), cfg.Errors)
+	}
+	for i, r := range cfg.Routes {
+		if r.Via != "blackhole" {
+			t.Errorf("Routes[%d].Via = %q, want %q", i, r.Via, "blackhole")
+		}
+	}
+}
+
+func TestParseConfigBlackholeFallbackAllowed(t *testing.T) {
+	// "If my work proxy is down, don't leak traffic directly" — fallback
+	// to blackhole must work even though no upstream is declared.
+	input := `
+listen ":8080"
+
+upstream "corp" {
+	type "http"
+	address "proxy:3128"
+}
+
+route ".risky.com" via="corp" fallback="blackhole"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(cfg.Routes) != 1 {
+		t.Fatalf("got %d routes, want 1 (errors: %v)", len(cfg.Routes), cfg.Errors)
+	}
+	if cfg.Routes[0].Fallback != "blackhole" {
+		t.Errorf("Fallback = %q, want %q", cfg.Routes[0].Fallback, "blackhole")
+	}
+}
+
+func TestParseConfigBlackholeUpstreamRejected(t *testing.T) {
+	// Declaring an upstream named "blackhole" collides with the built-in
+	// pseudo-upstream. Reject with a clear error so the user notices.
+	input := `
+listen ":8080"
+
+upstream "blackhole" {
+	type "http"
+	address "proxy:3128"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if _, ok := cfg.Upstreams["blackhole"]; ok {
+		t.Error("upstream named \"blackhole\" should be rejected as a built-in name collision")
+	}
+	if !hasErrorContaining(cfg.Errors, "blackhole") {
+		t.Errorf("Errors = %v, want one mentioning the reserved blackhole name", cfg.Errors)
+	}
+}
+
+func TestParseConfigDirectUpstreamRejected(t *testing.T) {
+	// Same shape as the blackhole collision test — "direct" has always
+	// been a built-in but the parser previously didn't enforce that no
+	// user upstream could shadow it. Add the same protection.
+	input := `
+listen ":8080"
+
+upstream "direct" {
+	type "http"
+	address "proxy:3128"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if _, ok := cfg.Upstreams["direct"]; ok {
+		t.Error("upstream named \"direct\" should be rejected as a built-in name collision")
+	}
+	if !hasErrorContaining(cfg.Errors, "direct") {
+		t.Errorf("Errors = %v, want one mentioning the reserved direct name", cfg.Errors)
+	}
+}
+
 func TestParseConfigMinimal(t *testing.T) {
 	input := `listen ":9090"`
 	cfg, err := Parse([]byte(input))

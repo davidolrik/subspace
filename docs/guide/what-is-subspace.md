@@ -31,6 +31,7 @@ For TLS traffic, Subspace never decrypts the data — it reads just enough of th
 - **SOCKS5 inbound** — accepts SOCKS5 clients on the same port, auto-detected alongside HTTP
 - **HTTP CONNECT, SOCKS5, and WireGuard** upstreams
 - **Pattern matching** — exact hostnames, domain suffixes, globs, CIDR subnets
+- **Blackhole routes** — drop ad/telemetry traffic with a fast refusal (HTTP 451 / SOCKS5 0x02), with per-domain drop counts in the dashboard
 - **Connection pooling** — reuses upstream connections for HTTP requests
 - **HTTP keep-alive** — multiple requests per client connection
 - **Internal pages** — link dashboards at `pages.subspace.pub` and live statistics at `stats.subspace.pub`, with `/` search across all pages and links

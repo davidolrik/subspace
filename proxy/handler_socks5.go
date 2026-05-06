@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,15 +12,16 @@ import (
 
 // SOCKS5 protocol constants
 const (
-	socks5Version       = 0x05
-	socks5AuthNone      = 0x00
-	socks5AuthNoAccept  = 0xFF
-	socks5CmdConnect    = 0x01
-	socks5AddrIPv4      = 0x01
-	socks5AddrDomain    = 0x03
-	socks5AddrIPv6      = 0x04
-	socks5StatusOK      = 0x00
-	socks5StatusFailure = 0x01
+	socks5Version          = 0x05
+	socks5AuthNone         = 0x00
+	socks5AuthNoAccept     = 0xFF
+	socks5CmdConnect       = 0x01
+	socks5AddrIPv4         = 0x01
+	socks5AddrDomain       = 0x03
+	socks5AddrIPv6         = 0x04
+	socks5StatusOK         = 0x00
+	socks5StatusFailure    = 0x01
+	socks5StatusNotAllowed = 0x02 // RFC 1928: connection not allowed by ruleset
 )
 
 // handleSOCKS5 performs the SOCKS5 server-side handshake, extracts the
@@ -95,6 +97,12 @@ func (s *Server) handleSOCKS5(conn *PeekConn) {
 
 	upstreamConn, usedUpstream, err := s.dialWithFallback(route, "tcp", targetAddr)
 	if err != nil {
+		if errors.Is(err, errBlackhole) {
+			slog.Debug("blackhole refused", "protocol", "SOCKS5", "host", hostname, "pattern", route.pattern)
+			s.socks5Reply(conn, socks5StatusNotAllowed, "0.0.0.0", 0)
+			s.recordBlackhole(hostname, route.pattern, 0, 0)
+			return
+		}
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", hostname, "error", err)
 			s.Stats.IncError("dns_failed")

@@ -129,12 +129,17 @@ upstream "<name>" {
 Maps a hostname pattern to an upstream.
 
 ```kdl
-route "<pattern>" via="<upstream-name>"
+route "<pattern>" via="<upstream-name>" fallback="<upstream-name>"
 ```
 
-The `via` property is required and must reference a defined upstream name, or the built-in `direct` upstream.
+| Property   | Required | Description                                                                                                          |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `via`      | Yes      | Name of a declared `upstream`, or one of the reserved built-ins: `direct` (connect without a proxy) or `blackhole` (drop the connection). |
+| `fallback` | No       | Second upstream used when `via` fails its health check or its dial fails. Must differ from `via`. Accepts the same built-ins (`direct`, `blackhole`) as `via`. |
 
-See [Pattern Matching](/reference/pattern-matching) for pattern syntax.
+The two built-in pseudo-upstreams need no corresponding `upstream` block — they're handled internally by the dispatcher. Defining an `upstream` named `direct` or `blackhole` is a config error: those names are reserved.
+
+See [Pattern Matching](/reference/pattern-matching) for pattern syntax and [Routing → Blackhole](/guide/routing#blackhole) for the per-protocol refusal contract.
 
 ### `tags`
 
@@ -216,7 +221,8 @@ include "<path-or-glob>"
 Config validation runs after all includes are resolved:
 
 - All `upstream` blocks must have a valid `type` and the required properties for that type
-- All `route` rules must reference an existing upstream or `"direct"`
+- `upstream "direct"` and `upstream "blackhole"` are rejected — those names are reserved
+- All `route` rules must reference an existing upstream, `"direct"`, or `"blackhole"`
 - Circular includes are rejected
 - Unknown node types produce an error
 

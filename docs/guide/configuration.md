@@ -99,14 +99,18 @@ upstream "home" {
 Routes traffic matching a pattern through a named upstream. See [Routing](/guide/routing) for full pattern syntax.
 
 ```kdl
-route ".corp.internal" via="corporate"
-route "10.0.0.0/8" via="internal"
-route "bypass.example.com" via="direct"
+route ".corp.internal"   via="corporate"
+route "10.0.0.0/8"       via="internal"
+route "bypass.example"   via="direct"
+route ".doubleclick.net" via="blackhole"
 ```
 
 Rules are evaluated in order. The **last matching rule wins**. Unmatched traffic connects directly.
 
-The built-in upstream `direct` bypasses all proxying — useful for exempting specific hosts from a broader rule.
+Two reserved pseudo-upstreams need no `upstream` block:
+
+- **`direct`** — bypass all proxying for a pattern. Useful for exempting specific hosts from a broader rule.
+- **`blackhole`** — drop the traffic with a fast refusal (HTTP 451 / SOCKS5 0x02 / TLS close). Useful for blocking ad networks or telemetry endpoints. See [Routing → Blackhole](/guide/routing#blackhole) for details.
 
 ## `include`
 

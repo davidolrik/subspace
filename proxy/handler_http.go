@@ -60,6 +60,10 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 		var err error
 		upstreamConn, usedUpstream, err = s.dialWithFallback(route, "tcp", targetAddr)
 		if err != nil {
+			if errors.Is(err, errBlackhole) {
+				s.blackholeHTTP(conn, req, hostname, route.pattern)
+				return false
+			}
 			if isDNSError(err) {
 				slog.Error("DNS lookup failed", "host", hostname, "error", err)
 				s.Stats.IncError("dns_failed")
@@ -142,6 +146,10 @@ func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr s
 
 	upstreamConn, usedUpstream, err := s.dialWithFallback(route, "tcp", targetAddr)
 	if err != nil {
+		if errors.Is(err, errBlackhole) {
+			s.blackholeHTTP(conn, req, hostname, route.pattern)
+			return
+		}
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", req.Host, "error", err)
 			s.Stats.IncError("dns_failed")
@@ -195,4 +203,17 @@ func (cw *countingWriter) Write(p []byte) (int, error) {
 func isWebSocketUpgrade(req *http.Request) bool {
 	return strings.EqualFold(req.Header.Get("Connection"), "upgrade") &&
 		strings.EqualFold(req.Header.Get("Upgrade"), "websocket")
+}
+
+// blackholeHTTP refuses an HTTP (or WebSocket-upgrade) request whose
+// route resolves to the blackhole pseudo-upstream. The request size is
+// estimated by serialising it to a counting discard so the dashboard
+// can show how much traffic was prevented from leaving the machine.
+func (s *Server) blackholeHTTP(conn io.Writer, req *http.Request, hostname, pattern string) {
+	cw := &countingWriter{w: io.Discard}
+	_ = req.Write(cw)
+	body := pages.ErrorPage(451, "Unavailable For Legal Reasons", hostname)
+	n, _ := conn.Write(body)
+	slog.Debug("blackhole refused", "protocol", "HTTP", "host", hostname, "pattern", pattern, "req_bytes", cw.n, "resp_bytes", n)
+	s.recordBlackhole(hostname, pattern, cw.n, int64(n))
 }

@@ -73,7 +73,7 @@ func printStatusOutput(status control.StatusResponse) {
 			us := status.Upstreams[name]
 
 			var badge string
-			if name == "direct" {
+			if isPseudoUpstream(name) {
 				badge = style.Badge(style.Body, style.BgSuccess, " -- ")
 			} else if us.Healthy {
 				badge = style.Badge(style.Success, style.BgSuccess, " OK ")
@@ -130,17 +130,26 @@ func printStatusOutput(status control.StatusResponse) {
 	fmt.Println()
 }
 
+// isPseudoUpstream reports whether name is a built-in synthetic upstream
+// ("direct" or "blackhole") rather than an operator-declared one. Used
+// for sort order and badge rendering.
+func isPseudoUpstream(name string) bool {
+	return name == "direct" || name == "blackhole"
+}
+
 func sortedUpstreamNames(m map[string]control.UpstreamStatus) []string {
 	names := make([]string, 0, len(m))
 	for name := range m {
 		names = append(names, name)
 	}
 	sort.Slice(names, func(i, j int) bool {
-		if names[i] == "direct" {
-			return false
-		}
-		if names[j] == "direct" {
-			return true
+		// Pseudo-upstreams (direct, blackhole) sort after declared
+		// upstreams so the operator's named upstreams stay grouped at
+		// the top. Within the pseudo-upstreams, alphabetical order
+		// puts "blackhole" before "direct".
+		ip, jp := isPseudoUpstream(names[i]), isPseudoUpstream(names[j])
+		if ip != jp {
+			return jp
 		}
 		return names[i] < names[j]
 	})

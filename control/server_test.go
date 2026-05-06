@@ -380,6 +380,56 @@ func TestStatusEndpointUnhealthy(t *testing.T) {
 	}
 }
 
+func TestStatusEndpointBlackhole(t *testing.T) {
+	// blackhole is a built-in pseudo-upstream with no monitor target;
+	// it should appear in /status alongside "direct" with type
+	// "blackhole", healthy=true, and any collected stats attached.
+	collector := stats.New()
+	collector.IncUpstream("blackhole", true)
+	collector.IncUpstream("blackhole", true)
+	collector.AddUpstreamBytes("blackhole", 4321, 256)
+
+	sockPath := tempSocket(t)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	go srv.Serve()
+
+	client := unixClient(sockPath)
+	resp, err := client.Get("http://subspace/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var status StatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	us, ok := status.Upstreams["blackhole"]
+	if !ok {
+		t.Fatal("missing upstream blackhole in /status response")
+	}
+	if us.Type != "blackhole" {
+		t.Errorf("type = %q, want %q", us.Type, "blackhole")
+	}
+	if !us.Healthy {
+		t.Error("blackhole should always be reported healthy (it never dials)")
+	}
+	if us.Stats == nil {
+		t.Fatal("expected stats for blackhole upstream")
+	}
+	if us.Stats.Success != 2 {
+		t.Errorf("blackhole stats success = %d, want 2", us.Stats.Success)
+	}
+	if us.Stats.BytesIn != 4321 {
+		t.Errorf("blackhole stats bytes_in = %d, want 4321", us.Stats.BytesIn)
+	}
+}
+
 func TestStatusEndpointJSON(t *testing.T) {
 	collector := stats.New()
 	collector.IncProtocol("HTTP")

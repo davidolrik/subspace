@@ -1347,6 +1347,213 @@ func TestProxyCONNECTFallbackOnDialFailure(t *testing.T) {
 	}
 }
 
+// --- blackhole tests ---
+
+// TestProxyCONNECTBlackhole asserts that a CONNECT request whose target
+// resolves to the blackhole pseudo-upstream is refused with HTTP 451
+// (Unavailable For Legal Reasons) without any outbound dial.
+func TestProxyCONNECTBlackhole(t *testing.T) {
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: ".ads.example", Upstream: "blackhole"},
+	})
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	// Use a port the test machine almost certainly cannot reach so a
+	// regression that *does* try to dial would fail loudly rather than
+	// silently succeeding.
+	fmt.Fprintf(conn, "CONNECT tracker.ads.example:1 HTTP/1.1\r\nHost: tracker.ads.example:1\r\n\r\n")
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("CONNECT response: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 451 {
+		t.Errorf("status = %d, want 451 (Unavailable For Legal Reasons)", resp.StatusCode)
+	}
+
+	snap := srv.Stats.Snapshot()
+	if snap.Upstreams["blackhole"].Success != 1 {
+		t.Errorf("blackhole upstream success = %d, want 1", snap.Upstreams["blackhole"].Success)
+	}
+	if snap.Routes[".ads.example"].Success != 1 {
+		t.Errorf("route .ads.example success = %d, want 1", snap.Routes[".ads.example"].Success)
+	}
+	if snap.Domains["tracker.ads.example"].Success != 1 {
+		t.Errorf("domain tracker.ads.example success = %d, want 1", snap.Domains["tracker.ads.example"].Success)
+	}
+}
+
+// TestProxyHTTPBlackhole asserts that a plain HTTP request whose host
+// resolves to the blackhole pseudo-upstream gets a 451 response and is
+// never forwarded.
+func TestProxyHTTPBlackhole(t *testing.T) {
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: ".ads.example", Upstream: "blackhole"},
+	})
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+		},
+	}
+
+	resp, err := client.Get("http://pixel.ads.example/track")
+	if err != nil {
+		t.Fatalf("GET through proxy: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 451 {
+		t.Errorf("status = %d, want 451", resp.StatusCode)
+	}
+
+	snap := srv.Stats.Snapshot()
+	if snap.Upstreams["blackhole"].Success != 1 {
+		t.Errorf("blackhole upstream success = %d, want 1", snap.Upstreams["blackhole"].Success)
+	}
+	// bytes_in should reflect the request bytes the client sent.
+	if snap.Upstreams["blackhole"].BytesIn == 0 {
+		t.Errorf("blackhole upstream bytes_in = 0, want >0 (request bytes received before drop)")
+	}
+}
+
+// TestProxySOCKS5Blackhole asserts that a SOCKS5 CONNECT to a
+// blackholed host is refused with reply code 0x02 (connection not
+// allowed by ruleset).
+func TestProxySOCKS5Blackhole(t *testing.T) {
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: ".ads.example", Upstream: "blackhole"},
+	})
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	// Auth negotiation: version 5, 1 method, no-auth (0x00).
+	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatalf("auth write: %v", err)
+	}
+	authResp := make([]byte, 2)
+	if _, err := io.ReadFull(conn, authResp); err != nil {
+		t.Fatalf("auth read: %v", err)
+	}
+	if authResp[0] != 0x05 || authResp[1] != 0x00 {
+		t.Fatalf("auth handshake = %x, want 0500", authResp)
+	}
+
+	// CONNECT request: ver=5 cmd=1 rsv=0 atyp=3(domain) len=N name port=1.
+	host := "tracker.ads.example"
+	req := []byte{0x05, 0x01, 0x00, 0x03, byte(len(host))}
+	req = append(req, []byte(host)...)
+	req = append(req, 0x00, 0x01) // port = 1
+	if _, err := conn.Write(req); err != nil {
+		t.Fatalf("connect write: %v", err)
+	}
+
+	// Reply: ver(1) status(1) rsv(1) atyp(1) addr(4) port(2) for IPv4.
+	reply := make([]byte, 10)
+	if _, err := io.ReadFull(conn, reply); err != nil {
+		t.Fatalf("connect reply read: %v", err)
+	}
+	if reply[1] != 0x02 {
+		t.Errorf("SOCKS5 status = %#x, want 0x02 (connection not allowed by ruleset)", reply[1])
+	}
+
+	snap := srv.Stats.Snapshot()
+	if snap.Upstreams["blackhole"].Success != 1 {
+		t.Errorf("blackhole upstream success = %d, want 1", snap.Upstreams["blackhole"].Success)
+	}
+	if snap.Routes[".ads.example"].Success != 1 {
+		t.Errorf("route success = %d, want 1", snap.Routes[".ads.example"].Success)
+	}
+}
+
+// TestProxyTLSBlackhole asserts that a transparent TLS connection
+// whose SNI matches a blackhole route is closed before any dial. The
+// proxy has no in-band channel to communicate the block at this layer,
+// so the contract is "the connection is closed cleanly".
+func TestProxyTLSBlackhole(t *testing.T) {
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: ".ads.example", Upstream: "blackhole"},
+	})
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	// Send a TLS ClientHello with an SNI that matches the blackhole rule.
+	if _, err := conn.Write(buildClientHelloWithSNI("pixel.ads.example")); err != nil {
+		t.Fatalf("write ClientHello: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 16)
+	n, err := conn.Read(buf)
+	if err == nil && n > 0 {
+		t.Errorf("got %d bytes back from proxy (% x), want immediate close", n, buf[:n])
+	}
+
+	// Give the goroutine a moment to record stats — the read-EOF returns
+	// immediately on close, but the deferred stats increment may not be
+	// ordered with it on all platforms. Poll briefly.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if srv.Stats.Snapshot().Upstreams["blackhole"].Success >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := srv.Stats.Snapshot().Upstreams["blackhole"].Success; got != 1 {
+		t.Errorf("blackhole upstream success = %d, want 1", got)
+	}
+}
+
+// TestProxyCONNECTFallbackToBlackhole asserts that a route with a
+// failing primary upstream and fallback="blackhole" produces a 451
+// response — the fallback is honored as a deliberate drop.
+func TestProxyCONNECTFallbackToBlackhole(t *testing.T) {
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: ".risky.example", Upstream: "dead", Fallback: "blackhole"},
+	})
+	deadDialer := upstream.NewHTTPConnectDialer("127.0.0.1:1", "", "")
+	dialers := map[string]upstream.Dialer{"dead": deadDialer}
+
+	_, proxyAddr := startProxyServer(t, matcher, dialers)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT tracker.risky.example:443 HTTP/1.1\r\nHost: tracker.risky.example:443\r\n\r\n")
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("CONNECT response: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 451 {
+		t.Errorf("status = %d, want 451 (fallback to blackhole)", resp.StatusCode)
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && searchStr(s, substr)
 }

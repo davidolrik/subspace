@@ -70,6 +70,70 @@ route ".corp.com" via="corporate"
 route "public.corp.com" via="direct"
 ```
 
+### Blackhole
+
+The built-in upstream `blackhole` drops the connection without dialing anywhere. No `upstream` block is required — `blackhole` and `direct` are reserved built-in names. Use it to block ad networks, telemetry endpoints, or anything else you'd rather not let your machine talk to.
+
+```kdl
+route ".doubleclick.net" via="blackhole"
+route "*.telemetry.example" via="blackhole"
+route "10.66.0.0/16" via="blackhole"
+```
+
+#### Refusal behaviour per protocol
+
+The proxy refuses immediately — there's no slow timeout, no failed-DNS error, no leaked connection. The wire format depends on how the client reached the proxy:
+
+| Client protocol             | Refusal                                                                |
+| --------------------------- | ---------------------------------------------------------------------- |
+| HTTP (plain)                | `HTTP/1.1 451 Unavailable For Legal Reasons` with a styled error page  |
+| HTTP CONNECT                | `HTTP/1.1 451 Unavailable For Legal Reasons` then close                |
+| WebSocket upgrade           | `HTTP/1.1 451 Unavailable For Legal Reasons` (the upgrade is rejected) |
+| SOCKS5                      | Reply byte `0x02` — *connection not allowed by ruleset* (RFC 1928)     |
+| Transparent TLS (SNI-based) | Connection closed (no application-layer channel before the handshake)  |
+
+[HTTP 451](https://datatracker.ietf.org/doc/html/rfc7725) was chosen over `403` and `502` because it specifically signals "this resource is being refused on purpose," not "the server failed" or "you're not authorised." Browsers won't auto-retry, and the styled error page tells the user what happened.
+
+#### Use as a fallback
+
+`blackhole` works wherever a `via=` would — including in the `fallback=` slot. This is useful when you'd rather drop traffic than leak it directly if the work proxy goes down:
+
+```kdl
+// If "corporate" is unhealthy, refuse rather than connect directly.
+route ".corp.internal" via="corporate" fallback="blackhole"
+```
+
+The blackhole short-circuit happens after the primary upstream's dial fails or its health check fails — no extra dial attempts, no slow timeouts.
+
+#### Catch-all blocking
+
+Use `via="blackhole"` with a catch-all pattern to flip subspace into "deny by default" mode and explicitly allow only the routes you've defined:
+
+```kdl
+// Allow specific destinations through their named upstreams...
+route ".corp.internal" via="corporate"
+route ".internal.lan"  via="home-vpn"
+
+// ...and drop everything else.
+route "." via="blackhole"
+```
+
+Because the last matching rule wins, the broad `route "."` only applies when nothing more specific does.
+
+#### Stats and visibility
+
+Drops are not silent — every blackhole is recorded:
+
+- **`subspace status`** — `blackhole` appears in the upstreams table alongside your declared upstreams (sorted at the bottom with `direct`), with a running count of drops, the bytes-in clients tried to send, and the bytes-out of the synthetic refusals.
+- **`subspace top upstreams|domains|routes`** — blackhole hits show up in the top-N rankings, so you can see *which* hosts are being blocked the most.
+- **Statistics dashboard** — the "Traffic by Upstream" chart and "Top Activity" panels include a `blackhole` series.
+- **`subspace resolve <url>`** — confirms a URL routes to blackhole and notes the refusal mode.
+- **Logs** — every drop emits a `blackhole refused` debug log with the matched pattern and host. Visible with `subspace logs -L debug`.
+
+#### Reserved name
+
+You can't define an upstream named `blackhole` (or `direct`) — those names are reserved for the built-ins. Subspace will emit a config error and skip the offending block.
+
 ## Rule Ordering
 
 Rules are evaluated in order. The **last matching rule wins**. This lets you set broad rules first and override with specific exceptions later.

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 )
@@ -170,6 +171,15 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 
 	upstreamConn, usedUpstream, err := s.dialWithFallback(route, "tcp", targetAddr)
 	if err != nil {
+		if errors.Is(err, errBlackhole) {
+			slog.Debug("blackhole refused", "protocol", "TLS", "sni", sni, "pattern", route.pattern)
+			// TLS pass-through has no application-layer channel to
+			// signal a block before the handshake completes — the
+			// honest answer is to close the connection.
+			s.recordBlackhole(sni, route.pattern, 0, 0)
+			conn.Close()
+			return
+		}
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "sni", sni, "error", err)
 			s.Stats.IncError("dns_failed")

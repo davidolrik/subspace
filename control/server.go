@@ -212,15 +212,19 @@ func (s *Server) Status() StatusResponse {
 		}
 	}
 
-	// Include the built-in "direct" upstream with its stats (no health check)
-	directStatus := UpstreamStatus{
-		Type:    "direct",
-		Healthy: true,
+	// Include the built-in pseudo-upstreams with their stats. Neither
+	// has a monitor target — "direct" connects without a proxy and
+	// "blackhole" drops traffic — so they're always reported healthy.
+	for _, name := range []string{"direct", "blackhole"} {
+		us := UpstreamStatus{
+			Type:    name,
+			Healthy: true,
+		}
+		if ustats, ok := snap.Upstreams[name]; ok {
+			us.Stats = &ustats
+		}
+		resp.Upstreams[name] = us
 	}
-	if ustats, ok := snap.Upstreams["direct"]; ok {
-		directStatus.Stats = &ustats
-	}
-	resp.Upstreams["direct"] = directStatus
 
 	if s.pool != nil {
 		ps := s.pool.Stats()

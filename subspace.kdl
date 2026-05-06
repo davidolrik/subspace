@@ -8,3 +8,8 @@ listen "127.0.0.1:8118"
 // }
 
 // route ".corp.internal" via="corporate"
+
+// "blackhole" is a built-in pseudo-upstream that drops traffic with a
+// fast refusal (HTTP 451 / SOCKS5 0x02). No upstream block needed.
+// route ".doubleclick.net" via="blackhole"
+// route "*.telemetry.com"  via="blackhole"

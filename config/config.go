@@ -130,6 +130,13 @@ var validUpstreamTypes = map[string]bool{
 	"wireguard": true,
 }
 
+// isBuiltinUpstream reports whether name is a reserved pseudo-upstream
+// that needs no `upstream` block. "direct" connects without a proxy;
+// "blackhole" drops traffic with a protocol-appropriate refusal.
+func isBuiltinUpstream(name string) bool {
+	return name == "direct" || name == "blackhole"
+}
+
 // ParseFile parses a config file, resolving include directives relative
 // to the file's directory. This is the primary entry point for loading
 // config from disk.
@@ -222,6 +229,10 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 				continue
 			}
 			name := node.Arguments[0].ValueString()
+			if isBuiltinUpstream(name) {
+				p.collect(currentFile, fmt.Sprintf("upstream %q: %q is a reserved built-in name", name, name))
+				continue
+			}
 			u, err := parseUpstream(node)
 			if err != nil {
 				p.collect(currentFile, fmt.Sprintf("upstream %q: %v", name, err))
@@ -354,14 +365,15 @@ func (p *parser) finalize() (*Config, error) {
 		cfg.ControlSocket = defaultControlSocket()
 	}
 
-	// Validate route references. "direct" is a built-in that bypasses
-	// all upstreams, so it doesn't need to exist in the Upstreams map.
-	// Routes with an unknown via are dropped; routes with a bad
-	// fallback keep working but lose the fallback. Errors are
-	// collected so the operator can see all of them at once.
+	// Validate route references. Built-in pseudo-upstreams ("direct",
+	// "blackhole") bypass the Upstreams map — direct connects without a
+	// proxy, blackhole drops the traffic. Routes with an unknown via
+	// are dropped; routes with a bad fallback keep working but lose the
+	// fallback. Errors are collected so the operator can see all of
+	// them at once.
 	kept := cfg.Routes[:0]
 	for _, r := range cfg.Routes {
-		if r.Via != "direct" {
+		if !isBuiltinUpstream(r.Via) {
 			if _, ok := cfg.Upstreams[r.Via]; !ok {
 				cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q references unknown upstream %q (route dropped)", r.Pattern, r.Via))
 				continue
@@ -371,7 +383,7 @@ func (p *parser) finalize() (*Config, error) {
 			if r.Fallback == r.Via {
 				cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q: fallback must differ from via (%q) (fallback cleared)", r.Pattern, r.Via))
 				r.Fallback = ""
-			} else if r.Fallback != "direct" {
+			} else if !isBuiltinUpstream(r.Fallback) {
 				if _, ok := cfg.Upstreams[r.Fallback]; !ok {
 					cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q references unknown fallback upstream %q (fallback cleared)", r.Pattern, r.Fallback))
 					r.Fallback = ""

@@ -144,6 +144,30 @@ Check upstream health:
 subspace status
 ```
 
+#### Blackhole route doesn't block traffic
+
+A `route "..." via="blackhole"` rule is in your config and `subspace resolve <url>` confirms it matches, but the browser still reaches the host.
+
+```sh
+$ subspace resolve fitnessengros.dk
+
+  url       fitnessengros.dk
+  hostname  fitnessengros.dk
+
+  rules
+    → . → blackhole  config.d/99-all.kdl
+
+  upstream  blackhole (traffic dropped — HTTP 451 / SOCKS5 0x02)
+```
+
+Things to check:
+
+- **Is the daemon using a binary that supports blackhole?** `resolve` builds its own matcher from the on-disk config, so it can show a rule that the running daemon never loaded. If you upgraded the binary, restart the daemon (`brew services restart subspace`, or kill and re-run `subspace serve`). Earlier versions silently dropped routes whose `via` named no declared upstream.
+- **Is your browser actually using the proxy?** Check System Settings → Network → Proxies, and that the URL isn't being requested over QUIC/HTTP-3 or via a separate VPN that bypasses the proxy.
+- **Is DNS being cached?** A blackhole drops the connection cleanly, but a previously-established socket from the same browser tab (HTTP/2 multiplexing, persistent connections, service workers) may keep working until the tab is reloaded.
+
+Once the daemon is using the new binary, `subspace status` will list `blackhole` in the upstreams table and the per-route success counter will tick up on every drop.
+
 #### DNS resolution failures
 
 ```text

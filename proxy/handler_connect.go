@@ -31,6 +31,11 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 
 	upstreamConn, usedUpstream, err := s.dialWithFallback(route, "tcp", targetAddr)
 	if err != nil {
+		if errors.Is(err, errBlackhole) {
+			s.blackholeHTTP(conn, req, host, route.pattern)
+			conn.Close()
+			return
+		}
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", host, "error", err)
 			s.Stats.IncError("dns_failed")

@@ -859,12 +859,14 @@
 
                 sortedUpstreams() {
                     const entries = Object.entries(this.statusData.upstreams || {});
+                    const isPseudo = name => name === 'direct' || name === 'blackhole';
                     return entries.sort((a, b) => {
                         // Healthy before unhealthy
                         if (a[1].healthy !== b[1].healthy) return a[1].healthy ? -1 : 1;
-                        // Direct last
-                        if (a[0] === 'direct') return 1;
-                        if (b[0] === 'direct') return -1;
+                        // Built-in pseudo-upstreams (direct, blackhole) sort
+                        // after declared ones, alphabetically between themselves.
+                        const ap = isPseudo(a[0]), bp = isPseudo(b[0]);
+                        if (ap !== bp) return ap ? 1 : -1;
                         return a[0].localeCompare(b[0]);
                     });
                 },

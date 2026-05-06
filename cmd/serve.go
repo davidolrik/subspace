@@ -206,16 +206,19 @@ func buildRouting(cfg *config.Config) (*route.Matcher, map[string]upstream.Diale
 	}
 
 	// Drop routes whose via lost its dialer at construction time, and
-	// clear fallbacks that lost theirs. "direct" is always available.
+	// clear fallbacks that lost theirs. The built-in pseudo-upstreams
+	// ("direct", "blackhole") are always available — direct connects
+	// without a proxy, blackhole short-circuits inside the proxy
+	// dispatcher — so neither needs a dialer in the map.
 	kept := cfg.Routes[:0]
 	for _, r := range cfg.Routes {
-		if r.Via != "direct" {
+		if !isPseudoUpstream(r.Via) {
 			if _, ok := dialers[r.Via]; !ok {
 				cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q: upstream %q is unavailable (route dropped)", r.Pattern, r.Via))
 				continue
 			}
 		}
-		if r.Fallback != "" && r.Fallback != "direct" {
+		if r.Fallback != "" && !isPseudoUpstream(r.Fallback) {
 			if _, ok := dialers[r.Fallback]; !ok {
 				cfg.Errors = append(cfg.Errors, fmt.Sprintf("route %q: fallback upstream %q is unavailable (fallback cleared)", r.Pattern, r.Fallback))
 				r.Fallback = ""

@@ -115,7 +115,7 @@ func newResolveCommand(configFile *string) *cobra.Command {
 			effectiveUpstream := active.Upstream
 			fellBack := false
 
-			if health != nil && active.Upstream != "direct" {
+			if health != nil && !isPseudoUpstream(active.Upstream) {
 				if us, ok := health[active.Upstream]; ok && !us.Healthy {
 					if active.Fallback != "" {
 						effectiveUpstream = active.Fallback
@@ -132,11 +132,16 @@ func newResolveCommand(configFile *string) *cobra.Command {
 				fallbackNote = " " + style.Colorize(style.Warning, "(fallback — "+active.Upstream+" is down)")
 			}
 
-			if effectiveUpstream == "direct" {
-				fmt.Printf("  %s  %s%s\n",
+			if isPseudoUpstream(effectiveUpstream) {
+				note := ""
+				if effectiveUpstream == "blackhole" {
+					note = " " + style.Colorize(style.Muted, "(traffic dropped — HTTP 451 / SOCKS5 0x02)")
+				}
+				fmt.Printf("  %s  %s%s%s\n",
 					lbl("upstream"),
-					style.Colorize(style.UpstreamColor("direct"), "direct"),
+					style.Colorize(style.UpstreamColor(effectiveUpstream), effectiveUpstream),
 					fallbackNote,
+					note,
 				)
 				fmt.Println()
 				return nil

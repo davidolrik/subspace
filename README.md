@@ -160,6 +160,13 @@ route "10.0.0.0/8" via="internal"
 
 // Direct — bypass all upstreams for this pattern
 route "bypass.corp.com" via="direct"
+
+// Blackhole — drop traffic for this pattern (refuses with HTTP 451 / SOCKS5 0x02)
+route ".ads.example.com" via="blackhole"
+route "*.telemetry.com"  via="blackhole"
+
+// Fallback to blackhole — if the work proxy is down, refuse rather than leak directly
+route ".risky.example" via="corporate" fallback="blackhole"
 ```
 
 Pattern types:
@@ -171,7 +178,14 @@ Pattern types:
 | Glob          | `"192.168.*.*"`  | `192.168.1.1`, `192.168.0.255`                    |
 | CIDR          | `"10.0.0.0/8"`   | any IP in the `10.0.0.0/8` subnet (IPv4 and IPv6) |
 
-The built-in upstream `direct` can be used to bypass proxying for specific patterns, which is useful when a broader rule would otherwise match.
+Two built-in pseudo-upstreams need no `upstream` block:
+
+- `direct` — bypass any broader matching upstream and connect straight to the target.
+- `blackhole` — drop the traffic. HTTP/CONNECT/WebSocket clients receive a synthetic
+  `HTTP/1.1 451 Unavailable For Legal Reasons`, SOCKS5 clients get reply byte `0x02`
+  (connection not allowed by ruleset), and TLS pass-through connections are closed.
+  Drops are tracked per-route, per-domain and per-upstream in `subspace status` and
+  the statistics dashboard so you can see how much traffic was prevented from leaving.
 
 Unmatched traffic always connects directly.
 
