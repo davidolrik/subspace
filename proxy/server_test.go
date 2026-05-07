@@ -824,6 +824,110 @@ func TestKeepAliveWebSocketBreaksLoop(t *testing.T) {
 	}
 }
 
+// stubInternalPages is a minimal InternalPages implementation for tests.
+// It writes a complete, well-framed HTTP/1.1 response so the client knows
+// the response ended without relying on connection-close framing.
+type stubInternalPages struct{}
+
+func (stubInternalPages) ServeHTTP(conn net.Conn, req *http.Request) {
+	body := []byte("ok")
+	fmt.Fprintf(conn, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", len(body))
+	conn.Write(body)
+}
+
+// TestInternalHostNotCountedAsHTTP asserts that requests to the daemon's
+// own internal hosts (the dashboard, /api/*) are excluded from the protocol
+// breakdown. The dashboard polls many endpoints every few seconds; counting
+// that self-traffic would drown out real client activity in the chart.
+func TestInternalHostNotCountedAsHTTP(t *testing.T) {
+	matcher := route.NewMatcher(nil)
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+	srv.Pages = stubInternalPages{}
+
+	// Several requests to an internal host, each on a fresh TCP connection
+	// (matching how internal-pages requests behave today, since the handler
+	// closes the connection after responding).
+	for i := 0; i < 3; i++ {
+		conn, err := net.Dial("tcp", proxyAddr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(conn, "GET /api/snapshot HTTP/1.1\r\nHost: stats.subspace.pub\r\n\r\n")
+		br := bufio.NewReader(conn)
+		resp, err := http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+		conn.Close()
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	snap := srv.Stats.Snapshot()
+	if got := snap.Protocols["HTTP"]; got != 0 {
+		t.Errorf("Protocols[HTTP] = %d, want 0 (internal-host requests must not count)", got)
+	}
+	// Connections is bumped by IncProtocol, so excluding internal-host
+	// requests from the protocol breakdown also excludes them from the
+	// global total — connection stats reflect external traffic only.
+	if snap.Connections != 0 {
+		t.Errorf("Connections = %d, want 0 (internal-host requests must not count)", snap.Connections)
+	}
+}
+
+// TestProtocolCountedOncePerTCPConn verifies that a single TCP connection
+// serving multiple keep-alive HTTP requests only registers one HTTP increment
+// in the protocol breakdown — keeping it apples-to-apples with HTTPS/CONNECT,
+// which can only be classified once per TCP connection.
+func TestProtocolCountedOncePerTCPConn(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "ok-%s", r.URL.Path)
+	}))
+	t.Cleanup(backend.Close)
+
+	_, backendPort, _ := net.SplitHostPort(backend.Listener.Addr().String())
+
+	matcher := route.NewMatcher(nil)
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	br := bufio.NewReader(conn)
+
+	// Send three keep-alive requests on the same TCP connection.
+	for i := 0; i < 3; i++ {
+		closeHdr := ""
+		if i == 2 {
+			closeHdr = "Connection: close\r\n"
+		}
+		fmt.Fprintf(conn, "GET /req%d HTTP/1.1\r\nHost: 127.0.0.1:%s\r\n%s\r\n", i, backendPort, closeHdr)
+
+		resp, err := http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}
+
+	// Allow the keep-alive loop to fully unwind after the close.
+	time.Sleep(50 * time.Millisecond)
+
+	snap := srv.Stats.Snapshot()
+	if got := snap.Protocols["HTTP"]; got != 1 {
+		t.Errorf("Protocols[HTTP] = %d, want 1 (one TCP connection should count once regardless of request volume)", got)
+	}
+	if snap.Connections != 1 {
+		t.Errorf("Connections = %d, want 1", snap.Connections)
+	}
+}
+
 // --- connection pooling tests ---
 
 func TestHTTPConnectionPooling(t *testing.T) {

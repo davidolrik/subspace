@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"go.olrik.dev/subspace/pages"
 	"go.olrik.dev/subspace/route"
 	"go.olrik.dev/subspace/stats"
 	"go.olrik.dev/subspace/upstream"
@@ -131,6 +132,10 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	// HTTP keep-alive loop: read requests until the client signals close,
 	// the connection is idle too long, or a handler takes over (CONNECT/WebSocket).
+	// The protocol counter is incremented at most once per TCP connection so
+	// HTTP keep-alive doesn't inflate counts relative to HTTPS/CONNECT, which
+	// only get one classification event each.
+	counted := false
 	for {
 		pc.Conn.SetReadDeadline(time.Now().Add(s.IdleTimeout))
 
@@ -146,26 +151,51 @@ func (s *Server) handleConn(conn net.Conn) {
 		pc.Conn.SetReadDeadline(time.Time{}) // clear deadline for handler
 
 		if req.Method == http.MethodConnect {
-			_, port, _ := net.SplitHostPort(req.Host)
-			if port == "443" || port == "" {
-				s.Stats.IncProtocol("HTTPS")
-			} else {
-				s.Stats.IncProtocol("CONNECT:" + port)
+			if !counted {
+				_, port, _ := net.SplitHostPort(req.Host)
+				if port == "443" || port == "" {
+					s.Stats.IncProtocol("HTTPS")
+				} else {
+					s.Stats.IncProtocol("CONNECT:" + port)
+				}
 			}
 			s.handleCONNECT(pc, req)
 			return // CONNECT takes over the connection
 		}
 
-		if isWebSocketUpgrade(req) {
-			s.Stats.IncProtocol("WebSocket")
-		} else {
-			s.Stats.IncProtocol("HTTP")
+		// Requests to internal hosts (the daemon's own dashboard / pages) are
+		// self-traffic, not external traffic the proxy is forwarding — exclude
+		// them from the protocol breakdown so dashboard polling doesn't drown
+		// out real client activity in the chart.
+		if !counted && !isInternalHTTPRequest(s.Pages, req) {
+			if isWebSocketUpgrade(req) {
+				s.Stats.IncProtocol("WebSocket")
+			} else {
+				s.Stats.IncProtocol("HTTP")
+			}
+			counted = true
 		}
 
 		if !s.handleHTTP(pc, req) {
 			return
 		}
 	}
+}
+
+// isInternalHTTPRequest reports whether req targets the daemon's own
+// internal pages (dashboard, /api/*). These are served by the daemon
+// itself and should be excluded from external-traffic statistics.
+// Returns false when no internal-pages handler is wired up, since in
+// that case the host would be forwarded to an upstream like any other.
+func isInternalHTTPRequest(p InternalPages, req *http.Request) bool {
+	if p == nil {
+		return false
+	}
+	host := req.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return pages.IsInternalHost(host)
 }
 
 // isTimeoutOrEOF returns true for errors that indicate a graceful
