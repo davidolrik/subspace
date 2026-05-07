@@ -2,6 +2,7 @@ package stats
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -45,24 +46,37 @@ func upstreamMetricExpr(metric string) (string, error) {
 // can cause a small undercount when the window straddles a restart;
 // for the dashboard's intended use that's acceptable.
 func (s *Store) TopUpstreams(from, to time.Time, metric string, limit int) ([]TopEntry, error) {
-	return s.topByName(from, to, metric, limit, "snapshot_upstreams", "upstream")
+	return s.topByName(from, to, metric, limit, "snapshot_upstreams", "upstream", nil)
 }
 
 // TopDomains returns the most-active destination hostnames in the
 // window, ranked by the given metric. Same shape and semantics as
 // TopUpstreams.
 func (s *Store) TopDomains(from, to time.Time, metric string, limit int) ([]TopEntry, error) {
-	return s.topByName(from, to, metric, limit, "snapshot_domains", "domain")
+	return s.topByName(from, to, metric, limit, "snapshot_domains", "domain", nil)
 }
 
 // TopRoutes returns the most-active route patterns in the window,
 // ranked by the given metric. Same shape and semantics as
 // TopUpstreams.
 func (s *Store) TopRoutes(from, to time.Time, metric string, limit int) ([]TopEntry, error) {
-	return s.topByName(from, to, metric, limit, "snapshot_routes", "route")
+	return s.topByName(from, to, metric, limit, "snapshot_routes", "route", nil)
 }
 
-func (s *Store) topByName(from, to time.Time, metric string, limit int, table, column string) ([]TopEntry, error) {
+// TopRoutesIn behaves like TopRoutes but only considers routes whose
+// pattern is in the given set. Used by the dashboard's "Top Blocked"
+// card so the numbers come from the same time-windowed differential
+// data the regular Top Routes card uses, but filtered to just the
+// patterns currently routed at blackhole. Passing an empty list
+// returns no rows (rather than degrading to TopRoutes).
+func (s *Store) TopRoutesIn(from, to time.Time, metric string, limit int, names []string) ([]TopEntry, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	return s.topByName(from, to, metric, limit, "snapshot_routes", "route", names)
+}
+
+func (s *Store) topByName(from, to time.Time, metric string, limit int, table, column string, includeOnly []string) ([]TopEntry, error) {
 	expr, err := upstreamMetricExpr(metric)
 	if err != nil {
 		return nil, err
@@ -71,17 +85,33 @@ func (s *Store) topByName(from, to time.Time, metric string, limit int, table, c
 		limit = 10
 	}
 
+	args := []any{from.Unix(), to.Unix()}
+	filterClause := ""
+	if len(includeOnly) > 0 {
+		// Build a parameterised IN clause so route patterns aren't
+		// interpolated into the SQL string. SQLite tops out around
+		// 999 bound variables per statement, which is well above any
+		// realistic blackhole pattern count.
+		placeholders := make([]string, len(includeOnly))
+		for i, n := range includeOnly {
+			placeholders[i] = "?"
+			args = append(args, n)
+		}
+		filterClause = fmt.Sprintf(" AND %s IN (%s)", column, strings.Join(placeholders, ","))
+	}
+	args = append(args, limit)
+
 	query := fmt.Sprintf(`
 		SELECT %s, MAX(%s) - MIN(%s) AS delta
 		FROM %s
-		WHERE timestamp >= ? AND timestamp <= ?
+		WHERE timestamp >= ? AND timestamp <= ?%s
 		GROUP BY %s
 		HAVING delta > 0
 		ORDER BY delta DESC
 		LIMIT ?
-	`, column, expr, expr, table, column)
+	`, column, expr, expr, table, filterClause, column)
 
-	rows, err := s.db.Query(query, from.Unix(), to.Unix(), limit)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying top %s: %w", table, err)
 	}

@@ -73,12 +73,16 @@ func printStatusOutput(status control.StatusResponse) {
 			us := status.Upstreams[name]
 
 			var badge string
-			if isPseudoUpstream(name) {
-				badge = style.Badge(style.Body, style.BgSuccess, " -- ")
-			} else if us.Healthy {
-				badge = style.Badge(style.Success, style.BgSuccess, " OK ")
-			} else {
-				badge = style.Badge(style.Error, style.BgError, "FAIL")
+			switch {
+			case name == "blackhole":
+				badge = style.Badge(style.Success, style.BgSuccess, "BLOCK")
+			case us.Healthy:
+				// Both declared healthy upstreams and "direct" land here:
+				// "direct" is reported healthy by the control server, so
+				// it gets the same green " OK " pill as the others.
+				badge = style.Badge(style.Success, style.BgSuccess, " OK  ")
+			default:
+				badge = style.Badge(style.Error, style.BgError, "FAIL ")
 			}
 
 			if us.Address != "" {
@@ -137,19 +141,29 @@ func isPseudoUpstream(name string) bool {
 	return name == "direct" || name == "blackhole"
 }
 
+// sortedUpstreamNames orders upstreams in three buckets so the operator
+// can glance at the list and immediately see what's working: healthy
+// declared upstreams first, then the always-on pseudo-upstreams
+// (blackhole, direct), then unhealthy declared upstreams pushed to the
+// bottom. Each bucket is alphabetical.
 func sortedUpstreamNames(m map[string]control.UpstreamStatus) []string {
 	names := make([]string, 0, len(m))
 	for name := range m {
 		names = append(names, name)
 	}
+	bucket := func(name string) int {
+		if isPseudoUpstream(name) {
+			return 1
+		}
+		if m[name].Healthy {
+			return 0
+		}
+		return 2
+	}
 	sort.Slice(names, func(i, j int) bool {
-		// Pseudo-upstreams (direct, blackhole) sort after declared
-		// upstreams so the operator's named upstreams stay grouped at
-		// the top. Within the pseudo-upstreams, alphabetical order
-		// puts "blackhole" before "direct".
-		ip, jp := isPseudoUpstream(names[i]), isPseudoUpstream(names[j])
-		if ip != jp {
-			return jp
+		bi, bj := bucket(names[i]), bucket(names[j])
+		if bi != bj {
+			return bi < bj
 		}
 		return names[i] < names[j]
 	})

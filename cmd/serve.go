@@ -161,6 +161,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 				slog.Warn("config error", "error", msg)
 			}
 			pagesHandler.SetConfigErrors(cfg.Errors)
+			pagesHandler.SetBlackholeRoutes(blackholePatterns(cfg))
 
 			slog.Info("subspace listening",
 				"version", Version,
@@ -235,6 +236,25 @@ func buildRouting(cfg *config.Config) (*route.Matcher, map[string]upstream.Diale
 	matcher := route.NewMatcher(rules)
 
 	return matcher, dialers
+}
+
+// blackholePatterns returns the patterns of every route currently
+// pointing at the built-in blackhole pseudo-upstream, either as the
+// primary `via=` target or as a `fallback=`. Patterns appear at most
+// once, in route-declaration order so the dashboard reads top-to-bottom.
+func blackholePatterns(cfg *config.Config) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, r := range cfg.Routes {
+		if r.Via == "blackhole" || r.Fallback == "blackhole" {
+			if _, ok := seen[r.Pattern]; ok {
+				continue
+			}
+			seen[r.Pattern] = struct{}{}
+			out = append(out, r.Pattern)
+		}
+	}
+	return out
 }
 
 func buildDialer(u config.Upstream) (upstream.Dialer, error) {
@@ -462,6 +482,7 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 		// Replaces both the previous error list and any prior
 		// reload-failure notice (handled inside SetConfigErrors).
 		pagesHandler.SetConfigErrors(newCfg.Errors)
+		pagesHandler.SetBlackholeRoutes(blackholePatterns(newCfg))
 	}
 
 	slog.Info("config reloaded",

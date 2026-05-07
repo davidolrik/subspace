@@ -70,3 +70,37 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestBlackholePatterns(t *testing.T) {
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{Pattern: ".ads.example", Via: "blackhole"},
+			{Pattern: ".corp.internal", Via: "corporate"},                                  // ignored
+			{Pattern: ".risky.com", Via: "corporate", Fallback: "blackhole"},                // counted via fallback
+			{Pattern: "*.telemetry.com", Via: "blackhole"},
+			{Pattern: ".ads.example", Via: "blackhole"},                                     // duplicate pattern dedup'd
+		},
+	}
+	got := blackholePatterns(cfg)
+	want := []string{".ads.example", ".risky.com", "*.telemetry.com"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v (%d entries), want %v (%d)", got, len(got), want, len(want))
+	}
+	for i, p := range want {
+		if got[i] != p {
+			t.Errorf("got[%d] = %q, want %q (route order must be preserved)", i, got[i], p)
+		}
+	}
+}
+
+func TestBlackholePatternsEmpty(t *testing.T) {
+	cfg := &config.Config{
+		Routes: []config.Route{
+			{Pattern: ".corp.internal", Via: "corporate"},
+			{Pattern: ".internal", Via: "direct"},
+		},
+	}
+	if got := blackholePatterns(cfg); len(got) != 0 {
+		t.Errorf("got %v, want empty (no blackhole rules in config)", got)
+	}
+}

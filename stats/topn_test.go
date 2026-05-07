@@ -236,6 +236,69 @@ func TestTopRoutes(t *testing.T) {
 	}
 }
 
+func TestTopRoutesIn(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	record := func(name string, samples []UpstreamStats) {
+		for i, s := range samples {
+			ts := base.Add(time.Duration(i) * time.Second)
+			snap := Snapshot{Routes: map[string]UpstreamStats{name: s}}
+			if err := store.Record(ts, snap); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	record(".ads.example", []UpstreamStats{{BytesIn: 0}, {BytesIn: 5000}})
+	record(".tracker.io", []UpstreamStats{{BytesIn: 0}, {BytesIn: 1000}})
+	record(".corp.internal", []UpstreamStats{{BytesIn: 0}, {BytesIn: 9999}}) // not in filter
+
+	patterns := []string{".ads.example", ".tracker.io"}
+	top, err := store.TopRoutesIn(base, base.Add(time.Hour), "bytes_in", 10, patterns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 2 {
+		t.Fatalf("got %d entries, want 2 (filtered to blackhole patterns): %+v", len(top), top)
+	}
+	if top[0].Name != ".ads.example" || top[0].Value != 5000 {
+		t.Errorf("rank 0 = %+v, want .ads.example=5000", top[0])
+	}
+	if top[1].Name != ".tracker.io" || top[1].Value != 1000 {
+		t.Errorf("rank 1 = %+v, want .tracker.io=1000", top[1])
+	}
+	for _, e := range top {
+		if e.Name == ".corp.internal" {
+			t.Errorf("filtered-out route .corp.internal leaked into results")
+		}
+	}
+}
+
+func TestTopRoutesInEmptyFilterReturnsNothing(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	snap := Snapshot{Routes: map[string]UpstreamStats{".x": {BytesIn: 100}}}
+	_ = store.Record(base, snap)
+	_ = store.Record(base.Add(time.Second), Snapshot{Routes: map[string]UpstreamStats{".x": {BytesIn: 200}}})
+
+	top, err := store.TopRoutesIn(base, base.Add(time.Hour), "bytes_in", 10, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 0 {
+		t.Errorf("got %d entries, want 0 when filter is empty (must NOT degrade to unfiltered): %+v", len(top), top)
+	}
+}
+
 func TestTopUpstreamsWindowFilters(t *testing.T) {
 	store, err := OpenStore(tempDB(t))
 	if err != nil {

@@ -148,6 +148,12 @@ type Handler struct {
 	// operator editing the config doesn't need to remember to refresh
 	// each open dashboard tab.
 	configVersion uint64
+	// blackholeRoutes lists the route patterns currently pointing at
+	// the built-in blackhole pseudo-upstream (via or fallback). Driven
+	// by SetBlackholeRoutes during config (re)load and surfaced via
+	// /api/blackhole so the dashboard only renders the "Blocked Traffic"
+	// card when the user actually has blackhole rules configured.
+	blackholeRoutes []string
 }
 
 // New creates a pages handler. The collector is used for live stats
@@ -221,6 +227,8 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		mux.HandleFunc(host+"/api/favicon", h.handleFaviconAPI)
 		mux.HandleFunc(host+"/api/nav", h.handleNavAPI)
 		mux.HandleFunc(host+"/api/config-errors", h.handleConfigErrorsAPI)
+		mux.HandleFunc(host+"/api/blackhole", h.handleBlackholeAPI)
+		mux.HandleFunc(host+"/api/blackhole/top", h.handleBlackholeTopAPI)
 		mux.Handle(host+"/static/", http.StripPrefix("/static/", fileServer))
 		mux.HandleFunc(host+"/", h.handleStatistics)
 	}
@@ -281,6 +289,17 @@ func (h *Handler) SetConfigErrors(errs []string) {
 func (h *Handler) SetReloadError(msg string) {
 	h.mu.Lock()
 	h.reloadError = msg
+	h.mu.Unlock()
+}
+
+// SetBlackholeRoutes records the patterns currently routed to the
+// blackhole pseudo-upstream (either as `via=` or `fallback=`). The
+// statistics dashboard shows a dedicated "Blocked Traffic" card only
+// when this list is non-empty so users without any blackhole rules
+// don't see an empty section. Call after each successful (re)load.
+func (h *Handler) SetBlackholeRoutes(patterns []string) {
+	h.mu.Lock()
+	h.blackholeRoutes = append([]string(nil), patterns...)
 	h.mu.Unlock()
 }
 
@@ -604,6 +623,105 @@ func (h *Handler) handleConfigErrorsAPI(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(configErrorsResponse{Errors: combined, Version: version})
+}
+
+// blackholeResponse describes the blackhole-route configuration plus
+// the live drop counters so the dashboard can render its "Blocked
+// Traffic" card from a single fetch.
+type blackholeResponse struct {
+	Active   bool                `json:"active"`
+	Patterns []string            `json:"patterns,omitempty"`
+	Stats    *stats.UpstreamStats `json:"stats,omitempty"`
+}
+
+func (h *Handler) handleBlackholeAPI(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	patterns := append([]string(nil), h.blackholeRoutes...)
+	collector := h.stats
+	h.mu.RUnlock()
+
+	resp := blackholeResponse{
+		Active:   len(patterns) > 0,
+		Patterns: patterns,
+	}
+	if collector != nil {
+		snap := collector.Snapshot()
+		if us, ok := snap.Upstreams["blackhole"]; ok {
+			resp.Stats = &us
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// handleBlackholeTopAPI returns the top-N route patterns currently
+// pointing at the blackhole pseudo-upstream, ranked by the requested
+// metric over the requested window. Uses the same time-windowed
+// differential as /api/top so the numbers agree with the regular
+// "Top Routes" card; differs only in that the result set is filtered
+// to blackhole patterns server-side, which keeps the answer correct
+// even when blackhole patterns fall outside the global top-N.
+//
+// Query parameters mirror /api/top:
+//   - metric:   "bytes_total" (default), "success", "failures",
+//               "bytes_in", "bytes_out"
+//   - duration: window in seconds (default 86400 = 24h)
+//   - n:        max entries (default 10, capped at 100)
+func (h *Handler) handleBlackholeTopAPI(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		http.Error(w, "statistics not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	h.mu.RLock()
+	patterns := append([]string(nil), h.blackholeRoutes...)
+	h.mu.RUnlock()
+
+	q := r.URL.Query()
+
+	metric := q.Get("metric")
+	if metric == "" {
+		metric = "bytes_total"
+	}
+
+	duration := 24 * time.Hour
+	if d := q.Get("duration"); d != "" {
+		if seconds, err := strconv.Atoi(d); err == nil && seconds > 0 {
+			duration = time.Duration(seconds) * time.Second
+		}
+	}
+
+	limit := 10
+	if n := q.Get("n"); n != "" {
+		if v, err := strconv.Atoi(n); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	to := time.Now()
+	from := to.Add(-duration)
+
+	top, err := h.store.TopRoutesIn(from, to, metric, limit, patterns)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if top == nil {
+		top = []stats.TopEntry{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"kind":   "blackhole",
+		"metric": metric,
+		"window": int(duration.Seconds()),
+		"limit":  limit,
+		"top":    top,
+	})
 }
 
 func (h *Handler) handleSearchEnginesAPI(w http.ResponseWriter, r *http.Request) {

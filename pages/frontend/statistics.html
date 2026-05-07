@@ -273,6 +273,7 @@
             color: var(--text);
             font-weight: 600;
         }
+
     </style>
 </head>
 <body x-data="{...statistics(), ...search()}" x-init="init(); initSearch()">
@@ -328,7 +329,11 @@
             </div>
             <div class="stat-card">
                 <div class="label">Upstreams</div>
-                <div class="value" x-text="Object.keys(live.upstreams || {}).length"></div>
+                <!-- Counts healthy upstreams (declared + always-on pseudos
+                     direct/blackhole). Unhealthy declared upstreams are
+                     excluded so the number matches the green pills, not
+                     the failed ones beneath them. -->
+                <div class="value" x-text="Object.values(statusData.upstreams || {}).filter(u => u.healthy).length"></div>
             </div>
         </div>
 
@@ -352,7 +357,7 @@
                                 <div class="latency" x-text="up.latency"></div>
                             </template>
                             <template x-if="up.stats">
-                                <div x-text="formatNumber(up.stats.success) + ' ok'"></div>
+                                <div x-text="formatNumber(up.stats.success) + (name === 'blackhole' ? ' blocked' : ' ok')"></div>
                             </template>
                         </div>
                     </div>
@@ -438,11 +443,28 @@
                 <ol class="top-list">
                     <template x-for="entry in topRoutes" :key="entry.name">
                         <li>
-                            <span class="top-name" x-text="entry.name"></span>
+                            <span class="top-name" x-text="displayRouteName(entry.name)"></span>
                             <span class="top-value" x-text="formatTopValue(entry.value)"></span>
                         </li>
                     </template>
                     <li class="top-empty" x-show="topRoutes.length === 0">No activity yet</li>
+                </ol>
+            </div>
+            <!-- Top Blocked: only rendered when the user has at least one
+                 blackhole route. Computed locally by filtering the live
+                 per-route snapshot to patterns currently routed at
+                 blackhole, sorted by the same metric the other Top cards
+                 use. -->
+            <div class="chart-card top-card" x-show="blackhole.active" x-cloak>
+                <h2>Top Blocked</h2>
+                <ol class="top-list">
+                    <template x-for="entry in topBlockedRoutes" :key="entry.name">
+                        <li>
+                            <span class="top-name" x-text="displayRouteName(entry.name)"></span>
+                            <span class="top-value" x-text="formatTopValue(entry.value)"></span>
+                        </li>
+                    </template>
+                    <li class="top-empty" x-show="topBlockedRoutes.length === 0">No drops yet</li>
                 </ol>
             </div>
         </div>
@@ -716,6 +738,10 @@
             Alpine.data('statistics', () => ({
                 live: { connections: 0, active: 0, upstreams: {}, protocols: {} },
                 statusData: { upstreams: {} },
+                // blackhole drives the "Blocked Traffic" card. Hidden
+                // entirely until the backend confirms the user has at
+                // least one blackhole route.
+                blackhole: { active: false, patterns: [], stats: null },
                 nav: [],
                 configErrors: [],
                 duration: 3600,
@@ -727,6 +753,7 @@
                 topUpstreams: [],
                 topDomains: [],
                 topRoutes: [],
+                topBlockedRoutes: [],
                 timeOptions: [
                     { label: '5m', seconds: 300 },
                     { label: '1h', seconds: 3600 },
@@ -783,6 +810,7 @@
                         // Each dataset is tagged at construction time
                         // with one of:
                         //   _paletteKey   — named palette slot (line charts)
+                        //   _bgPaletteKey — named palette slot for backgroundColor (bar charts pinned to a specific color, e.g. blackhole=red)
                         //   _paletteIdx   — single index into the cycling list (bar charts)
                         //   _paletteIdxList — array of indices, one per slice (pie charts)
                         const palette = chartColors();
@@ -793,6 +821,8 @@
                                 if (ds._fillAlpha !== undefined) {
                                     ds.backgroundColor = chartFill(ds._paletteKey, ds._fillAlpha);
                                 }
+                            } else if (ds._bgPaletteKey) {
+                                ds.backgroundColor = palette[ds._bgPaletteKey];
                             } else if (ds._paletteIdxList) {
                                 ds.backgroundColor = ds._paletteIdxList.map(i => palList[i % palList.length]);
                             } else if (ds._paletteIdx !== undefined) {
@@ -817,27 +847,42 @@
 
                 async refresh() {
                     const topURL = (kind) => `/api/top?kind=${kind}&metric=${this.topMetric}&duration=${this.duration}&n=10`;
+                    // /api/blackhole/top mirrors /api/top's parameters, so
+                    // the same query string we build for the regular Top
+                    // cards (metric + duration + n) yields a "Top Blocked"
+                    // result drawn from the same time-windowed source.
+                    const blackholeTopURL = `/api/blackhole/top?metric=${this.topMetric}&duration=${this.duration}&n=10`;
                     const [
                         liveData, timeseriesData, statusData, navData, errorsData,
-                        topUp, topDom, topRt,
+                        blackholeData, topUp, topDom, topRt, topBl,
                     ] = await Promise.all([
                         fetch('/api/snapshot').then(r => r.json()).catch(() => null),
                         fetch(`/api/timeseries?duration=${this.duration}`).then(r => r.json()).catch(() => null),
                         fetch('/api/status').then(r => r.json()).catch(() => null),
                         fetch('/api/nav').then(r => r.json()).catch(() => null),
                         fetch('/api/config-errors').then(r => r.json()).catch(() => null),
+                        fetch('/api/blackhole').then(r => r.json()).catch(() => null),
                         fetch(topURL('upstreams')).then(r => r.json()).catch(() => null),
                         fetch(topURL('domains')).then(r => r.json()).catch(() => null),
                         fetch(topURL('routes')).then(r => r.json()).catch(() => null),
+                        fetch(blackholeTopURL).then(r => r.json()).catch(() => null),
                     ]);
 
                     if (liveData) this.live = liveData;
                     if (statusData) this.statusData = statusData;
                     if (navData) this.nav = navData;
                     this.configErrors = (errorsData && errorsData.errors) || [];
+                    if (blackholeData) {
+                        this.blackhole = {
+                            active: !!blackholeData.active,
+                            patterns: blackholeData.patterns || [],
+                            stats: blackholeData.stats || null,
+                        };
+                    }
                     this.topUpstreams = (topUp && topUp.top) || [];
                     this.topDomains = (topDom && topDom.top) || [];
                     this.topRoutes = (topRt && topRt.top) || [];
+                    this.topBlockedRoutes = (topBl && topBl.top) || [];
 
                     // Update charts after Alpine has finished processing DOM
                     // updates from the reactive data changes above
@@ -857,16 +902,30 @@
                     return v.toLocaleString();
                 },
 
+                // displayRouteName renders the catch-all route patterns
+                // ("." and "*") as a readable label. Bare punctuation in
+                // a list of hostnames is hard to read and easily mistaken
+                // for noise.
+                displayRouteName(name) {
+                    if (name === '.' || name === '*') return '(catch-all)';
+                    return name;
+                },
+
+
                 sortedUpstreams() {
                     const entries = Object.entries(this.statusData.upstreams || {});
                     const isPseudo = name => name === 'direct' || name === 'blackhole';
+                    // Three buckets, alphabetical within each:
+                    //   0 = healthy declared upstreams
+                    //   1 = pseudo-upstreams (blackhole, direct — always healthy)
+                    //   2 = unhealthy declared upstreams (pushed to the bottom)
+                    const bucket = ([name, up]) => {
+                        if (isPseudo(name)) return 1;
+                        return up.healthy ? 0 : 2;
+                    };
                     return entries.sort((a, b) => {
-                        // Healthy before unhealthy
-                        if (a[1].healthy !== b[1].healthy) return a[1].healthy ? -1 : 1;
-                        // Built-in pseudo-upstreams (direct, blackhole) sort
-                        // after declared ones, alphabetically between themselves.
-                        const ap = isPseudo(a[0]), bp = isPseudo(b[0]);
-                        if (ap !== bp) return ap ? 1 : -1;
+                        const ba = bucket(a), bb = bucket(b);
+                        if (ba !== bb) return ba - bb;
                         return a[0].localeCompare(b[0]);
                     });
                 },
@@ -960,6 +1019,7 @@
                     points.forEach(p => Object.keys(p.upstreams || {}).forEach(n => upstreamNames.add(n)));
 
                     const palette = chartColorList();
+                    const namedPalette = chartColors();
                     const datasets = [...upstreamNames].map((name, i) => {
                         // Compute per-interval throughput (delta of cumulative bytes)
                         const totals = points.map(p => {
@@ -971,6 +1031,19 @@
                             const d = v - totals[j - 1];
                             return d > 0 ? d : 0;
                         });
+                        // Pin the blackhole series to the red palette slot
+                        // so blocked traffic always reads as "stop / refused"
+                        // regardless of how many other upstreams cycle the
+                        // palette around it.
+                        if (name === 'blackhole') {
+                            return {
+                                label: name,
+                                data: deltas,
+                                backgroundColor: namedPalette.red,
+                                borderColor: 'transparent',
+                                _bgPaletteKey: 'red',
+                            };
+                        }
                         return {
                             label: name,
                             data: deltas,

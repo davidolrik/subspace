@@ -8,19 +8,25 @@ import (
 )
 
 func TestSortedUpstreamNames(t *testing.T) {
-	// Operator-declared upstreams come first (alphabetical), then the
-	// built-in pseudo-upstreams ("blackhole" before "direct"). The
-	// pseudo-upstreams stay grouped at the bottom regardless of their
-	// alphabetical position relative to declared ones.
+	// Three buckets, alphabetical within each:
+	//   1. healthy declared upstreams
+	//   2. pseudo-upstreams ("blackhole", "direct" — always healthy)
+	//   3. unhealthy declared upstreams (pushed to the bottom)
 	in := map[string]control.UpstreamStatus{
-		"zebra":     {},
-		"direct":    {},
-		"alpha":     {},
-		"blackhole": {},
-		"middle":    {},
+		"zebra":     {Healthy: true},
+		"direct":    {Healthy: true},
+		"alpha":     {Healthy: true},
+		"blackhole": {Healthy: true},
+		"sick":      {Healthy: false},
+		"middle":    {Healthy: true},
+		"broken":    {Healthy: false},
 	}
 	got := sortedUpstreamNames(in)
-	want := []string{"alpha", "middle", "zebra", "blackhole", "direct"}
+	want := []string{
+		"alpha", "middle", "zebra", // healthy declared
+		"blackhole", "direct", // pseudo (alphabetical)
+		"broken", "sick", // unhealthy declared
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("sortedUpstreamNames = %v, want %v", got, want)
 	}

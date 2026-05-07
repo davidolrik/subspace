@@ -373,6 +373,63 @@ func TestConfigErrorsAPI(t *testing.T) {
 	}
 }
 
+func TestBlackholeAPIInactiveByDefault(t *testing.T) {
+	h := New(nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://stats.subspace.pub/api/blackhole", nil)
+	rec := httptest.NewRecorder()
+	h.handleBlackholeAPI(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var resp blackholeResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Active {
+		t.Error("Active = true, want false when no patterns are registered")
+	}
+	if len(resp.Patterns) != 0 {
+		t.Errorf("Patterns = %v, want empty", resp.Patterns)
+	}
+}
+
+func TestBlackholeAPIActiveAfterSet(t *testing.T) {
+	collector := stats.New()
+	collector.IncUpstream("blackhole", true)
+	collector.IncUpstream("blackhole", true)
+	collector.AddUpstreamBytes("blackhole", 1024, 256)
+
+	h := New(nil, collector, nil)
+	h.SetBlackholeRoutes([]string{".ads.example.com", "*.telemetry.com"})
+
+	req := httptest.NewRequest(http.MethodGet, "http://stats.subspace.pub/api/blackhole", nil)
+	rec := httptest.NewRecorder()
+	h.handleBlackholeAPI(rec, req)
+
+	var resp blackholeResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Active {
+		t.Error("Active = false, want true after SetBlackholeRoutes with patterns")
+	}
+	if len(resp.Patterns) != 2 {
+		t.Fatalf("Patterns = %v, want 2 entries", resp.Patterns)
+	}
+	if resp.Stats == nil {
+		t.Fatal("Stats = nil, want populated from collector")
+	}
+	if resp.Stats.Success != 2 {
+		t.Errorf("Stats.Success = %d, want 2", resp.Stats.Success)
+	}
+	if resp.Stats.BytesIn != 1024 {
+		t.Errorf("Stats.BytesIn = %d, want 1024", resp.Stats.BytesIn)
+	}
+}
+
 func TestConfigErrorsAPIPrependsReloadFailure(t *testing.T) {
 	h := New(nil, nil, nil)
 	h.SetConfigErrors([]string{"existing problem"})
