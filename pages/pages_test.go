@@ -206,6 +206,23 @@ func TestUndefinedPageRedirectsToDocs(t *testing.T) {
 	}
 }
 
+func TestRootRedirectsToStatisticsWhenNoPagesDefined(t *testing.T) {
+	h := New(nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/", nil)
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	loc := rec.Header().Get("Location")
+	want := "http://" + StatsHost + "/"
+	if loc != want {
+		t.Errorf("Location = %q, want %q", loc, want)
+	}
+}
+
 func TestRootRedirectsToFirstPage(t *testing.T) {
 	pages := []PageInfo{
 		{Name: "dev", Page: &PageConfig{Title: "Development"}},

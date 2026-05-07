@@ -199,8 +199,11 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		}
 	}
 
-	// Root redirect: pages.subspace.pub/ → first configured page
-	rootRedirect := "/" // fallback (won't match anything useful)
+	// Root redirect: pages.subspace.pub/ → first configured page,
+	// or to the statistics dashboard when no pages are defined (which
+	// is otherwise a redirect loop, since the fallback would point back
+	// at this same handler). HTTP because internal pages are HTTP-only.
+	rootRedirect := "http://" + StatsHost + "/"
 	if len(pageList) > 0 {
 		rootRedirect = "/" + pageList[0].Name + "/"
 	}
