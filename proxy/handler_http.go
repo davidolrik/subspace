@@ -15,7 +15,7 @@ import (
 // handleHTTP handles a plaintext HTTP request, either forwarding it to the
 // target or upgrading to a WebSocket tunnel. Returns true if the connection
 // should be kept alive for another request.
-func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
+func (s *Server) handleHTTP(conn *PeekConn, req *http.Request, l boundListener) bool {
 	host := req.Host
 	if host == "" {
 		slog.Error("HTTP request missing Host header")
@@ -38,7 +38,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 		return false
 	}
 
-	route := s.routeFor(hostname)
+	route := s.routeFor(hostname, l.cfg.Private)
 
 	// WebSocket upgrade takes over the connection
 	if isWebSocketUpgrade(req) {
@@ -61,7 +61,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 		upstreamConn, usedUpstream, err = s.dialWithFallback(route, "tcp", targetAddr)
 		if err != nil {
 			if errors.Is(err, errBlackhole) {
-				s.blackholeHTTP(conn, req, hostname, route.pattern)
+				s.blackholeHTTP(conn, req, hostname, route.pattern, route.private)
 				return false
 			}
 			if isDNSError(err) {
@@ -74,9 +74,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 				conn.Write(pages.ErrorPage(502, "Upstream Unavailable", "Upstream '"+usedUpstream+"' is not reachable"))
 			} else {
 				slog.Error("HTTP dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
-				s.Stats.IncUpstream(usedUpstream, false)
-				s.Stats.IncDomain(hostname, false)
-				s.Stats.IncRoute(route.pattern, false)
+				s.recordFailure(hostname, route.pattern, usedUpstream, route.private)
 				s.Stats.IncError("dial_failed")
 				conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
 			}
@@ -84,9 +82,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 		}
 	}
 
-	s.Stats.IncUpstream(usedUpstream, true)
-	s.Stats.IncDomain(hostname, true)
-	s.Stats.IncRoute(route.pattern, true)
+	s.recordSuccess(hostname, route.pattern, usedUpstream, route.private)
 
 	// Forward the request to the upstream
 	cw := &countingWriter{w: upstreamConn}
@@ -123,9 +119,7 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request) bool {
 		return false
 	}
 
-	s.Stats.AddUpstreamBytes(usedUpstream, crw.n, cw.n)
-	s.Stats.AddDomainBytes(hostname, crw.n, cw.n)
-	s.Stats.AddRouteBytes(route.pattern, crw.n, cw.n)
+	s.recordBytes(hostname, route.pattern, usedUpstream, crw.n, cw.n, route.private)
 
 	// Return connection to pool if reusable, otherwise close
 	if s.Pool != nil && !resp.Close && br.Buffered() == 0 {
@@ -147,7 +141,7 @@ func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr s
 	upstreamConn, usedUpstream, err := s.dialWithFallback(route, "tcp", targetAddr)
 	if err != nil {
 		if errors.Is(err, errBlackhole) {
-			s.blackholeHTTP(conn, req, hostname, route.pattern)
+			s.blackholeHTTP(conn, req, hostname, route.pattern, route.private)
 			return
 		}
 		if isDNSError(err) {
@@ -160,18 +154,14 @@ func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr s
 			conn.Write(pages.ErrorPage(502, "Upstream Unavailable", "Upstream '"+usedUpstream+"' is not reachable"))
 		} else {
 			slog.Error("WebSocket dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
-			s.Stats.IncUpstream(usedUpstream, false)
-			s.Stats.IncDomain(hostname, false)
-			s.Stats.IncRoute(route.pattern, false)
+			s.recordFailure(hostname, route.pattern, usedUpstream, route.private)
 			s.Stats.IncError("dial_failed")
 			conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
 		}
 		return
 	}
 
-	s.Stats.IncUpstream(usedUpstream, true)
-	s.Stats.IncDomain(hostname, true)
-	s.Stats.IncRoute(route.pattern, true)
+	s.recordSuccess(hostname, route.pattern, usedUpstream, route.private)
 
 	// Forward the original upgrade request to the upstream
 	if err := req.Write(upstreamConn); err != nil {
@@ -183,9 +173,7 @@ func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr s
 
 	rawConn, buffered := conn.Unwrap()
 	result := Relay(rawConn, upstreamConn, buffered)
-	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
-	s.Stats.AddDomainBytes(hostname, result.BytesIn, result.BytesOut)
-	s.Stats.AddRouteBytes(route.pattern, result.BytesIn, result.BytesOut)
+	s.recordBytes(hostname, route.pattern, usedUpstream, result.BytesIn, result.BytesOut, route.private)
 }
 
 // countingWriter wraps an io.Writer and counts the bytes written.
@@ -209,11 +197,12 @@ func isWebSocketUpgrade(req *http.Request) bool {
 // route resolves to the blackhole pseudo-upstream. The request size is
 // estimated by serialising it to a counting discard so the dashboard
 // can show how much traffic was prevented from leaving the machine.
-func (s *Server) blackholeHTTP(conn io.Writer, req *http.Request, hostname, pattern string) {
+// Private connections skip the per-domain/per-route attributions.
+func (s *Server) blackholeHTTP(conn io.Writer, req *http.Request, hostname, pattern string, private bool) {
 	cw := &countingWriter{w: io.Discard}
 	_ = req.Write(cw)
 	body := pages.ErrorPage(451, "Unavailable For Legal Reasons", hostname)
 	n, _ := conn.Write(body)
 	slog.Debug("blackhole refused", "protocol", "HTTP", "host", hostname, "pattern", pattern, "req_bytes", cw.n, "resp_bytes", n)
-	s.recordBlackhole(hostname, pattern, cw.n, int64(n))
+	s.recordBlackhole(hostname, pattern, cw.n, int64(n), private)
 }

@@ -127,7 +127,7 @@ func parseSNIExtension(data []byte) (string, error) {
 
 // handleTLS handles a TLS connection by extracting the SNI from the ClientHello,
 // looking up the appropriate dialer, connecting to the target, and relaying traffic.
-func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
+func (s *Server) handleTLS(conn *PeekConn, l boundListener) {
 	// Peek the TLS record header (5 bytes) to determine the full record length,
 	// then peek the complete ClientHello to reliably extract SNI.
 	header, err := conn.Peek(5)
@@ -164,8 +164,8 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 	// and stats.subspace.pub pass through to the external redirect server
 	// which redirects HTTPS → HTTP so the daemon can intercept the request.
 
-	targetAddr := sni + ":" + listenPort
-	route := s.routeFor(sni)
+	targetAddr := sni + ":" + l.port
+	route := s.routeFor(sni, l.cfg.Private)
 
 	slog.Debug("TLS", "sni", sni, "target", targetAddr, "via", route.upstream)
 
@@ -176,7 +176,7 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 			// TLS pass-through has no application-layer channel to
 			// signal a block before the handshake completes — the
 			// honest answer is to close the connection.
-			s.recordBlackhole(sni, route.pattern, 0, 0)
+			s.recordBlackhole(sni, route.pattern, 0, 0, route.private)
 			conn.Close()
 			return
 		}
@@ -185,21 +185,15 @@ func (s *Server) handleTLS(conn *PeekConn, listenPort string) {
 			s.Stats.IncError("dns_failed")
 		} else {
 			slog.Error("TLS dial failed", "sni", sni, "target", targetAddr, "via", usedUpstream, "error", err)
-			s.Stats.IncUpstream(usedUpstream, false)
-			s.Stats.IncDomain(sni, false)
-			s.Stats.IncRoute(route.pattern, false)
+			s.recordFailure(sni, route.pattern, usedUpstream, route.private)
 			s.Stats.IncError("dial_failed")
 		}
 		conn.Close()
 		return
 	}
 
-	s.Stats.IncUpstream(usedUpstream, true)
-	s.Stats.IncDomain(sni, true)
-	s.Stats.IncRoute(route.pattern, true)
+	s.recordSuccess(sni, route.pattern, usedUpstream, route.private)
 	rawConn, buffered := conn.Unwrap()
 	result := Relay(rawConn, upstreamConn, buffered)
-	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
-	s.Stats.AddDomainBytes(sni, result.BytesIn, result.BytesOut)
-	s.Stats.AddRouteBytes(route.pattern, result.BytesIn, result.BytesOut)
+	s.recordBytes(sni, route.pattern, usedUpstream, result.BytesIn, result.BytesOut, route.private)
 }

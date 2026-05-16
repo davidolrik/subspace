@@ -100,11 +100,38 @@ Subspace uses [KDL](https://kdl.dev) for configuration. The default config path 
 
 ### `listen`
 
-The address to listen on.
+The address to listen on. The plain form binds a single port:
 
 ```kdl
 listen "127.0.0.1:8118"
 ```
+
+`listen` may also take a block, and may be repeated to bind multiple
+ports. Each listener can carry per-port options:
+
+```kdl
+listen "127.0.0.1:8118"
+
+listen "127.0.0.1:8119" {
+    private true            // suppress per-domain stats for this port
+    label "incognito"       // cosmetic name used in logs and dashboards
+}
+```
+
+`private` makes every connection accepted on the listener "private":
+the per-domain and per-route stats tables don't record the traffic, but
+total connections, protocol breakdowns and per-upstream byte counts
+still do — so totals on the dashboard remain accurate. Point an
+"incognito" browser profile at the private port (e.g.
+`HTTPS_PROXY=http://127.0.0.1:8119`) and that browsing won't appear in
+the per-domain or per-route history.
+
+This only hides traffic from **subspace's own statistics**. SNI is
+still visible on the wire to anyone who can observe your network. If
+that's your threat model, use a VPN or Tor — not a stats-tier
+"incognito" flag.
+
+Changing the listener set requires a restart; other settings still hot-reload.
 
 ### `control_socket`
 
@@ -167,6 +194,10 @@ route "*.telemetry.com"  via="blackhole"
 
 // Fallback to blackhole — if the work proxy is down, refuse rather than leak directly
 route ".risky.example" via="corporate" fallback="blackhole"
+
+// Private route — connections still flow, but the per-domain and per-route
+// stats tables don't record them. Per-upstream and protocol rollups still count.
+route ".bank.example.com" via="direct" private=true
 ```
 
 Pattern types:
@@ -286,6 +317,23 @@ subspace logs -L debug -F        # all levels, follow live
 | `-N, --lines`  | Number of historical lines                      | `10`    |
 | `-L, --level`  | Minimum level: `debug`, `info`, `warn`, `error` | `info`  |
 | `-F, --follow` | Stream live output after history                | `false` |
+
+### `subspace stats purge <domain>`
+
+Remove every historical sample for a domain from the per-domain stats
+table. Useful when something landed in stats that should have been
+browsed through a private listener.
+
+```sh
+subspace stats purge tracker.example.com
+subspace stats purge tracker.example.com -J   # raw JSON output
+```
+
+Only the per-domain table is touched — route, upstream, protocol, and
+connection rollups are intentionally left intact, since route patterns
+aren't 1:1 with a single host and the rollups don't identify the
+domain in the first place. The live in-memory counter is cleared too,
+so the dashboard stops showing the host immediately.
 
 ### `subspace version`
 

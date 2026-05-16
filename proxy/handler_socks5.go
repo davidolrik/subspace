@@ -26,7 +26,7 @@ const (
 
 // handleSOCKS5 performs the SOCKS5 server-side handshake, extracts the
 // target address, and relays traffic through the appropriate upstream.
-func (s *Server) handleSOCKS5(conn *PeekConn) {
+func (s *Server) handleSOCKS5(conn *PeekConn, l boundListener) {
 	// --- Auth negotiation ---
 	// Client sends: version(1) + nmethods(1) + methods(nmethods)
 	// We already peeked the version byte (0x05). Read the full greeting.
@@ -91,7 +91,7 @@ func (s *Server) handleSOCKS5(conn *PeekConn) {
 	targetAddr := net.JoinHostPort(hostname, strconv.Itoa(int(port)))
 
 	// --- Route and dial ---
-	route := s.routeFor(hostname)
+	route := s.routeFor(hostname, l.cfg.Private)
 
 	slog.Debug("SOCKS5", "target", targetAddr, "via", route.upstream)
 
@@ -100,7 +100,7 @@ func (s *Server) handleSOCKS5(conn *PeekConn) {
 		if errors.Is(err, errBlackhole) {
 			slog.Debug("blackhole refused", "protocol", "SOCKS5", "host", hostname, "pattern", route.pattern)
 			s.socks5Reply(conn, socks5StatusNotAllowed, "0.0.0.0", 0)
-			s.recordBlackhole(hostname, route.pattern, 0, 0)
+			s.recordBlackhole(hostname, route.pattern, 0, 0, route.private)
 			return
 		}
 		if isDNSError(err) {
@@ -108,18 +108,14 @@ func (s *Server) handleSOCKS5(conn *PeekConn) {
 			s.Stats.IncError("dns_failed")
 		} else {
 			slog.Error("SOCKS5 dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
-			s.Stats.IncUpstream(usedUpstream, false)
-			s.Stats.IncDomain(hostname, false)
-			s.Stats.IncRoute(route.pattern, false)
+			s.recordFailure(hostname, route.pattern, usedUpstream, route.private)
 			s.Stats.IncError("dial_failed")
 		}
 		s.socks5Reply(conn, socks5StatusFailure, "0.0.0.0", 0)
 		return
 	}
 
-	s.Stats.IncUpstream(usedUpstream, true)
-	s.Stats.IncDomain(hostname, true)
-	s.Stats.IncRoute(route.pattern, true)
+	s.recordSuccess(hostname, route.pattern, usedUpstream, route.private)
 
 	// Send success reply
 	s.socks5Reply(conn, socks5StatusOK, "0.0.0.0", 0)
@@ -127,9 +123,7 @@ func (s *Server) handleSOCKS5(conn *PeekConn) {
 	// Relay traffic
 	rawConn, buffered := conn.Unwrap()
 	result := Relay(rawConn, upstreamConn, buffered)
-	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
-	s.Stats.AddDomainBytes(hostname, result.BytesIn, result.BytesOut)
-	s.Stats.AddRouteBytes(route.pattern, result.BytesIn, result.BytesOut)
+	s.recordBytes(hostname, route.pattern, usedUpstream, result.BytesIn, result.BytesOut, route.private)
 }
 
 // socks5ReadAddr reads the target address based on the address type byte.

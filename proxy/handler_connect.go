@@ -11,7 +11,7 @@ import (
 
 // handleCONNECT handles an HTTP CONNECT request by establishing a tunnel
 // to the target host through the appropriate upstream dialer.
-func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
+func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request, l boundListener) {
 	targetAddr := req.Host
 
 	// Ensure the target has a port
@@ -25,14 +25,14 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 	// TLS connections to pages.subspace.pub / stats.subspace.pub pass
 	// through to the external redirect server for HTTPS → HTTP redirection.
 
-	route := s.routeFor(host)
+	route := s.routeFor(host, l.cfg.Private)
 
 	slog.Debug("CONNECT", "target", targetAddr, "via", route.upstream)
 
 	upstreamConn, usedUpstream, err := s.dialWithFallback(route, "tcp", targetAddr)
 	if err != nil {
 		if errors.Is(err, errBlackhole) {
-			s.blackholeHTTP(conn, req, host, route.pattern)
+			s.blackholeHTTP(conn, req, host, route.pattern, route.private)
 			conn.Close()
 			return
 		}
@@ -46,9 +46,7 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 			conn.Write(pages.ErrorPage(502, "Upstream Unavailable", "Upstream '"+usedUpstream+"' is not reachable"))
 		} else {
 			slog.Error("CONNECT dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
-			s.Stats.IncUpstream(usedUpstream, false)
-			s.Stats.IncDomain(host, false)
-			s.Stats.IncRoute(route.pattern, false)
+			s.recordFailure(host, route.pattern, usedUpstream, route.private)
 			s.Stats.IncError("dial_failed")
 			conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
 		}
@@ -56,16 +54,12 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request) {
 		return
 	}
 
-	s.Stats.IncUpstream(usedUpstream, true)
-	s.Stats.IncDomain(host, true)
-	s.Stats.IncRoute(route.pattern, true)
+	s.recordSuccess(host, route.pattern, usedUpstream, route.private)
 	conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
 	// Unwrap to raw conn for zero-copy relay. After CONNECT + 200 response,
 	// the bufio.Reader should have no buffered bytes.
 	rawConn, buffered := conn.Unwrap()
 	result := Relay(rawConn, upstreamConn, buffered)
-	s.Stats.AddUpstreamBytes(usedUpstream, result.BytesIn, result.BytesOut)
-	s.Stats.AddDomainBytes(host, result.BytesIn, result.BytesOut)
-	s.Stats.AddRouteBytes(route.pattern, result.BytesIn, result.BytesOut)
+	s.recordBytes(host, route.pattern, usedUpstream, result.BytesIn, result.BytesOut, route.private)
 }

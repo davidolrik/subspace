@@ -33,7 +33,28 @@ type Route struct {
 	Pattern  string
 	Via      string
 	Fallback string
-	File     string // absolute path to the config file containing this route
+	// Private suppresses domain-identifying stats writes (per-domain and
+	// per-route counters) for traffic that matches this route. Rollups —
+	// total connections, protocol breakdown, per-upstream bytes — still
+	// record so totals reconcile with reality. Set via `private=#true`.
+	Private bool
+	File    string // absolute path to the config file containing this route
+}
+
+// Listener describes one bind address the proxy accepts connections on.
+// More than one listener may be configured; each carries its own
+// `private` and `label` flags so an operator can point an "incognito"
+// browser profile at a dedicated port whose traffic never lands in
+// the per-domain stats tables.
+type Listener struct {
+	Address string
+	// Private suppresses domain-identifying stats writes (per-domain and
+	// per-route counters) for any connection accepted on this listener.
+	// Rollups still record.
+	Private bool
+	// Label is a cosmetic name used in logs and status output to
+	// disambiguate listeners (e.g. "incognito"). Empty by default.
+	Label string
 }
 
 // Page describes an internal page served at pages.subspace.pub/{name}.
@@ -82,7 +103,10 @@ type Tag struct {
 
 // Config is the top-level configuration for subspace.
 type Config struct {
-	Listen        string
+	// Listeners are the bind addresses the proxy accepts connections on.
+	// At least one is required; declaring more than one is supported so
+	// an operator can dedicate a port to incognito-style private traffic.
+	Listeners     []Listener
 	ControlSocket string
 	Pages         []Page
 	Upstreams     map[string]Upstream
@@ -221,7 +245,11 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 				p.collect(currentFile, "listen requires an address argument")
 				continue
 			}
-			p.cfg.Listen = node.Arguments[0].ValueString()
+			l, errs := parseListen(node)
+			for _, msg := range errs {
+				p.collect(currentFile, msg)
+			}
+			p.cfg.Listeners = append(p.cfg.Listeners, l)
 
 		case "upstream":
 			if len(node.Arguments) < 1 {
@@ -801,11 +829,79 @@ func parseRoute(node *document.Node) (Route, error) {
 		fallback = fbVal.ValueString()
 	}
 
+	var private bool
+	if privVal, ok := node.Properties.Get("private"); ok && privVal != nil {
+		b, perr := asBool(privVal)
+		if perr != nil {
+			return Route{}, fmt.Errorf("route %q: %w", pattern, perr)
+		}
+		private = b
+	}
+
 	return Route{
 		Pattern:  pattern,
 		Via:      via,
 		Fallback: fallback,
+		Private:  private,
 	}, nil
+}
+
+// parseListen walks an optional `listen "addr" { ... }` block and
+// returns the constructed Listener plus a slice of non-fatal child-node
+// errors. Children are optional — the plain `listen "addr"` form parses
+// cleanly with no children. Per-child errors are surfaced via the
+// returned slice so the rest of the listener still applies; this
+// matches how upstream/tags/env blocks behave.
+func parseListen(node *document.Node) (Listener, []string) {
+	l := Listener{Address: node.Arguments[0].ValueString()}
+	var errs []string
+	for _, child := range node.Children {
+		switch child.Name.ValueString() {
+		case "private":
+			if len(child.Arguments) < 1 {
+				errs = append(errs, fmt.Sprintf("listen %q: private requires a boolean argument", l.Address))
+				continue
+			}
+			b, perr := asBool(child.Arguments[0])
+			if perr != nil {
+				errs = append(errs, fmt.Sprintf("listen %q: %v", l.Address, perr))
+				continue
+			}
+			l.Private = b
+		case "label":
+			if len(child.Arguments) < 1 {
+				errs = append(errs, fmt.Sprintf("listen %q: label requires a string argument", l.Address))
+				continue
+			}
+			l.Label = child.Arguments[0].ValueString()
+		default:
+			errs = append(errs, fmt.Sprintf("listen %q: unknown child node %q", l.Address, child.Name.ValueString()))
+		}
+	}
+	return l, errs
+}
+
+// asBool resolves a KDL value to a Go bool. Subspace uses KDL v1, which
+// spells booleans as bare `true` / `false` keywords; the parser may
+// surface them either as a Go bool through ResolvedValue() or as the
+// literal string "true"/"false" through ValueString() depending on how
+// the value was tokenised. Both forms are accepted.
+func asBool(v *document.Value) (bool, error) {
+	if v == nil {
+		return false, fmt.Errorf("expected boolean, got nil")
+	}
+	switch x := v.ResolvedValue().(type) {
+	case bool:
+		return x, nil
+	case string:
+		switch x {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("expected boolean (true or false), got %q", v.ValueString())
 }
 
 func hasGlobMeta(pattern string) bool {

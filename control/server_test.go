@@ -27,7 +27,7 @@ func TestControlServerStreamLogs(t *testing.T) {
 	buf.Append(testEntry(slog.LevelInfo, "old line 3"))
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, buf, nil, nil, nil)
+	srv, err := NewServer(sockPath, buf, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestControlServerDefaultLines(t *testing.T) {
 	}
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, buf, nil, nil, nil)
+	srv, err := NewServer(sockPath, buf, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestControlServerLevelFilter(t *testing.T) {
 	buf.Append(testEntry(slog.LevelError, "error msg"))
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, buf, nil, nil, nil)
+	srv, err := NewServer(sockPath, buf, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestControlServerColorParam(t *testing.T) {
 	buf.Append(testEntry(slog.LevelInfo, "colored test"))
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, buf, nil, nil, nil)
+	srv, err := NewServer(sockPath, buf, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestControlServerNotFound(t *testing.T) {
 	buf := NewLogBuffer(100)
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, buf, nil, nil, nil)
+	srv, err := NewServer(sockPath, buf, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestStatusEndpointHealthy(t *testing.T) {
 	})
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, monitor, nil)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, nil, monitor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestStatusEndpointUnhealthy(t *testing.T) {
 	})
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, monitor, nil)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, nil, monitor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestStatusEndpointBlackhole(t *testing.T) {
 	collector.AddUpstreamBytes("blackhole", 4321, 256)
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, nil, nil)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestStatusEndpointJSON(t *testing.T) {
 	})
 
 	sockPath := tempSocket(t)
-	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, monitor, nil)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, nil, monitor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,6 +469,116 @@ func TestStatusEndpointJSON(t *testing.T) {
 	}
 	if us.Stats.Success != 1 {
 		t.Errorf("upstream stats success = %d, want 1", us.Stats.Success)
+	}
+}
+
+func TestControlServerStatsPurge(t *testing.T) {
+	dbPath := tempSocket(t) + ".db" // tempSocket gives us a unique path
+	os.Remove(dbPath)
+	store, err := stats.OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close(); os.Remove(dbPath) })
+
+	// Record a single snapshot that names two domains.
+	err = store.Record(time.Now(), stats.Snapshot{
+		Domains: map[string]stats.UpstreamStats{
+			"private.example.com": {Success: 1},
+			"other.example.com":   {Success: 1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	collector := stats.New()
+	collector.IncDomain("private.example.com", true)
+	collector.IncDomain("other.example.com", true)
+
+	sockPath := tempSocket(t)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), collector, store, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	go srv.Serve()
+
+	client := unixClient(sockPath)
+	resp, err := client.Post("http://subspace/stats/purge?domain=private.example.com", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got PurgeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Domain != "private.example.com" {
+		t.Errorf("domain = %q, want %q", got.Domain, "private.example.com")
+	}
+	if got.Removed != 1 {
+		t.Errorf("removed = %d, want 1", got.Removed)
+	}
+
+	// The in-memory counter should be gone too.
+	snap := collector.Snapshot()
+	if _, ok := snap.Domains["private.example.com"]; ok {
+		t.Error("private.example.com still in collector snapshot after purge")
+	}
+	if _, ok := snap.Domains["other.example.com"]; !ok {
+		t.Error("other.example.com should still be present in collector snapshot")
+	}
+}
+
+func TestControlServerStatsPurgeRequiresDomain(t *testing.T) {
+	dbPath := tempSocket(t) + ".db"
+	os.Remove(dbPath)
+	store, err := stats.OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close(); os.Remove(dbPath) })
+
+	sockPath := tempSocket(t)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), nil, store, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	go srv.Serve()
+
+	client := unixClient(sockPath)
+	resp, err := client.Post("http://subspace/stats/purge", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for missing domain", resp.StatusCode)
+	}
+}
+
+func TestControlServerStatsPurgeRejectsGet(t *testing.T) {
+	sockPath := tempSocket(t)
+	srv, err := NewServer(sockPath, NewLogBuffer(10), nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { srv.Close() })
+	go srv.Serve()
+
+	client := unixClient(sockPath)
+	resp, err := client.Get("http://subspace/stats/purge?domain=x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405 for GET", resp.StatusCode)
 	}
 }
 

@@ -287,6 +287,32 @@ func (s *Store) Query(from, to time.Time) (*TimeSeries, error) {
 	return &TimeSeries{Points: points}, nil
 }
 
+// PurgeDomain removes every historical sample naming the given
+// hostname from the per-domain stats table. Returns the number of rows
+// deleted. Other tables (protocols, upstreams, routes, the connection
+// rollup) are intentionally left intact: route patterns aren't 1:1
+// with a single host, and the rollups don't identify the domain in
+// the first place. Use this when something landed in stats that
+// should have been browsed through a private listener.
+//
+// The domain match is exact and case-sensitive — stats are keyed off
+// the hostname extracted from the request (Host header / SNI /
+// SOCKS5 destination), which is already normalised by the matcher.
+func (s *Store) PurgeDomain(domain string) (int64, error) {
+	if domain == "" {
+		return 0, fmt.Errorf("domain is required")
+	}
+	res, err := s.db.Exec("DELETE FROM snapshot_domains WHERE domain = ?", domain)
+	if err != nil {
+		return 0, fmt.Errorf("purging domain %q: %w", domain, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // Prune deletes data points older than the supplied duration from
 // every snapshot table. A non-positive duration is a no-op so callers
 // can wire a "no retention configured" path through without branching.

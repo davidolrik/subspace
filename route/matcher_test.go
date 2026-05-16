@@ -358,3 +358,20 @@ func TestResolveStripsPort(t *testing.T) {
 		t.Errorf("Upstream = %q, want %q", result.Upstream, "tunnel")
 	}
 }
+
+func TestResolveCarriesPrivate(t *testing.T) {
+	m := NewMatcher([]Rule{
+		{Pattern: ".bank.example.com", Upstream: "direct", Private: true},
+		{Pattern: ".other.com", Upstream: "direct"},
+	})
+
+	priv := m.Resolve("login.bank.example.com")
+	if priv == nil || !priv.Private {
+		t.Errorf("private rule should resolve with Private=true, got %+v", priv)
+	}
+
+	pub := m.Resolve("foo.other.com")
+	if pub == nil || pub.Private {
+		t.Errorf("non-private rule should resolve with Private=false, got %+v", pub)
+	}
+}

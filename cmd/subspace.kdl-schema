@@ -26,9 +26,19 @@ document {
 
     // -- listener -----------------------------------------------------
 
-    node "listen" max=1 {
-        description "Bind address for the proxy listener (e.g. \":8080\" or \"127.0.0.1:8118\")."
+    node "listen" {
+        description "Bind address for the proxy listener (e.g. \":8080\" or \"127.0.0.1:8118\"). May be repeated to bind multiple ports; each may carry its own private/label settings."
         value type="string"
+        children {
+            node "private" max=1 {
+                description "Suppress per-domain and per-route stats for traffic accepted on this listener. Rollups (connections, protocols, per-upstream bytes) still record."
+                value type="bool"
+            }
+            node "label" max=1 {
+                description "Cosmetic name used in logs and dashboards to disambiguate listeners (e.g. \"incognito\")."
+                value type="string"
+            }
+        }
     }
 
     node "control_socket" max=1 {
@@ -94,6 +104,10 @@ document {
         prop "fallback" {
             description "Optional second upstream used when `via` fails its health check. Must differ from `via`. Accepts the same built-ins (\"direct\", \"blackhole\") as `via`."
             type "string"
+        }
+        prop "private" {
+            description "When true, suppress per-domain and per-route stats writes for traffic matching this rule. Rollups (connections, protocols, per-upstream bytes) still record."
+            type "bool"
         }
     }
 

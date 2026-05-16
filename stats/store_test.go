@@ -224,6 +224,100 @@ func TestStorePruneDeletesOldRows(t *testing.T) {
 	}
 }
 
+func TestStorePurgeDomain(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		snap := Snapshot{
+			Domains: map[string]UpstreamStats{
+				"private.example.com": {Success: int64(i + 1), BytesIn: 100, BytesOut: 200},
+				"other.example.com":   {Success: int64(i + 1), BytesIn: 50, BytesOut: 75},
+			},
+			Routes: map[string]UpstreamStats{
+				".example.com": {Success: int64(i + 1)},
+			},
+			Upstreams: map[string]UpstreamStats{
+				"direct": {Success: int64(i + 1), BytesIn: 150, BytesOut: 275},
+			},
+		}
+		if err := store.Record(now.Add(-time.Duration(i)*time.Minute), snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := store.PurgeDomain("private.example.com")
+	if err != nil {
+		t.Fatalf("PurgeDomain failed: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("PurgeDomain returned %d, want 3", n)
+	}
+
+	// The target domain should be gone.
+	var got int
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM snapshot_domains WHERE domain = ?", "private.example.com").Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 0 {
+		t.Errorf("private.example.com rows after purge = %d, want 0", got)
+	}
+
+	// Other domains keep their rows.
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM snapshot_domains WHERE domain = ?", "other.example.com").Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 3 {
+		t.Errorf("other.example.com rows after purge = %d, want 3", got)
+	}
+
+	// Routes and upstreams are intentionally left alone.
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM snapshot_routes").Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 3 {
+		t.Errorf("snapshot_routes rows after purge = %d, want 3 (untouched)", got)
+	}
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM snapshot_upstreams").Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 3 {
+		t.Errorf("snapshot_upstreams rows after purge = %d, want 3 (untouched)", got)
+	}
+}
+
+func TestStorePurgeDomainRequiresDomain(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if _, err := store.PurgeDomain(""); err == nil {
+		t.Error("PurgeDomain(\"\") should return an error")
+	}
+}
+
+func TestStorePurgeDomainNoMatchIsZero(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	n, err := store.PurgeDomain("never.recorded.example")
+	if err != nil {
+		t.Fatalf("PurgeDomain failed: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("PurgeDomain on empty DB returned %d, want 0", n)
+	}
+}
+
 func TestStorePruneZeroIsNoOp(t *testing.T) {
 	store, err := OpenStore(tempDB(t))
 	if err != nil {

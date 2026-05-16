@@ -26,6 +26,7 @@ type Server struct {
 	listener  net.Listener
 	buf       *LogBuffer
 	collector *stats.Collector
+	store     *stats.Store
 	pool      PoolStatsSource
 	mux       *http.ServeMux
 	sockPath  string
@@ -35,8 +36,9 @@ type Server struct {
 }
 
 // NewServer creates a control server listening on the given Unix socket path.
-// The monitor and pool parameters are optional (pass nil to omit).
-func NewServer(sockPath string, buf *LogBuffer, collector *stats.Collector, monitor *upstream.Monitor, pool PoolStatsSource) (*Server, error) {
+// The monitor, store, and pool parameters are optional (pass nil to omit) —
+// commands that need them respond with 503 when their dependency is absent.
+func NewServer(sockPath string, buf *LogBuffer, collector *stats.Collector, store *stats.Store, monitor *upstream.Monitor, pool PoolStatsSource) (*Server, error) {
 	// Remove stale socket file
 	os.Remove(sockPath)
 
@@ -49,6 +51,7 @@ func NewServer(sockPath string, buf *LogBuffer, collector *stats.Collector, moni
 		listener:  ln,
 		buf:       buf,
 		collector: collector,
+		store:     store,
 		pool:      pool,
 		mux:       http.NewServeMux(),
 		sockPath:  sockPath,
@@ -57,6 +60,7 @@ func NewServer(sockPath string, buf *LogBuffer, collector *stats.Collector, moni
 
 	s.mux.HandleFunc("/logs", s.handleLogs)
 	s.mux.HandleFunc("/stats", s.handleStats)
+	s.mux.HandleFunc("/stats/purge", s.handleStatsPurge)
 	s.mux.HandleFunc("/status", s.handleStatus)
 
 	return s, nil
@@ -174,6 +178,49 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	snap := s.collector.Snapshot()
 	json.NewEncoder(w).Encode(snap)
+}
+
+// PurgeResponse is the JSON body returned by /stats/purge — the number
+// of historical rows the daemon dropped for the requested domain.
+type PurgeResponse struct {
+	Domain  string `json:"domain"`
+	Removed int64  `json:"removed"`
+}
+
+// handleStatsPurge removes every historical per-domain stats row for
+// the domain named in the `domain` query parameter. POST-only so a
+// stray GET from a browser preview can't silently erase history; the
+// CLI submits via POST.
+func (s *Server) handleStatsPurge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.store == nil {
+		http.Error(w, "stats store not available", http.StatusServiceUnavailable)
+		return
+	}
+	domain := r.URL.Query().Get("domain")
+	if domain == "" {
+		http.Error(w, "missing required query parameter: domain", http.StatusBadRequest)
+		return
+	}
+	// Also drop the live in-memory counter for this domain, so the
+	// dashboard doesn't show the purged host until the next process
+	// restart. If the collector ever grows a delete API we'd use that;
+	// for now this mirrors what the historical purge does.
+	if s.collector != nil {
+		s.collector.ForgetDomain(domain)
+	}
+	n, err := s.store.PurgeDomain(domain)
+	if err != nil {
+		slog.Error("stats purge failed", "domain", domain, "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(PurgeResponse{Domain: domain, Removed: n})
 }
 
 // Status returns the current health and statistics for all upstreams.

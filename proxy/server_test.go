@@ -38,7 +38,7 @@ func startProxyServer(t *testing.T, matcher *route.Matcher, dialers map[string]u
 		t.Fatal(err)
 	}
 
-	srv := NewServer(ln, matcher, dialers, nil)
+	srv := NewServer([]ListenerConfig{{Net: ln}}, matcher, dialers, nil)
 	t.Cleanup(func() { srv.Close() })
 
 	go srv.Serve()
@@ -206,7 +206,7 @@ func TestProxyTLSSNI(t *testing.T) {
 	}
 	_, proxyPort, _ := net.SplitHostPort(ln.Addr().String())
 
-	srv := NewServer(ln, matcher, nil, nil)
+	srv := NewServer([]ListenerConfig{{Net: ln}}, matcher, nil, nil)
 	t.Cleanup(func() { srv.Close() })
 	go srv.Serve()
 
@@ -242,7 +242,7 @@ func TestProxyTLSSNI(t *testing.T) {
 		if err != nil {
 			t.Skip("cannot bind listener for TLS test")
 		}
-		srv2 := NewServer(ln2, matcher, nil, nil)
+		srv2 := NewServer([]ListenerConfig{{Net: ln2}}, matcher, nil, nil)
 		t.Cleanup(func() { srv2.Close() })
 		go srv2.Serve()
 
@@ -1063,7 +1063,7 @@ func startProxyServerWithPool(t *testing.T, matcher *route.Matcher, dialers map[
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(ln, matcher, dialers, pool)
+	srv := NewServer([]ListenerConfig{{Net: ln}}, matcher, dialers, pool)
 	t.Cleanup(func() { srv.Close() })
 	go srv.Serve()
 	return srv, ln.Addr().String()
@@ -1332,7 +1332,7 @@ func TestProxyHTTPFallbackOnUnhealthy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := NewServer(ln, matcher, dialers, nil)
+	srv := NewServer([]ListenerConfig{{Net: ln}}, matcher, dialers, nil)
 	srv.SetMonitor(monitor)
 	t.Cleanup(func() { srv.Close() })
 	go srv.Serve()
@@ -1385,7 +1385,7 @@ func TestProxyHTTPNoFallbackUnhealthy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := NewServer(ln, matcher, dialers, nil)
+	srv := NewServer([]ListenerConfig{{Net: ln}}, matcher, dialers, nil)
 	srv.SetMonitor(monitor)
 	t.Cleanup(func() { srv.Close() })
 	go srv.Serve()
@@ -1655,6 +1655,112 @@ func TestProxyCONNECTFallbackToBlackhole(t *testing.T) {
 
 	if resp.StatusCode != 451 {
 		t.Errorf("status = %d, want 451 (fallback to blackhole)", resp.StatusCode)
+	}
+}
+
+// startProxyPrivate is like startProxyServer but marks the listener as
+// private, so every connection accepted on it should skip the
+// domain/route stats tables.
+func startProxyPrivate(t *testing.T, matcher *route.Matcher, dialers map[string]upstream.Dialer) (*Server, string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer([]ListenerConfig{{Net: ln, Private: true, Label: "incognito"}}, matcher, dialers, nil)
+	t.Cleanup(func() { srv.Close() })
+	go srv.Serve()
+	return srv, ln.Addr().String()
+}
+
+// waitForUpstream polls the snapshot until the named upstream has at
+// least one success-or-failure recorded, then returns the snapshot. The
+// proxy records stats from a goroutine, so an unconditional read can
+// race with the relay completing.
+func waitForUpstream(t *testing.T, srv *Server, name string) (snap any) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s := srv.Stats.Snapshot()
+		if us, ok := s.Upstreams[name]; ok && us.Success+us.Failures > 0 {
+			return s
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("upstream %q never recorded a success or failure", name)
+	return nil
+}
+
+func TestProxyPrivateListenerOmitsDomainAndRouteStats(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "ok")
+	}))
+	t.Cleanup(backend.Close)
+
+	matcher := route.NewMatcher(nil) // direct
+	srv, addr := startProxyPrivate(t, matcher, nil)
+
+	client := &http.Client{Transport: &http.Transport{
+		Proxy: http.ProxyURL(mustParseURL(t, "http://"+addr)),
+	}}
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("GET through proxy failed: %v", err)
+	}
+	resp.Body.Close()
+
+	waitForUpstream(t, srv, "direct")
+	snap := srv.Stats.Snapshot()
+
+	if got := len(snap.Domains); got != 0 {
+		t.Errorf("Domains has %d entries on private listener, want 0: %#v", got, snap.Domains)
+	}
+	if got := len(snap.Routes); got != 0 {
+		t.Errorf("Routes has %d entries on private listener, want 0: %#v", got, snap.Routes)
+	}
+	if us, ok := snap.Upstreams["direct"]; !ok || us.Success == 0 {
+		t.Errorf("Upstreams[direct] should still record on private listener, got %+v", us)
+	}
+	if snap.Protocols["HTTP"] == 0 {
+		t.Errorf("Protocols[HTTP] should still record on private listener, got %d", snap.Protocols["HTTP"])
+	}
+}
+
+func TestProxyPrivateRouteOmitsDomainAndRouteStats(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "ok")
+	}))
+	t.Cleanup(backend.Close)
+
+	// Use an exact-match rule for the backend host (httptest binds to
+	// 127.0.0.1 with a random port; the hostname stripped from the URL
+	// is "127.0.0.1"). Marking it Private should suppress the
+	// per-domain and per-route writes.
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: "127.0.0.1", Upstream: "direct", Private: true},
+	})
+	srv, addr := startProxyServer(t, matcher, nil)
+
+	client := &http.Client{Transport: &http.Transport{
+		Proxy: http.ProxyURL(mustParseURL(t, "http://"+addr)),
+	}}
+	resp, err := client.Get(backend.URL)
+	if err != nil {
+		t.Fatalf("GET through proxy failed: %v", err)
+	}
+	resp.Body.Close()
+
+	waitForUpstream(t, srv, "direct")
+	snap := srv.Stats.Snapshot()
+
+	if got := len(snap.Domains); got != 0 {
+		t.Errorf("Domains has %d entries for private route, want 0: %#v", got, snap.Domains)
+	}
+	if got := len(snap.Routes); got != 0 {
+		t.Errorf("Routes has %d entries for private route, want 0: %#v", got, snap.Routes)
+	}
+	if us, ok := snap.Upstreams["direct"]; !ok || us.Success == 0 {
+		t.Errorf("Upstreams[direct] should still record for private route, got %+v", us)
 	}
 }
 

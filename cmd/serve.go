@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,15 +56,18 @@ func newServeCommand(configFile *string) *cobra.Command {
 			// error here.
 			matcher, dialers := buildRouting(cfg)
 
-			// Start proxy listener
-			ln, err := net.Listen("tcp", cfg.Listen)
+			// Start proxy listeners — at least one is required.
+			if len(cfg.Listeners) == 0 {
+				return fmt.Errorf("no listeners configured (need at least one `listen` directive)")
+			}
+			listeners, err := openListeners(cfg.Listeners)
 			if err != nil {
-				return fmt.Errorf("listen on %s: %w", cfg.Listen, err)
+				return err
 			}
 
 			defer closeDialers(dialers)
 			pool := upstream.NewPool(upstream.PoolConfig{})
-			srv := proxy.NewServer(ln, matcher, dialers, pool)
+			srv := proxy.NewServer(listeners, matcher, dialers, pool)
 
 			// Start health monitor for upstream proxies
 			monitor := upstream.NewMonitor(buildMonitorTargets(cfg, dialers), 10*time.Second, 3*time.Second)
@@ -143,7 +147,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			}
 
 			// Start control socket (with access to proxy stats and upstream health)
-			ctrlSrv, err := control.NewServer(cfg.ControlSocket, logBuf, srv.Stats, monitor, pool)
+			ctrlSrv, err := control.NewServer(cfg.ControlSocket, logBuf, srv.Stats, statsStore, monitor, pool)
 			if err != nil {
 				return fmt.Errorf("control socket: %w", err)
 			}
@@ -165,7 +169,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 
 			slog.Info("subspace listening",
 				"version", Version,
-				"addr", cfg.Listen,
+				"addrs", listenSummary(cfg.Listeners),
 				"control", cfg.ControlSocket,
 				"upstreams", len(cfg.Upstreams),
 				"routes", len(cfg.Routes),
@@ -187,6 +191,66 @@ func newServeCommand(configFile *string) *cobra.Command {
 			return srv.Serve()
 		},
 	}
+}
+
+// openListeners binds each configured Listener to a TCP socket and
+// pairs it with the parsed private/label settings ready to hand to
+// proxy.NewServer. If any bind fails, listeners that were already
+// opened are closed before the error is returned so the operator
+// doesn't end up with half a daemon running on a partial set of ports.
+func openListeners(cfgs []config.Listener) ([]proxy.ListenerConfig, error) {
+	out := make([]proxy.ListenerConfig, 0, len(cfgs))
+	for _, lc := range cfgs {
+		ln, err := net.Listen("tcp", lc.Address)
+		if err != nil {
+			for _, opened := range out {
+				opened.Net.Close()
+			}
+			return nil, fmt.Errorf("listen on %s: %w", lc.Address, err)
+		}
+		out = append(out, proxy.ListenerConfig{
+			Net:     ln,
+			Private: lc.Private,
+			Label:   lc.Label,
+		})
+	}
+	return out, nil
+}
+
+// listenSummary returns a compact "addr[private:label] ..." string for
+// log lines, joining multiple listeners with a space.
+func listenSummary(ls []config.Listener) string {
+	parts := make([]string, 0, len(ls))
+	for _, l := range ls {
+		s := l.Address
+		var tags []string
+		if l.Private {
+			tags = append(tags, "private")
+		}
+		if l.Label != "" {
+			tags = append(tags, l.Label)
+		}
+		if len(tags) > 0 {
+			s += "[" + strings.Join(tags, ":") + "]"
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, " ")
+}
+
+// sameListeners reports whether two Listener slices describe the same
+// set in the same order. Used by the config reloader to decide whether
+// to warn that listener changes need a restart.
+func sameListeners(a, b []config.Listener) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // buildRouting creates a route matcher and dialer map from the
@@ -231,7 +295,13 @@ func buildRouting(cfg *config.Config) (*route.Matcher, map[string]upstream.Diale
 
 	rules := make([]route.Rule, len(cfg.Routes))
 	for i, r := range cfg.Routes {
-		rules[i] = route.Rule{Pattern: r.Pattern, Upstream: r.Via, Fallback: r.Fallback, File: r.File}
+		rules[i] = route.Rule{
+			Pattern:  r.Pattern,
+			Upstream: r.Via,
+			Fallback: r.Fallback,
+			Private:  r.Private,
+			File:     r.File,
+		}
 	}
 	matcher := route.NewMatcher(rules)
 
@@ -438,9 +508,9 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	}
 
 	// Warn about settings that require a restart
-	if newCfg.Listen != currentCfg.Listen {
-		slog.Warn("config reload: listen address changed, requires restart to take effect",
-			"current", currentCfg.Listen, "new", newCfg.Listen)
+	if !sameListeners(currentCfg.Listeners, newCfg.Listeners) {
+		slog.Warn("config reload: listener set changed, requires restart to take effect",
+			"current", listenSummary(currentCfg.Listeners), "new", listenSummary(newCfg.Listeners))
 	}
 	if newCfg.ControlSocket != currentCfg.ControlSocket {
 		slog.Warn("config reload: control_socket changed, requires restart to take effect",

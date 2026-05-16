@@ -166,6 +166,23 @@ func (c *Collector) AddRouteBytes(pattern string, bytesIn, bytesOut int64) {
 	r.bytesOut.Add(bytesOut)
 }
 
+// ForgetDomain removes the live in-memory counter for the named host.
+// Used by the stats purge command so the dashboard's running totals
+// stop including a domain that's just been wiped from the historical
+// store. Returns true if a counter was actually removed.
+func (c *Collector) ForgetDomain(host string) bool {
+	if host == "" {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.domains[host]; !ok {
+		return false
+	}
+	delete(c.domains, host)
+	return true
+}
+
 func (c *Collector) getOrCreateNamed(m *map[string]*upstreamCounters, name string) *upstreamCounters {
 	c.mu.RLock()
 	if u, ok := (*m)[name]; ok {

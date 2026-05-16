@@ -104,6 +104,7 @@ It routes traffic based on hostnames through configurable upstream proxies
 	rootCmd.AddCommand(newResolveCommand(&configFile))
 	rootCmd.AddCommand(newValidateCommand(&configFile))
 	rootCmd.AddCommand(newTopCommand(&configFile))
+	rootCmd.AddCommand(newStatsCommand(&configFile))
 	rootCmd.AddCommand(newSchemaCommand())
 	rootCmd.AddCommand(newThemeCommand())
 	rootCmd.AddCommand(newVersionCommand())

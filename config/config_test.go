@@ -33,8 +33,8 @@ func TestParseConfig(t *testing.T) {
 		t.Fatalf("Parse failed: %v", err)
 	}
 
-	if cfg.Listen != ":8080" {
-		t.Errorf("Listen = %q, want %q", cfg.Listen, ":8080")
+	if got := firstListenAddr(cfg); got != ":8080" {
+		t.Errorf("Listen = %q, want %q", got, ":8080")
 	}
 
 	if len(cfg.Upstreams) != 2 {
@@ -237,8 +237,8 @@ func TestParseConfigMinimal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-	if cfg.Listen != ":9090" {
-		t.Errorf("Listen = %q, want %q", cfg.Listen, ":9090")
+	if got := firstListenAddr(cfg); got != ":9090" {
+		t.Errorf("Listen = %q, want %q", got, ":9090")
 	}
 	if len(cfg.Upstreams) != 0 {
 		t.Errorf("got %d upstreams, want 0", len(cfg.Upstreams))
@@ -546,8 +546,8 @@ include "nothing/*.kdl"
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
 	}
-	if cfg.Listen != ":8080" {
-		t.Errorf("Listen = %q, want %q", cfg.Listen, ":8080")
+	if got := firstListenAddr(cfg); got != ":8080" {
+		t.Errorf("Listen = %q, want %q", got, ":8080")
 	}
 }
 
@@ -566,8 +566,8 @@ include "upstreams/*.kdl"
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
 	}
-	if cfg.Listen != ":8080" {
-		t.Errorf("Listen = %q, want %q", cfg.Listen, ":8080")
+	if got := firstListenAddr(cfg); got != ":8080" {
+		t.Errorf("Listen = %q, want %q", got, ":8080")
 	}
 }
 
@@ -1739,5 +1739,160 @@ theme
 	}
 	if !found {
 		t.Errorf("expected a non-fatal error mentioning theme, got %v", cfg.Errors)
+	}
+}
+
+// firstListenAddr returns the first listener's address, or "" if none.
+// Used by tests that pre-date multi-listener support and only assert
+// against a single bind address.
+func firstListenAddr(cfg *Config) string {
+	if len(cfg.Listeners) == 0 {
+		return ""
+	}
+	return cfg.Listeners[0].Address
+}
+
+func TestParseConfigListenPlainArg(t *testing.T) {
+	cfg, err := Parse([]byte(`listen "127.0.0.1:8118"`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Listeners) != 1 {
+		t.Fatalf("got %d listeners, want 1", len(cfg.Listeners))
+	}
+	l := cfg.Listeners[0]
+	if l.Address != "127.0.0.1:8118" {
+		t.Errorf("Address = %q, want %q", l.Address, "127.0.0.1:8118")
+	}
+	if l.Private {
+		t.Error("Private = true, want false")
+	}
+	if l.Label != "" {
+		t.Errorf("Label = %q, want empty", l.Label)
+	}
+}
+
+func TestParseConfigListenBlockPrivateAndLabel(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen "127.0.0.1:8119" {
+    private true
+    label "incognito"
+}
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Listeners) != 1 {
+		t.Fatalf("got %d listeners, want 1", len(cfg.Listeners))
+	}
+	l := cfg.Listeners[0]
+	if l.Address != "127.0.0.1:8119" {
+		t.Errorf("Address = %q, want %q", l.Address, "127.0.0.1:8119")
+	}
+	if !l.Private {
+		t.Error("Private = false, want true")
+	}
+	if l.Label != "incognito" {
+		t.Errorf("Label = %q, want %q", l.Label, "incognito")
+	}
+	if len(cfg.Errors) != 0 {
+		t.Errorf("unexpected errors: %v", cfg.Errors)
+	}
+}
+
+func TestParseConfigMultipleListeners(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen "127.0.0.1:8118"
+listen "127.0.0.1:8119" {
+    private true
+}
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Listeners) != 2 {
+		t.Fatalf("got %d listeners, want 2", len(cfg.Listeners))
+	}
+	if cfg.Listeners[0].Private {
+		t.Error("Listeners[0].Private = true, want false")
+	}
+	if !cfg.Listeners[1].Private {
+		t.Error("Listeners[1].Private = false, want true")
+	}
+}
+
+func TestParseConfigListenBlockRejectsUnknownChild(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen "127.0.0.1:8118" {
+    nonsense "x"
+}
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !hasErrorContaining(cfg.Errors, "nonsense") {
+		t.Errorf("expected a non-fatal error mentioning nonsense, got %v", cfg.Errors)
+	}
+	// The listener itself should still be registered.
+	if len(cfg.Listeners) != 1 {
+		t.Fatalf("got %d listeners, want 1", len(cfg.Listeners))
+	}
+}
+
+func TestParseConfigListenBlockRejectsNonBoolPrivate(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen "127.0.0.1:8118" {
+    private "yes"
+}
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !hasErrorContaining(cfg.Errors, "boolean") {
+		t.Errorf("expected a non-fatal error about boolean, got %v", cfg.Errors)
+	}
+	if cfg.Listeners[0].Private {
+		t.Error("Private should remain false when value is invalid")
+	}
+}
+
+func TestParseConfigRoutePrivate(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen ":8080"
+upstream "u" {
+    type "http"
+    address "p:3128"
+}
+route ".bank.example.com" via="u" private=true
+route ".other.com" via="u"
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Routes) != 2 {
+		t.Fatalf("got %d routes, want 2", len(cfg.Routes))
+	}
+	if !cfg.Routes[0].Private {
+		t.Error("Routes[0].Private = false, want true")
+	}
+	if cfg.Routes[1].Private {
+		t.Error("Routes[1].Private = true, want false")
+	}
+}
+
+func TestParseConfigRoutePrivateRejectsNonBool(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen ":8080"
+upstream "u" {
+    type "http"
+    address "p:3128"
+}
+route ".x.com" via="u" private="maybe"
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !hasErrorContaining(cfg.Errors, "boolean") {
+		t.Errorf("expected a non-fatal error mentioning boolean, got %v", cfg.Errors)
 	}
 }

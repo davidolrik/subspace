@@ -11,7 +11,12 @@ type Rule struct {
 	Pattern  string
 	Upstream string
 	Fallback string
-	File     string // source config file (for diagnostics)
+	// Private signals that traffic matching this rule should not be
+	// recorded against domain-identifying stats counters. Proxy handlers
+	// OR this with their listener's private flag to decide whether to
+	// skip per-domain and per-route writes.
+	Private bool
+	File    string // source config file (for diagnostics)
 }
 
 type patternKind int
@@ -28,6 +33,7 @@ type compiledRule struct {
 	pattern  string
 	upstream string
 	fallback string
+	private  bool
 	file     string
 	kind     patternKind
 	cidr     *net.IPNet
@@ -55,6 +61,7 @@ func compileRule(r Rule) compiledRule {
 		pattern:  pattern,
 		upstream: r.Upstream,
 		fallback: r.Fallback,
+		private:  r.Private,
 		file:     r.File,
 	}
 
@@ -140,6 +147,7 @@ func ruleFromCompiled(cr *compiledRule) *Rule {
 		Pattern:  cr.pattern,
 		Upstream: cr.upstream,
 		Fallback: cr.fallback,
+		Private:  cr.private,
 		File:     cr.file,
 	}
 }
