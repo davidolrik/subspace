@@ -6,15 +6,28 @@ import (
 )
 
 // recordUpstreamSeries inserts a sequence of cumulative samples for the
-// given upstream so the per-window MAX-MIN delta can be tested.
+// given upstream so the per-window delta can be tested. The first
+// sample lands one second *before* `base` so it acts as the
+// pre-window baseline; the remaining samples land at `base`, `base+1s`,
+// etc. so queries that start at `base` see the inside-the-window
+// activity attributed against that prior baseline.
 func recordUpstreamSeries(t *testing.T, store *Store, name string, base time.Time, samples []UpstreamStats) {
 	t.Helper()
-	for i, s := range samples {
+	if len(samples) == 0 {
+		return
+	}
+	// Baseline lives strictly before the window so the delta math
+	// can subtract it from the in-window values.
+	if err := store.Record(base.Add(-time.Second), Snapshot{
+		Upstreams: map[string]UpstreamStats{name: samples[0]},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range samples[1:] {
 		ts := base.Add(time.Duration(i) * time.Second)
-		snap := Snapshot{
+		if err := store.Record(ts, Snapshot{
 			Upstreams: map[string]UpstreamStats{name: s},
-		}
-		if err := store.Record(ts, snap); err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -171,11 +184,23 @@ func TestTopDomains(t *testing.T) {
 	defer store.Close()
 
 	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	// First sample lands strictly before `base` as the pre-window
+	// baseline; subsequent samples land inside the window so the delta
+	// math has something to subtract from.
 	record := func(name string, samples []UpstreamStats) {
-		for i, s := range samples {
+		if len(samples) == 0 {
+			return
+		}
+		if err := store.Record(base.Add(-time.Second), Snapshot{
+			Domains: map[string]UpstreamStats{name: samples[0]},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for i, s := range samples[1:] {
 			ts := base.Add(time.Duration(i) * time.Second)
-			snap := Snapshot{Domains: map[string]UpstreamStats{name: s}}
-			if err := store.Record(ts, snap); err != nil {
+			if err := store.Record(ts, Snapshot{
+				Domains: map[string]UpstreamStats{name: s},
+			}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -296,6 +321,199 @@ func TestTopRoutesInEmptyFilterReturnsNothing(t *testing.T) {
 	}
 	if len(top) != 0 {
 		t.Errorf("got %d entries, want 0 when filter is empty (must NOT degrade to unfiltered): %+v", len(top), top)
+	}
+}
+
+// TestTopWindowCountsPreSnapshotActivity verifies the delta includes
+// activity that landed in the very first snapshot of the domain. The
+// previous SQL used MAX(window) - MIN(window), which silently dropped
+// any cumulative value present in the first row — visible to the user
+// as "Top Activity shows the same numbers regardless of the period
+// selector" on a fresh daemon or a recently-active domain.
+func TestTopWindowCountsPreSnapshotActivity(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	base := time.Now().Add(-10 * time.Minute).Truncate(time.Second)
+
+	// Domain's very first snapshot already holds 1000 bytes (the
+	// request happened before the first 5s recorder tick). Then a
+	// later request brings it to 2500.
+	record := func(ts time.Time, bytes int64) {
+		snap := Snapshot{Domains: map[string]UpstreamStats{
+			"fresh.example": {BytesIn: bytes},
+		}}
+		if err := store.Record(ts, snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record(base, 1000)
+	record(base.Add(30*time.Second), 1000)
+	record(base.Add(time.Minute), 2500)
+	record(base.Add(2*time.Minute), 2500)
+
+	// Window starts before the first snapshot → all activity should
+	// be attributed, since nothing for this domain pre-existed the
+	// window.
+	top, err := store.TopDomains(base.Add(-time.Hour), base.Add(time.Hour), "bytes_in", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 1 {
+		t.Fatalf("got %d entries, want 1", len(top))
+	}
+	if got := top[0].Value; got != 2500 {
+		t.Errorf("delta = %d, want 2500 (all activity, including pre-first-snapshot 1000)", got)
+	}
+}
+
+// TestTopWindowExcludesPreWindowActivity verifies the inverse — that
+// activity recorded BEFORE the window is not double-counted into the
+// window's delta. Caught a previous fix attempt that read the
+// pre-window value with the wrong sign.
+func TestTopWindowExcludesPreWindowActivity(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+
+	record := func(ts time.Time, bytes int64) {
+		snap := Snapshot{Domains: map[string]UpstreamStats{
+			"long-lived.example": {BytesIn: bytes},
+		}}
+		if err := store.Record(ts, snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Pre-window activity reached 5000.
+	record(base, 5000)
+	record(base.Add(10*time.Minute), 5000)
+	// Window starts here.
+	windowStart := base.Add(30 * time.Minute)
+	// Inside the window, an additional 1500 bytes accumulate.
+	record(windowStart.Add(5*time.Minute), 6500)
+	record(windowStart.Add(20*time.Minute), 6500)
+
+	top, err := store.TopDomains(windowStart, windowStart.Add(time.Hour), "bytes_in", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 1 {
+		t.Fatalf("got %d entries, want 1", len(top))
+	}
+	if got := top[0].Value; got != 1500 {
+		t.Errorf("delta = %d, want 1500 (only the activity inside the window)", got)
+	}
+}
+
+// TestTopWindowSurvivesRestart verifies a counter reset inside the
+// window doesn't make the delta go negative (which the HAVING > 0
+// filter would otherwise silently exclude). Restarts are an
+// acknowledged best-effort case — we want to surface the post-restart
+// activity at minimum, not lose the row entirely.
+func TestTopWindowSurvivesRestart(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	record := func(ts time.Time, bytes int64) {
+		snap := Snapshot{Domains: map[string]UpstreamStats{
+			"restarted.example": {BytesIn: bytes},
+		}}
+		if err := store.Record(ts, snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Pre-window cumulative ran to 10000.
+	record(base, 10000)
+	windowStart := base.Add(10 * time.Minute)
+	// Inside the window the daemon restarts: counters drop to 0
+	// then climb back up to 300.
+	record(windowStart.Add(time.Minute), 0)
+	record(windowStart.Add(5*time.Minute), 300)
+
+	top, err := store.TopDomains(windowStart, windowStart.Add(time.Hour), "bytes_in", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 1 {
+		t.Fatalf("got %d entries, want 1 (post-restart activity should still surface)", len(top))
+	}
+	if got := top[0].Value; got != 300 {
+		t.Errorf("delta = %d, want 300 (post-restart growth)", got)
+	}
+}
+
+// TestTopWindowStraddlingRestartCountsBothSides verifies that a window
+// crossing a daemon restart attributes both the in-window growth that
+// happened pre-restart AND the post-restart growth — without picking
+// up the pre-restart historical peak (which would inflate) or the
+// post-restart cumulative alone (which would under-count).
+func TestTopWindowStraddlingRestartCountsBothSides(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	base := time.Now().Add(-15 * time.Minute).Truncate(time.Second)
+	record := func(ts time.Time, bytes int64) {
+		snap := Snapshot{Upstreams: map[string]UpstreamStats{
+			"b1": {BytesIn: bytes},
+		}}
+		if err := store.Record(ts, snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Window will cover [base+10min, base+15min] (a 5-minute window).
+	windowStart := base.Add(10 * time.Minute)
+	windowEnd := base.Add(15 * time.Minute)
+
+	// Pre-window: counter reached 200 right before the window.
+	record(base, 100)
+	record(base.Add(5*time.Minute), 200)
+	// Immediately before window start — this is the seed value the
+	// new SQL must read to attribute the first chunk of in-window
+	// growth correctly.
+	record(windowStart.Add(-5*time.Second), 200)
+
+	// In-window pre-restart: 200 → 250 (50 of in-window growth).
+	record(windowStart, 220)
+	record(windowStart.Add(2*time.Minute), 250)
+
+	// Restart inside the window at +2min30s. Counter drops to 0,
+	// then climbs to 6.
+	restart := windowStart.Add(2*time.Minute + 30*time.Second)
+	record(restart, 0)
+	record(restart.Add(time.Minute), 4)
+	record(windowEnd, 6)
+
+	top, err := store.TopUpstreams(windowStart, windowEnd, "bytes_in", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 1 {
+		t.Fatalf("got %d entries, want 1: %+v", len(top), top)
+	}
+	if top[0].Name != "b1" {
+		t.Errorf("name = %q, want %q", top[0].Name, "b1")
+	}
+	// Expected:
+	//   pre-restart in-window growth: 250 - 200 (seed) = 50
+	//   post-restart in-window growth: 6 - 0           = 6
+	//   total                                          = 56
+	if top[0].Value != 56 {
+		t.Errorf("value = %d, want 56 (pre-restart 50 + post-restart 6)", top[0].Value)
 	}
 }
 

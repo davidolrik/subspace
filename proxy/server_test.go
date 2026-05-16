@@ -1658,6 +1658,100 @@ func TestProxyCONNECTFallbackToBlackhole(t *testing.T) {
 	}
 }
 
+// waitForError polls the snapshot until the named error counter is
+// at least 1, then returns. Used to avoid races against the goroutine
+// that records the stat. Fails the test on timeout.
+func waitForError(t *testing.T, srv *Server, name string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if srv.Stats.Snapshot().Errors[name] > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("error %q never recorded", name)
+}
+
+func TestProxyDNSFailureAttributesToDomainNotUpstream(t *testing.T) {
+	// .invalid is reserved by RFC 6761 and guaranteed never to resolve.
+	const badHost = "no-such-host.invalid"
+
+	matcher := route.NewMatcher(nil) // direct
+	srv, addr := startProxyServer(t, matcher, nil)
+
+	client := &http.Client{Transport: &http.Transport{
+		Proxy: http.ProxyURL(mustParseURL(t, "http://"+addr)),
+	}}
+	resp, err := client.Get("http://" + badHost + "/")
+	if err != nil {
+		// A proxy-level 502 reaches the client as a normal response, so
+		// an error here is itself a test failure.
+		t.Fatalf("GET should reach the proxy and return a response: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 502 {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+
+	waitForError(t, srv, "dns_failed")
+	snap := srv.Stats.Snapshot()
+
+	// Per-domain failure should be visible — that's the whole point.
+	dom, ok := snap.Domains[badHost]
+	if !ok || dom.Failures == 0 {
+		t.Errorf("Domains[%q].Failures should be >0, got %+v", badHost, dom)
+	}
+
+	// And per-route, since route patterns are the second axis on the
+	// failures view.
+	rt, ok := snap.Routes["direct"]
+	if !ok || rt.Failures == 0 {
+		t.Errorf("Routes[direct].Failures should be >0, got %+v", rt)
+	}
+
+	// Upstream should NOT be attributed — DNS resolution for the target
+	// hostname happens before any dial reaches an upstream, so blaming
+	// "direct" for a remote DNS issue would be misleading.
+	if us, ok := snap.Upstreams["direct"]; ok && us.Failures > 0 {
+		t.Errorf("Upstreams[direct].Failures should be 0 for DNS failure, got %+v", us)
+	}
+}
+
+func TestProxyDNSFailureOnPrivateListenerStillAttributes(t *testing.T) {
+	// Failures are diagnostic data the operator needs regardless of the
+	// connection's private flag — they already surface in `subspace
+	// logs` either way. Only the *success* side respects private.
+	const badHost = "no-such-host.invalid"
+
+	matcher := route.NewMatcher(nil)
+	srv, addr := startProxyPrivate(t, matcher, nil)
+
+	client := &http.Client{Transport: &http.Transport{
+		Proxy: http.ProxyURL(mustParseURL(t, "http://"+addr)),
+	}}
+	resp, err := client.Get("http://" + badHost + "/")
+	if err != nil {
+		t.Fatalf("GET should reach the proxy: %v", err)
+	}
+	resp.Body.Close()
+
+	waitForError(t, srv, "dns_failed")
+	snap := srv.Stats.Snapshot()
+
+	dom, ok := snap.Domains[badHost]
+	if !ok || dom.Failures == 0 {
+		t.Errorf("Domains[%q].Failures should be >0 (failures bypass private), got %+v", badHost, dom)
+	}
+	rt, ok := snap.Routes["direct"]
+	if !ok || rt.Failures == 0 {
+		t.Errorf("Routes[direct].Failures should be >0 (failures bypass private), got %+v", rt)
+	}
+	if snap.Errors["dns_failed"] == 0 {
+		t.Error("dns_failed rollup should record")
+	}
+}
+
 // startProxyPrivate is like startProxyServer but marks the listener as
 // private, so every connection accepted on it should skip the
 // domain/route stats tables.

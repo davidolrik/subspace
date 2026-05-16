@@ -39,14 +39,16 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request, l boundListene
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", host, "error", err)
 			s.Stats.IncError("dns_failed")
+			s.recordHostFailure(host, route.pattern)
 			conn.Write(pages.ErrorPage(502, "Host Not Found", host))
 		} else if errors.Is(err, errUpstreamUnhealthy) {
 			slog.Error("upstream unavailable", "host", host, "via", usedUpstream)
 			s.Stats.IncError("dial_failed")
+			s.recordFailure(host, route.pattern, usedUpstream)
 			conn.Write(pages.ErrorPage(502, "Upstream Unavailable", "Upstream '"+usedUpstream+"' is not reachable"))
 		} else {
 			slog.Error("CONNECT dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
-			s.recordFailure(host, route.pattern, usedUpstream, route.private)
+			s.recordFailure(host, route.pattern, usedUpstream)
 			s.Stats.IncError("dial_failed")
 			conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
 		}

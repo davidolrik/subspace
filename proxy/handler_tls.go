@@ -183,9 +183,10 @@ func (s *Server) handleTLS(conn *PeekConn, l boundListener) {
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "sni", sni, "error", err)
 			s.Stats.IncError("dns_failed")
+			s.recordHostFailure(sni, route.pattern)
 		} else {
 			slog.Error("TLS dial failed", "sni", sni, "target", targetAddr, "via", usedUpstream, "error", err)
-			s.recordFailure(sni, route.pattern, usedUpstream, route.private)
+			s.recordFailure(sni, route.pattern, usedUpstream)
 			s.Stats.IncError("dial_failed")
 		}
 		conn.Close()

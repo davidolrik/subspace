@@ -106,9 +106,10 @@ func (s *Server) handleSOCKS5(conn *PeekConn, l boundListener) {
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", hostname, "error", err)
 			s.Stats.IncError("dns_failed")
+			s.recordHostFailure(hostname, route.pattern)
 		} else {
 			slog.Error("SOCKS5 dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
-			s.recordFailure(hostname, route.pattern, usedUpstream, route.private)
+			s.recordFailure(hostname, route.pattern, usedUpstream)
 			s.Stats.IncError("dial_failed")
 		}
 		s.socks5Reply(conn, socks5StatusFailure, "0.0.0.0", 0)

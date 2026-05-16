@@ -67,14 +67,16 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request, l boundListener) 
 			if isDNSError(err) {
 				slog.Error("DNS lookup failed", "host", hostname, "error", err)
 				s.Stats.IncError("dns_failed")
+				s.recordHostFailure(hostname, route.pattern)
 				conn.Write(pages.ErrorPage(502, "Host Not Found", hostname))
 			} else if errors.Is(err, errUpstreamUnhealthy) {
 				slog.Error("upstream unavailable", "host", hostname, "via", usedUpstream)
 				s.Stats.IncError("dial_failed")
+				s.recordFailure(hostname, route.pattern, usedUpstream)
 				conn.Write(pages.ErrorPage(502, "Upstream Unavailable", "Upstream '"+usedUpstream+"' is not reachable"))
 			} else {
 				slog.Error("HTTP dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
-				s.recordFailure(hostname, route.pattern, usedUpstream, route.private)
+				s.recordFailure(hostname, route.pattern, usedUpstream)
 				s.Stats.IncError("dial_failed")
 				conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
 			}
@@ -147,14 +149,16 @@ func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr s
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", req.Host, "error", err)
 			s.Stats.IncError("dns_failed")
+			s.recordHostFailure(hostname, route.pattern)
 			conn.Write(pages.ErrorPage(502, "Host Not Found", req.Host))
 		} else if errors.Is(err, errUpstreamUnhealthy) {
 			slog.Error("upstream unavailable", "host", req.Host, "via", usedUpstream)
 			s.Stats.IncError("dial_failed")
+			s.recordFailure(hostname, route.pattern, usedUpstream)
 			conn.Write(pages.ErrorPage(502, "Upstream Unavailable", "Upstream '"+usedUpstream+"' is not reachable"))
 		} else {
 			slog.Error("WebSocket dial failed", "target", targetAddr, "via", usedUpstream, "error", err)
-			s.recordFailure(hostname, route.pattern, usedUpstream, route.private)
+			s.recordFailure(hostname, route.pattern, usedUpstream)
 			s.Stats.IncError("dial_failed")
 			conn.Write(pages.ErrorPage(502, "Dial Failed", err.Error()))
 		}

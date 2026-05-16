@@ -318,12 +318,27 @@ func (s *Server) recordSuccess(host, pattern, usedUpstream string, private bool)
 	s.Stats.IncRoute(pattern, true)
 }
 
-// recordFailure mirrors recordSuccess on the failure side.
-func (s *Server) recordFailure(host, pattern, usedUpstream string, private bool) {
+// recordFailure mirrors recordSuccess on the failure side, but
+// deliberately ignores the connection's private flag. Failures are
+// diagnostic data the operator needs in the per-domain/per-route view
+// to triage broken upstreams — and they already appear in `subspace
+// logs` regardless, so the dashboard isn't a fresh disclosure
+// surface. Successes (which represent actual browsing history) are
+// the side that respects private; see recordSuccess.
+func (s *Server) recordFailure(host, pattern, usedUpstream string) {
 	s.Stats.IncUpstream(usedUpstream, false)
-	if private {
-		return
-	}
+	s.Stats.IncDomain(host, false)
+	s.Stats.IncRoute(pattern, false)
+}
+
+// recordHostFailure records a failure attributable to a destination
+// host but not to any upstream — e.g. a DNS lookup for the target
+// hostname failed before any dial reached an upstream. Without this
+// attribution, the global error counter (`dns_failed`) goes up but
+// the per-domain failures view stays empty, hiding which host is
+// flaking. Like recordFailure, this runs even for private
+// connections; see that function's comment for the rationale.
+func (s *Server) recordHostFailure(host, pattern string) {
 	s.Stats.IncDomain(host, false)
 	s.Stats.IncRoute(pattern, false)
 }

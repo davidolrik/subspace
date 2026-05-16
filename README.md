@@ -118,18 +118,29 @@ listen "127.0.0.1:8119" {
 }
 ```
 
-`private` makes every connection accepted on the listener "private":
-the per-domain and per-route stats tables don't record the traffic, but
-total connections, protocol breakdowns and per-upstream byte counts
-still do — so totals on the dashboard remain accurate. Point an
-"incognito" browser profile at the private port (e.g.
-`HTTPS_PROXY=http://127.0.0.1:8119`) and that browsing won't appear in
-the per-domain or per-route history.
+`private` suppresses *successful* per-domain and per-route writes for
+every connection accepted on the listener. Total connections, protocol
+breakdowns and per-upstream byte counts still record so the rollups
+stay accurate. Point an "incognito" browser profile at the private
+port (e.g. `HTTPS_PROXY=http://127.0.0.1:8119`) and successful browsing
+won't appear in the per-domain or per-route history.
+
+**Failures are recorded either way.** A failed connection didn't
+transfer any payload, and the failure already surfaces in `subspace
+logs` regardless — the dashboard isn't a new disclosure surface.
+Suppressing failures from the per-domain view would just hide
+diagnostic data the operator needs to triage broken upstreams. So
+private affects success/bytes only; failures always attribute to
+domain and route.
 
 This only hides traffic from **subspace's own statistics**. SNI is
 still visible on the wire to anyone who can observe your network. If
 that's your threat model, use a VPN or Tor — not a stats-tier
 "incognito" flag.
+
+If something leaked into the per-domain stats that shouldn't have
+(e.g. you forgot to switch your tool to the private port), use
+`subspace stats purge <domain>` to scrub it after the fact.
 
 Changing the listener set requires a restart; other settings still hot-reload.
 
@@ -261,7 +272,7 @@ All configured pages and the statistics page appear in a shared navigation menu.
 
 ### Built-in Pages
 
-- **Statistics** — always available at `stats.subspace.pub` (or `statistics.subspace.pub`). Shows live metrics (connections, active, upstream health), and historical charts (connections over time, traffic by upstream, protocol breakdown). Statistics are persisted to a SQLite database and retained for one year with automatic downsampling.
+- **Statistics** — always available at `stats.subspace.pub` (or `statistics.subspace.pub`). Shows live metrics (connections, active, upstream health), and historical charts (connections over time, traffic by upstream, protocol breakdown). Statistics are persisted to a SQLite database and retained for one year with automatic downsampling. Top-N windowed deltas are computed as the sum of positive per-name `LAG` differences, with a 2h pre-window lookback to seed the first sample — counter resets (daemon restarts) inside a window are skipped without distorting the totals.
 - **Fallback** — when subspace is not running, an external redirect server sends visitors to the documentation site at `https://subspace.pub/`.
 - **Error pages** — DNS failures and connection errors show styled error pages instead of bare HTTP 502 responses.
 
