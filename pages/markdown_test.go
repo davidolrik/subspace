@@ -38,16 +38,25 @@ func TestRenderMarkdownStripsEventHandlers(t *testing.T) {
 	}
 }
 
-func TestRenderMarkdownLinksGetTargetBlank(t *testing.T) {
+func TestRenderMarkdownLinksOpenInPlace(t *testing.T) {
 	html, err := RenderMarkdown(`[example](https://example.com)`)
 	if err != nil {
 		t.Fatalf("RenderMarkdown error: %v", err)
 	}
-	if !strings.Contains(html, `target="_blank"`) {
-		t.Errorf("expected target=\"_blank\" on rendered link, got: %q", html)
+	if strings.Contains(html, `target=`) {
+		t.Errorf("link should have no target attribute (open in place), got: %q", html)
 	}
-	if !strings.Contains(html, `rel=`) || !strings.Contains(html, "noopener") || !strings.Contains(html, "noreferrer") {
-		t.Errorf("expected rel=\"noopener noreferrer\" on rendered link, got: %q", html)
+}
+
+func TestRenderMarkdownPreservesExplicitTarget(t *testing.T) {
+	// Authors who explicitly want a new-tab link can write raw
+	// HTML in markdown; the sanitiser keeps the target attribute.
+	html, err := RenderMarkdown(`<a href="https://example.com" target="_blank">x</a>`)
+	if err != nil {
+		t.Fatalf("RenderMarkdown error: %v", err)
+	}
+	if !strings.Contains(html, `target="_blank"`) {
+		t.Errorf("explicit target=\"_blank\" should survive sanitisation, got: %q", html)
 	}
 }
 

@@ -41,8 +41,10 @@ var markdownRenderer = goldmark.New(
 // CommonMark + GFM produce (headings, lists, tables, code, blockquote,
 // links, basic inline formatting) and strips scripts, event handlers,
 // dangerous URI schemes, etc. We disable bluemonday's automatic
-// rel="nofollow" so addLinkTarget can write the rel value we want, and
-// allow id on headings so goldmark's auto-heading-ids survive.
+// rel="nofollow" because this dashboard isn't a public, search-engine-
+// indexed surface; allow target/rel on anchors so an author who writes
+// raw `<a target="_blank">` in markdown can opt into that explicitly.
+// We also allow id on headings so goldmark's auto-heading-ids survive.
 var markdownPolicy = func() *bluemonday.Policy {
 	p := bluemonday.UGCPolicy()
 	p.RequireNoFollowOnLinks(false)
@@ -64,9 +66,11 @@ var markdownPolicy = func() *bluemonday.Policy {
 }()
 
 // RenderMarkdown parses CommonMark + GFM markdown and returns sanitized
-// HTML safe to inject via x-html. All anchors are forced to open in a
-// new tab with rel="noopener noreferrer" to match the rest of the
-// dashboard's link behaviour and to prevent reverse-tabnabbing.
+// HTML safe to inject via x-html. Anchors are emitted without a
+// target attribute so clicks navigate in-place, matching the rest of
+// the dashboard's link cards; authors who want a new-tab link can
+// write raw `<a target="_blank">` in markdown and it survives
+// sanitisation.
 //
 // GitHub-flavored alerts are recognised — a blockquote whose first
 // paragraph starts with `[!NOTE]`, `[!TIP]`, `[!WARNING]`, `[!CAUTION]`,
@@ -108,7 +112,6 @@ func RenderMarkdownWithEnv(src string, lookup func(string) (string, bool)) (stri
 	pre := transformTaskLists(buf.String())
 	clean := markdownPolicy.SanitizeBytes([]byte(pre))
 	out := transformAlerts(string(clean))
-	out = addLinkTarget(out)
 	return strings.TrimRight(out, "\n"), nil
 }
 
@@ -289,44 +292,4 @@ func transformAlerts(html string) string {
 		}
 		return sb.String()
 	})
-}
-
-// addLinkTarget rewrites every <a href="..."> emitted by goldmark to
-// open in a new tab. We do this with a simple string scan rather than
-// HTML parsing because the sanitizer guarantees the input is well-formed
-// and only contains the small subset of tags UGCPolicy allows.
-func addLinkTarget(html string) string {
-	var b strings.Builder
-	b.Grow(len(html) + 64)
-
-	i := 0
-	for {
-		idx := strings.Index(html[i:], "<a ")
-		if idx < 0 {
-			b.WriteString(html[i:])
-			return b.String()
-		}
-		idx += i
-		end := strings.Index(html[idx:], ">")
-		if end < 0 {
-			b.WriteString(html[i:])
-			return b.String()
-		}
-		end += idx
-		b.WriteString(html[i:idx])
-
-		tag := html[idx : end+1]
-		// Only inject when href is present and target/rel aren't
-		// already set — preserves any explicit author choice.
-		if strings.Contains(tag, "href=") {
-			if !strings.Contains(tag, "target=") {
-				tag = strings.Replace(tag, "<a ", `<a target="_blank" `, 1)
-			}
-			if !strings.Contains(tag, "rel=") {
-				tag = strings.Replace(tag, "<a ", `<a rel="noopener noreferrer" `, 1)
-			}
-		}
-		b.WriteString(tag)
-		i = end + 1
-	}
 }
