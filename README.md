@@ -220,14 +220,25 @@ Pattern types:
 | Glob          | `"192.168.*.*"`  | `192.168.1.1`, `192.168.0.255`                    |
 | CIDR          | `"10.0.0.0/8"`   | any IP in the `10.0.0.0/8` subnet (IPv4 and IPv6) |
 
-Two built-in pseudo-upstreams need no `upstream` block:
+Three built-in pseudo-upstreams need no `upstream` block:
 
 - `direct` — bypass any broader matching upstream and connect straight to the target.
-- `blackhole` — drop the traffic. HTTP/CONNECT/WebSocket clients receive a synthetic
-  `HTTP/1.1 451 Unavailable For Legal Reasons`, SOCKS5 clients get reply byte `0x02`
-  (connection not allowed by ruleset), and TLS pass-through connections are closed.
-  Drops are tracked per-route, per-domain and per-upstream in `subspace status` and
-  the statistics dashboard so you can see how much traffic was prevented from leaving.
+- `blackhole` — drop the traffic *and* tell the operator about it. HTTP/CONNECT/WebSocket
+  clients receive a synthetic `HTTP/1.1 451 Unavailable For Legal Reasons`, SOCKS5 clients
+  get reply byte `0x02` (connection not allowed by ruleset), and TLS pass-through
+  connections are closed. Drops are tracked per-route, per-domain and per-upstream in
+  `subspace status` and the statistics dashboard so you can see how much traffic was
+  prevented from leaving.
+- `ignore` (alias `ignored`) — drop the traffic *quietly*. The connection is closed with
+  no protocol-level response: no 451 page, no SOCKS5 reply byte. Only the `ignore` upstream's
+  total counter is bumped — no per-domain or per-route stats. Typical use is as a fallback
+  for traffic the operator doesn't care about when the intended upstream is unreachable:
+
+  ```kdl
+  // When the corporate VPN is down, silently drop git fetches instead of
+  // leaking them to direct or surfacing 502s in the dashboard.
+  route ".git.corp.example" via="corporate" fallback="ignore"
+  ```
 
 Unmatched traffic always connects directly.
 

@@ -156,9 +156,28 @@ var validUpstreamTypes = map[string]bool{
 
 // isBuiltinUpstream reports whether name is a reserved pseudo-upstream
 // that needs no `upstream` block. "direct" connects without a proxy;
-// "blackhole" drops traffic with a protocol-appropriate refusal.
+// "blackhole" drops traffic with a protocol-appropriate refusal;
+// "ignore" silently drops the connection without recording per-domain
+// or per-route stats — see canonicalUpstreamName for the "ignored"
+// alias.
 func isBuiltinUpstream(name string) bool {
-	return name == "direct" || name == "blackhole"
+	switch name {
+	case "direct", "blackhole", "ignore", "ignored":
+		return true
+	}
+	return false
+}
+
+// canonicalUpstreamName normalises pseudo-upstream aliases to the
+// canonical name used internally and in stats. "ignored" is an alias
+// for "ignore" so the operator can read `via="ignored"` aloud as
+// "this route is ignored" without picking up two separate counters on
+// the dashboard. Non-aliases pass through unchanged.
+func canonicalUpstreamName(name string) string {
+	if name == "ignored" {
+		return "ignore"
+	}
+	return name
 }
 
 // ParseFile parses a config file, resolving include directives relative
@@ -823,10 +842,11 @@ func parseRoute(node *document.Node) (Route, error) {
 	if via == "" {
 		return Route{}, fmt.Errorf("route %q requires via property", pattern)
 	}
+	via = canonicalUpstreamName(via)
 
 	var fallback string
 	if fbVal, ok := node.Properties.Get("fallback"); ok && fbVal != nil {
-		fallback = fbVal.ValueString()
+		fallback = canonicalUpstreamName(fbVal.ValueString())
 	}
 
 	var private bool

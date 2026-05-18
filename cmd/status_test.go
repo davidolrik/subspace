@@ -10,13 +10,14 @@ import (
 func TestSortedUpstreamNames(t *testing.T) {
 	// Three buckets, alphabetical within each:
 	//   1. healthy declared upstreams
-	//   2. pseudo-upstreams ("blackhole", "direct" — always healthy)
+	//   2. pseudo-upstreams ("blackhole", "direct", "ignore" — always healthy)
 	//   3. unhealthy declared upstreams (pushed to the bottom)
 	in := map[string]control.UpstreamStatus{
 		"zebra":     {Healthy: true},
 		"direct":    {Healthy: true},
 		"alpha":     {Healthy: true},
 		"blackhole": {Healthy: true},
+		"ignore":    {Healthy: true},
 		"sick":      {Healthy: false},
 		"middle":    {Healthy: true},
 		"broken":    {Healthy: false},
@@ -24,7 +25,7 @@ func TestSortedUpstreamNames(t *testing.T) {
 	got := sortedUpstreamNames(in)
 	want := []string{
 		"alpha", "middle", "zebra", // healthy declared
-		"blackhole", "direct", // pseudo (alphabetical)
+		"blackhole", "direct", "ignore", // pseudo (alphabetical)
 		"broken", "sick", // unhealthy declared
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -33,12 +34,12 @@ func TestSortedUpstreamNames(t *testing.T) {
 }
 
 func TestIsPseudoUpstream(t *testing.T) {
-	for _, name := range []string{"direct", "blackhole"} {
+	for _, name := range []string{"direct", "blackhole", "ignore"} {
 		if !isPseudoUpstream(name) {
 			t.Errorf("isPseudoUpstream(%q) = false, want true", name)
 		}
 	}
-	for _, name := range []string{"corp", "tunnel", "", "direct-but-not"} {
+	for _, name := range []string{"corp", "tunnel", "", "direct-but-not", "ignored"} {
 		if isPseudoUpstream(name) {
 			t.Errorf("isPseudoUpstream(%q) = true, want false", name)
 		}

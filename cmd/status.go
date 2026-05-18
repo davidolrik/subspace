@@ -76,6 +76,8 @@ func printStatusOutput(status control.StatusResponse) {
 			switch {
 			case name == "blackhole":
 				badge = style.Badge(style.Success, style.BgSuccess, "BLOCK")
+			case name == "ignore":
+				badge = style.Badge(style.Success, style.BgSuccess, "DROP ")
 			case us.Healthy:
 				// Both declared healthy upstreams and "direct" land here:
 				// "direct" is reported healthy by the control server, so
@@ -135,10 +137,10 @@ func printStatusOutput(status control.StatusResponse) {
 }
 
 // isPseudoUpstream reports whether name is a built-in synthetic upstream
-// ("direct" or "blackhole") rather than an operator-declared one. Used
-// for sort order and badge rendering.
+// ("direct", "blackhole", "ignore") rather than an operator-declared
+// one. Used for sort order and badge rendering.
 func isPseudoUpstream(name string) bool {
-	return name == "direct" || name == "blackhole"
+	return name == "direct" || name == "blackhole" || name == "ignore"
 }
 
 // sortedUpstreamNames orders upstreams in three buckets so the operator

@@ -180,6 +180,12 @@ func (s *Server) handleTLS(conn *PeekConn, l boundListener) {
 			conn.Close()
 			return
 		}
+		if errors.Is(err, errIgnored) {
+			slog.Debug("ignore dropped", "protocol", "TLS", "sni", sni, "pattern", route.pattern)
+			s.recordIgnore()
+			conn.Close()
+			return
+		}
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "sni", sni, "error", err)
 			s.Stats.IncError("dns_failed")

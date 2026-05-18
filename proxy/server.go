@@ -28,10 +28,29 @@ var errUpstreamUnhealthy = errors.New("upstream is not reachable")
 // 0x02, raw close).
 var errBlackhole = errors.New("route is blackholed")
 
+// errIgnored is returned by dialWithFallback when the resolved
+// upstream (primary or fallback) is the built-in `ignore`, signalling
+// that the per-protocol handler should silently close the connection
+// without sending a refusal page or protocol-level error reply.
+// Unlike blackhole, `ignore` is for traffic the operator doesn't care
+// about — typically as a fallback when the intended upstream is down
+// and the operator wants the request to fail quietly rather than leak
+// to `direct` or surface in the blocked-traffic dashboard.
+var errIgnored = errors.New("route is ignored")
+
 // blackholeUpstream is the reserved name of the built-in pseudo-upstream
 // that drops traffic. Mirrors "direct" — no upstream block is required
 // and no dialer is registered for it.
 const blackholeUpstream = "blackhole"
+
+// ignoreUpstream is the reserved name of the built-in pseudo-upstream
+// that silently drops traffic. Like blackhole, no upstream block is
+// required and no dialer is registered; unlike blackhole, the wire
+// behaviour is a bare connection close and the only stats touched are
+// the ignore upstream's success counter (no per-domain, no per-route).
+// Config also accepts the alias "ignored", which the parser folds to
+// this canonical name.
+const ignoreUpstream = "ignore"
 
 // InternalPages serves requests for pages.subspace.pub and stats.subspace.pub.
 type InternalPages interface {
@@ -354,6 +373,15 @@ func (s *Server) recordBytes(host, pattern, usedUpstream string, bytesIn, bytesO
 	s.Stats.AddRouteBytes(pattern, bytesIn, bytesOut)
 }
 
+// recordIgnore is the bookkeeping side of a silent drop. Only the
+// ignore upstream's success counter is bumped — no per-domain, no
+// per-route, no byte counters — matching the "we don't care if this
+// works" semantic. The total tells the operator how often the ignore
+// pseudo-upstream fired; per-host detail lives in DEBUG logs.
+func (s *Server) recordIgnore() {
+	s.Stats.IncUpstream(ignoreUpstream, true)
+}
+
 // recordBlackhole is the bookkeeping side of a blackhole drop. bytesIn
 // is the request bytes the proxy received from the client before the
 // drop; bytesOut is the bytes of the synthetic refusal sent back (or 0
@@ -400,7 +428,7 @@ func (s *Server) routeFor(hostname string, listenerPrivate bool) resolvedRoute {
 	switch rule.Upstream {
 	case "direct":
 		// dialer already set to s.direct above.
-	case blackholeUpstream:
+	case blackholeUpstream, ignoreUpstream:
 		// No dialer — dialWithFallback short-circuits on the name.
 		r.dialer = nil
 	default:
@@ -414,7 +442,7 @@ func (s *Server) routeFor(hostname string, listenerPrivate bool) resolvedRoute {
 		switch rule.Fallback {
 		case "direct":
 			r.fallbackDialer = s.direct
-		case blackholeUpstream:
+		case blackholeUpstream, ignoreUpstream:
 			r.fallbackDialer = nil
 		default:
 			if d, ok := dialers[rule.Fallback]; ok {
@@ -433,9 +461,12 @@ func (s *Server) routeFor(hostname string, listenerPrivate bool) resolvedRoute {
 // returns errBlackhole without dialing — the per-protocol handler then
 // emits a refusal in the appropriate wire format.
 func (s *Server) dialWithFallback(route resolvedRoute, network, addr string) (net.Conn, string, error) {
-	// Primary blackhole short-circuits without consulting the monitor.
+	// Primary blackhole / ignore short-circuit without consulting the monitor.
 	if route.upstream == blackholeUpstream {
 		return nil, blackholeUpstream, errBlackhole
+	}
+	if route.upstream == ignoreUpstream {
+		return nil, ignoreUpstream, errIgnored
 	}
 
 	s.mu.RLock()
@@ -453,6 +484,9 @@ func (s *Server) dialWithFallback(route resolvedRoute, network, addr string) (ne
 		if route.fallbackUpstream == blackholeUpstream {
 			return nil, blackholeUpstream, errBlackhole
 		}
+		if route.fallbackUpstream == ignoreUpstream {
+			return nil, ignoreUpstream, errIgnored
+		}
 		if route.fallbackDialer != nil {
 			fallbackHealthy := monitor == nil || monitor.IsHealthy(route.fallbackUpstream)
 			if fallbackHealthy {
@@ -469,6 +503,9 @@ func (s *Server) dialWithFallback(route resolvedRoute, network, addr string) (ne
 	// Primary is unhealthy — try fallback
 	if route.fallbackUpstream == blackholeUpstream {
 		return nil, blackholeUpstream, errBlackhole
+	}
+	if route.fallbackUpstream == ignoreUpstream {
+		return nil, ignoreUpstream, errIgnored
 	}
 	if route.fallbackDialer != nil {
 		fallbackHealthy := monitor == nil || monitor.IsHealthy(route.fallbackUpstream)

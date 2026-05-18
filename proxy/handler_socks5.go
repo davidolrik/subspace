@@ -103,6 +103,14 @@ func (s *Server) handleSOCKS5(conn *PeekConn, l boundListener) {
 			s.recordBlackhole(hostname, route.pattern, 0, 0, route.private)
 			return
 		}
+		if errors.Is(err, errIgnored) {
+			slog.Debug("ignore dropped", "protocol", "SOCKS5", "host", hostname, "pattern", route.pattern)
+			// Silent drop — no SOCKS5 reply. The client sees its
+			// socket close, which is the closest analogue to "we
+			// don't care if it doesn't work" the protocol allows.
+			s.recordIgnore()
+			return
+		}
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", hostname, "error", err)
 			s.Stats.IncError("dns_failed")

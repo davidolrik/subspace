@@ -259,10 +259,12 @@ func (s *Server) Status() StatusResponse {
 		}
 	}
 
-	// Include the built-in pseudo-upstreams with their stats. Neither
-	// has a monitor target — "direct" connects without a proxy and
-	// "blackhole" drops traffic — so they're always reported healthy.
-	for _, name := range []string{"direct", "blackhole"} {
+	// Include the built-in pseudo-upstreams with their stats. None of
+	// them has a monitor target — "direct" connects without a proxy,
+	// "blackhole" refuses traffic with a 451-style drop, and "ignore"
+	// silently closes the connection — so they're always reported
+	// healthy.
+	for _, name := range []string{"direct", "blackhole", "ignore"} {
 		us := UpstreamStatus{
 			Type:    name,
 			Healthy: true,

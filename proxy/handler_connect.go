@@ -36,6 +36,12 @@ func (s *Server) handleCONNECT(conn *PeekConn, req *http.Request, l boundListene
 			conn.Close()
 			return
 		}
+		if errors.Is(err, errIgnored) {
+			slog.Debug("ignore dropped", "protocol", "CONNECT", "host", host, "pattern", route.pattern)
+			s.recordIgnore()
+			conn.Close()
+			return
+		}
 		if isDNSError(err) {
 			slog.Error("DNS lookup failed", "host", host, "error", err)
 			s.Stats.IncError("dns_failed")

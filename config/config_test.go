@@ -1880,6 +1880,42 @@ route ".other.com" via="u"
 	}
 }
 
+func TestParseConfigIgnoreUpstream(t *testing.T) {
+	cfg, err := Parse([]byte(`
+listen ":8080"
+route "x.example.com" via="ignore"
+route "y.example.com" via="ignored"
+upstream "u" {
+    type "http"
+    address "p:3128"
+}
+route ".z.example" via="u" fallback="ignore"
+route ".w.example" via="u" fallback="ignored"
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", cfg.Errors)
+	}
+	if len(cfg.Routes) != 4 {
+		t.Fatalf("got %d routes, want 4", len(cfg.Routes))
+	}
+	// Both via="ignore" and via="ignored" should canonicalise to "ignore".
+	for i, r := range cfg.Routes {
+		switch i {
+		case 0, 1:
+			if r.Via != "ignore" {
+				t.Errorf("Routes[%d].Via = %q, want canonical %q", i, r.Via, "ignore")
+			}
+		case 2, 3:
+			if r.Fallback != "ignore" {
+				t.Errorf("Routes[%d].Fallback = %q, want canonical %q", i, r.Fallback, "ignore")
+			}
+		}
+	}
+}
+
 func TestParseConfigRoutePrivateRejectsNonBool(t *testing.T) {
 	cfg, err := Parse([]byte(`
 listen ":8080"

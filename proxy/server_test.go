@@ -1627,6 +1627,91 @@ func TestProxyTLSBlackhole(t *testing.T) {
 	}
 }
 
+// TestProxyHTTPIgnoreSilentlyDrops asserts that a route with via="ignore"
+// causes the proxy to close the connection without sending any response
+// body, and bumps only the `ignore` upstream counter — no per-domain or
+// per-route writes.
+func TestProxyHTTPIgnoreSilentlyDrops(t *testing.T) {
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: ".dontcare.example", Upstream: "ignore"},
+	})
+	srv, addr := startProxyServer(t, matcher, nil)
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "GET http://foo.dontcare.example/ HTTP/1.1\r\nHost: foo.dontcare.example\r\n\r\n")
+
+	// Reading should yield EOF (silent close), not a 451 or 502 page.
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if n != 0 || (err != io.EOF && err != nil && !containsStr(err.Error(), "EOF") && !containsStr(err.Error(), "reset")) {
+		t.Errorf("ignore should silently close; got n=%d, err=%v, body=%q", n, err, string(buf[:n]))
+	}
+
+	// Wait for the ignore counter to land.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if srv.Stats.Snapshot().Upstreams["ignore"].Success >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	snap := srv.Stats.Snapshot()
+	if got := snap.Upstreams["ignore"].Success; got != 1 {
+		t.Errorf("upstreams[ignore].Success = %d, want 1", got)
+	}
+	if len(snap.Domains) != 0 {
+		t.Errorf("Domains should not be bumped for ignore; got %#v", snap.Domains)
+	}
+	if len(snap.Routes) != 0 {
+		t.Errorf("Routes should not be bumped for ignore; got %#v", snap.Routes)
+	}
+}
+
+// TestProxyCONNECTFallbackToIgnore covers the typical use case the
+// feature was added for: a route's primary upstream is unreachable,
+// and the operator wants the connection to fail silently rather than
+// surface a 502 or leak to direct.
+func TestProxyCONNECTFallbackToIgnore(t *testing.T) {
+	matcher := route.NewMatcher([]route.Rule{
+		{Pattern: ".sometimes.example", Upstream: "dead", Fallback: "ignore"},
+	})
+	deadDialer := upstream.NewHTTPConnectDialer("127.0.0.1:1", "", "")
+	dialers := map[string]upstream.Dialer{"dead": deadDialer}
+
+	srv, proxyAddr := startProxyServer(t, matcher, dialers)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "CONNECT tracker.sometimes.example:443 HTTP/1.1\r\nHost: tracker.sometimes.example:443\r\n\r\n")
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if n != 0 || (err != io.EOF && err != nil && !containsStr(err.Error(), "EOF") && !containsStr(err.Error(), "reset")) {
+		t.Errorf("CONNECT ignore fallback should silently close; got n=%d err=%v body=%q", n, err, string(buf[:n]))
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if srv.Stats.Snapshot().Upstreams["ignore"].Success >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := srv.Stats.Snapshot().Upstreams["ignore"].Success; got != 1 {
+		t.Errorf("ignore upstream success = %d, want 1", got)
+	}
+}
+
 // TestProxyCONNECTFallbackToBlackhole asserts that a route with a
 // failing primary upstream and fallback="blackhole" produces a 451
 // response — the fallback is honored as a deliberate drop.

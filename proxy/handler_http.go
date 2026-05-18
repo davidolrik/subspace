@@ -64,6 +64,11 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request, l boundListener) 
 				s.blackholeHTTP(conn, req, hostname, route.pattern, route.private)
 				return false
 			}
+			if errors.Is(err, errIgnored) {
+				slog.Debug("ignore dropped", "protocol", "HTTP", "host", hostname, "pattern", route.pattern)
+				s.recordIgnore()
+				return false
+			}
 			if isDNSError(err) {
 				slog.Error("DNS lookup failed", "host", hostname, "error", err)
 				s.Stats.IncError("dns_failed")
@@ -144,6 +149,11 @@ func (s *Server) handleWebSocket(conn *PeekConn, req *http.Request, targetAddr s
 	if err != nil {
 		if errors.Is(err, errBlackhole) {
 			s.blackholeHTTP(conn, req, hostname, route.pattern, route.private)
+			return
+		}
+		if errors.Is(err, errIgnored) {
+			slog.Debug("ignore dropped", "protocol", "WebSocket", "host", hostname, "pattern", route.pattern)
+			s.recordIgnore()
 			return
 		}
 		if isDNSError(err) {
