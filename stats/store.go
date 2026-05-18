@@ -82,8 +82,24 @@ CREATE INDEX IF NOT EXISTS idx_snap_rt_ts ON snapshot_routes(timestamp);
 `
 
 // OpenStore opens or creates a SQLite database at the given path.
+//
+// Pragmas are passed via the DSN so every connection from the pool
+// inherits them — setting them with db.Exec only affects one connection:
+//   - busy_timeout: wait up to 5s for a locked DB instead of failing
+//     immediately with SQLITE_BUSY.
+//   - journal_mode=WAL: lets reads run concurrently with a writer.
+//   - synchronous=NORMAL: safe in WAL mode and noticeably faster than
+//     the FULL default.
+//   - journal_size_limit: cap the *-wal sidecar at 64 MiB. After each
+//     checkpoint SQLite truncates the file back to this limit, so a
+//     transient long-running reader can't leave us with a multi-GB WAL.
 func OpenStore(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	const dsnPragmas = "?_pragma=busy_timeout(5000)" +
+		"&_pragma=journal_mode(WAL)" +
+		"&_pragma=synchronous(NORMAL)" +
+		"&_pragma=journal_size_limit(67108864)"
+
+	db, err := sql.Open("sqlite", path+dsnPragmas)
 	if err != nil {
 		return nil, fmt.Errorf("opening stats database: %w", err)
 	}
@@ -93,18 +109,24 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("creating stats schema: %w", err)
 	}
 
-	// WAL mode for better concurrent read/write performance
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("setting WAL mode: %w", err)
-	}
-
 	return &Store{db: db}, nil
 }
 
-// Close closes the database.
+// Close runs a TRUNCATE checkpoint so the *-wal sidecar is flushed and
+// shrunk before the connection pool drains, then closes the database.
 func (s *Store) Close() error {
+	s.truncateWAL()
 	return s.db.Close()
+}
+
+// truncateWAL runs a TRUNCATE checkpoint to flush the WAL into the main
+// DB file and shrink the *-wal sidecar back to zero. Best-effort: if a
+// reader is pinning the WAL, SQLite returns SQLITE_BUSY and the file
+// keeps its current size — that's fine, the next call will retry.
+// Called after bulk-write operations (Prune, Downsample) and on Close
+// to keep the WAL from growing unbounded between snapshots.
+func (s *Store) truncateWAL() {
+	_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 }
 
 // Record persists a snapshot at the given timestamp.
@@ -340,7 +362,11 @@ func (s *Store) Prune(olderThan time.Duration) error {
 			return fmt.Errorf("pruning %s: %w", table, err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.truncateWAL()
+	return nil
 }
 
 // Downsample aggregates fine-grained data older than `olderThan` into
@@ -465,5 +491,9 @@ func (s *Store) Downsample(olderThan time.Duration, bucket time.Duration) error 
 	}
 	tx.Exec("DROP TABLE tmp_rt")
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.truncateWAL()
+	return nil
 }

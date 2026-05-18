@@ -342,3 +342,154 @@ func TestStorePruneZeroIsNoOp(t *testing.T) {
 		t.Errorf("Prune(0) deleted rows: count = %d, want 5 (no-op)", count)
 	}
 }
+
+// TestStorePragmas verifies the connection-level pragmas that protect
+// the stats DB from unbounded WAL growth and busy-failures. These are
+// set via the DSN so every pooled connection inherits them; query each
+// one back through database/sql to confirm.
+func TestStorePragmas(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	cases := []struct {
+		pragma string
+		want   string
+	}{
+		{"journal_mode", "wal"},
+		{"synchronous", "1"}, // NORMAL
+		{"busy_timeout", "5000"},
+		{"journal_size_limit", "67108864"}, // 64 MiB
+	}
+	for _, tc := range cases {
+		var got string
+		if err := store.db.QueryRow("PRAGMA " + tc.pragma).Scan(&got); err != nil {
+			t.Fatalf("PRAGMA %s: %v", tc.pragma, err)
+		}
+		if got != tc.want {
+			t.Errorf("PRAGMA %s = %q, want %q", tc.pragma, got, tc.want)
+		}
+	}
+}
+
+// walSize returns the current size of the *-wal sidecar for the given
+// database file, or 0 if it doesn't exist.
+func walSize(t *testing.T, dbPath string) int64 {
+	t.Helper()
+	info, err := os.Stat(dbPath + "-wal")
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// fillForWALGrowth writes enough snapshots through `store` to push the
+// WAL past `minBytes`. Fails the test if it can't get there in a
+// reasonable number of iterations — which would mean the test below is
+// vacuous.
+func fillForWALGrowth(t *testing.T, store *Store, path string, minBytes int64) {
+	t.Helper()
+	base := time.Now().Truncate(time.Second)
+	for i := 0; i < 5000; i++ {
+		snap := Snapshot{
+			Connections: int64(i),
+			Protocols:   map[string]int64{"HTTP": int64(i)},
+			Upstreams:   map[string]UpstreamStats{"direct": {Success: int64(i), BytesIn: int64(i * 1000)}},
+		}
+		if err := store.Record(base.Add(time.Duration(i)*time.Second), snap); err != nil {
+			t.Fatal(err)
+		}
+		if walSize(t, path) >= minBytes {
+			return
+		}
+	}
+	t.Fatalf("WAL did not reach %d bytes after 5000 records (size=%d)", minBytes, walSize(t, path))
+}
+
+// TestStorePruneTruncatesWAL verifies that Prune flushes the WAL after
+// it commits, so a daemon doing regular retention sweeps doesn't carry
+// a multi-GB WAL between restarts.
+func TestStorePruneTruncatesWAL(t *testing.T) {
+	path := tempDB(t)
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	fillForWALGrowth(t, store, path, 256*1024)
+
+	if err := store.Prune(time.Hour); err != nil {
+		t.Fatalf("Prune failed: %v", err)
+	}
+
+	if got := walSize(t, path); got != 0 {
+		t.Errorf("WAL size after Prune = %d, want 0", got)
+	}
+}
+
+// TestStoreDownsampleTruncatesWAL verifies that Downsample flushes the
+// WAL after it commits. Downsample rewrites every old row across six
+// tables, so it's one of the heaviest WAL producers in the system.
+func TestStoreDownsampleTruncatesWAL(t *testing.T) {
+	path := tempDB(t)
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	fillForWALGrowth(t, store, path, 256*1024)
+
+	if err := store.Downsample(time.Hour, time.Minute); err != nil {
+		t.Fatalf("Downsample failed: %v", err)
+	}
+
+	if got := walSize(t, path); got != 0 {
+		t.Errorf("WAL size after Downsample = %d, want 0", got)
+	}
+}
+
+// TestStoreCloseTruncatesWAL writes enough data to grow the WAL, then
+// verifies Close() runs a TRUNCATE checkpoint so the *-wal sidecar
+// doesn't stick around at gigabyte sizes between daemon restarts.
+func TestStoreCloseTruncatesWAL(t *testing.T) {
+	path := tempDB(t)
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := time.Now().Truncate(time.Second)
+	for i := 0; i < 2000; i++ {
+		snap := Snapshot{
+			Connections: int64(i),
+			Protocols:   map[string]int64{"HTTP": int64(i)},
+			Upstreams:   map[string]UpstreamStats{"direct": {Success: int64(i), BytesIn: int64(i * 1000)}},
+		}
+		if err := store.Record(base.Add(time.Duration(i)*time.Second), snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Confirm the WAL actually grew — otherwise the test below is vacuous.
+	if info, err := os.Stat(path + "-wal"); err != nil || info.Size() == 0 {
+		t.Fatalf("expected WAL to grow during writes; stat err=%v size=%d", err, info.Size())
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	// After a clean Close that runs PRAGMA wal_checkpoint(TRUNCATE),
+	// the WAL should be empty (truncated to 0) or removed entirely.
+	info, err := os.Stat(path + "-wal")
+	if err != nil {
+		return // absent is fine
+	}
+	if info.Size() != 0 {
+		t.Errorf("WAL size after Close = %d, want 0", info.Size())
+	}
+}
