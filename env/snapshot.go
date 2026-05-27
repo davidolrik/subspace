@@ -68,6 +68,17 @@ func (s *Snapshot) SetReferences(refs map[string]struct{}) {
 	s.refs = cp
 }
 
+// HasReferences reports whether any `${NAME}` token is currently
+// registered. The refresher consults this before each capture so it
+// can skip the login-shell spawn entirely when no markdown card uses
+// the environment — there's nothing to substitute, so capturing would
+// be pure waste.
+func (s *Snapshot) HasReferences() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.refs) > 0
+}
+
 // Replace swaps the captured environment for a freshly captured one
 // and reports whether any *referenced* variable changed value or
 // presence. Returns false when no references are registered, even

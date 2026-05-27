@@ -63,6 +63,64 @@ func TestRefresherFiresOnChangeOnlyWhenReferencedChanges(t *testing.T) {
 	}
 }
 
+func TestRefresherSkipsCaptureWhenNoReferences(t *testing.T) {
+	// With no `${NAME}` references registered, there's nothing for the
+	// renderer to substitute, so the refresher must not spawn the
+	// capture shell at all. This is what keeps idle CPU at zero for
+	// configs that don't use env substitution — spawning a login shell
+	// every tick is pure waste otherwise.
+	snap := NewSnapshot() // no SetReferences → empty reference set
+
+	var captures int32
+	capture := func(_ context.Context) (map[string]string, error) {
+		atomic.AddInt32(&captures, 1)
+		return map[string]string{"X": "v"}, nil
+	}
+	r := NewRefresher(snap, 5*time.Millisecond, capture, func() {})
+	go r.Run()
+	defer r.Stop()
+
+	// Several tick intervals — plenty of chances to (wrongly) capture.
+	time.Sleep(50 * time.Millisecond)
+
+	if got := atomic.LoadInt32(&captures); got != 0 {
+		t.Errorf("capture ran %d times with no references; want 0", got)
+	}
+}
+
+func TestRefresherResumesCaptureWhenReferencesAdded(t *testing.T) {
+	// References can appear after a config reload adds a markdown card
+	// that uses ${NAME}. The watcher updates the reference set in place
+	// but never restarts the refresher, so the guard must be evaluated
+	// per tick — capturing resumes without a daemon restart.
+	snap := NewSnapshot()
+
+	var captures int32
+	capture := func(_ context.Context) (map[string]string, error) {
+		atomic.AddInt32(&captures, 1)
+		return map[string]string{"X": "v"}, nil
+	}
+	r := NewRefresher(snap, 5*time.Millisecond, capture, func() {})
+	go r.Run()
+	defer r.Stop()
+
+	time.Sleep(40 * time.Millisecond)
+	if got := atomic.LoadInt32(&captures); got != 0 {
+		t.Fatalf("capture ran %d times before any references; want 0", got)
+	}
+
+	// A reload adds an env-referencing card.
+	snap.SetReferences(map[string]struct{}{"X": {}})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && atomic.LoadInt32(&captures) == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if atomic.LoadInt32(&captures) == 0 {
+		t.Error("capture never ran after references were added")
+	}
+}
+
 func TestRefresherStopHaltsTicker(t *testing.T) {
 	snap := NewSnapshot()
 	snap.SetReferences(map[string]struct{}{"X": {}})

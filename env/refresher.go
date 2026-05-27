@@ -138,6 +138,7 @@ type Refresher struct {
 	capture  CaptureFn
 	onChange func()
 	stop     chan struct{}
+	done     chan struct{} // closed by Run on exit so Stop can wait for it
 }
 
 // NewRefresher constructs a refresher. The cmd/ layer enforces the
@@ -151,6 +152,7 @@ func NewRefresher(snap *Snapshot, interval time.Duration, capture CaptureFn, onC
 		capture:  capture,
 		onChange: onChange,
 		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
 	}
 }
 
@@ -158,6 +160,7 @@ func NewRefresher(snap *Snapshot, interval time.Duration, capture CaptureFn, onC
 // the result via Snapshot.Replace, and invokes onChange when (and
 // only when) a referenced variable actually changed.
 func (r *Refresher) Run() {
+	defer close(r.done)
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 	for {
@@ -171,6 +174,14 @@ func (r *Refresher) Run() {
 }
 
 func (r *Refresher) tickOnce() {
+	// Nothing references the environment → nothing to refresh. Skip the
+	// shell spawn entirely; this is what keeps idle CPU at zero for
+	// configs that don't use ${NAME} substitution. Checked per tick (not
+	// once at startup) so a config reload that adds an env-referencing
+	// card resumes capturing without a daemon restart.
+	if !r.snap.HasReferences() {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	vars, err := r.capture(ctx)
@@ -185,11 +196,13 @@ func (r *Refresher) tickOnce() {
 	}
 }
 
-// Stop signals Run to return. Safe to call once; subsequent calls
-// will panic on the closed channel — matches the stats.Recorder
-// idiom.
+// Stop signals Run to return and blocks until it has. After Stop
+// returns, no further capture can run — callers (and tests) can rely
+// on the loop being fully halted. Safe to call once; subsequent calls
+// will panic on the closed channel — matches the stats.Recorder idiom.
 func (r *Refresher) Stop() {
 	close(r.stop)
+	<-r.done
 }
 
 // ResolveShell picks the shell to invoke for env capture. Order:
