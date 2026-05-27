@@ -198,6 +198,22 @@ document {
         }
     }
 
+    // -- pprof --------------------------------------------------------
+
+    node "pprof" max=1 {
+        description "Go net/http/pprof debug server. Off by default. Exposes runtime internals and lets callers trigger expensive CPU/heap profiles, so keep it bound to loopback."
+        children {
+            node "enabled" max=1 {
+                description "Enable the pprof debug server."
+                value type="bool"
+            }
+            node "listen" max=1 {
+                description "Bind address for the pprof server. Defaults to 127.0.0.1:6060 when enabled without an explicit address."
+                value type="string"
+            }
+        }
+    }
+
     // -- include ------------------------------------------------------
 
     node "include" {

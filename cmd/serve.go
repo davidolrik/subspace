@@ -157,6 +157,25 @@ func newServeCommand(configFile *string) *cobra.Command {
 			// Give the statistics page access to upstream health data
 			pagesHandler.SetStatusProvider(func() any { return ctrlSrv.Status() })
 
+			// Start the pprof debug server if the operator enabled it.
+			// Listen-address changes need a restart (see reloadConfig).
+			if cfg.PprofEnabled {
+				pprofAddr := cfg.PprofListen
+				if pprofAddr == "" {
+					pprofAddr = defaultPprofListen
+				}
+				if !isLoopbackListen(pprofAddr) {
+					slog.Warn("pprof bound to a non-loopback address — this exposes runtime internals and lets anyone trigger expensive CPU/heap profiles; bind to localhost unless remote access is intended", "addr", pprofAddr)
+				}
+				pprofSrv, err := newPprofServer(pprofAddr)
+				if err != nil {
+					return fmt.Errorf("pprof listener: %w", err)
+				}
+				defer pprofSrv.Close()
+				go pprofSrv.Serve()
+				slog.Info("pprof profiler enabled", "addr", pprofSrv.Addr())
+			}
+
 			// Surface collected non-fatal config errors: log them so
 			// the operator sees them on the terminal, and hand them
 			// to the pages handler so the internal-pages banner
@@ -515,6 +534,11 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	if newCfg.ControlSocket != currentCfg.ControlSocket {
 		slog.Warn("config reload: control_socket changed, requires restart to take effect",
 			"current", currentCfg.ControlSocket, "new", newCfg.ControlSocket)
+	}
+	if newCfg.PprofEnabled != currentCfg.PprofEnabled || newCfg.PprofListen != currentCfg.PprofListen {
+		slog.Warn("config reload: pprof settings changed, requires restart to take effect",
+			"current_enabled", currentCfg.PprofEnabled, "new_enabled", newCfg.PprofEnabled,
+			"current_listen", currentCfg.PprofListen, "new_listen", newCfg.PprofListen)
 	}
 
 	matcher, dialers := buildRouting(newCfg)

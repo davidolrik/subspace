@@ -13,3 +13,11 @@ listen "127.0.0.1:8118"
 // fast refusal (HTTP 451 / SOCKS5 0x02). No upstream block needed.
 // route ".doubleclick.net" via="blackhole"
 // route "*.telemetry.com"  via="blackhole"
+
+// Go net/http/pprof debug server, off by default. Exposes runtime
+// internals and lets callers trigger expensive profiles — keep it on
+// loopback. listen defaults to 127.0.0.1:6060 when omitted.
+// pprof {
+//   enabled true
+//   listen "127.0.0.1:6060"
+// }

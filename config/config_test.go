@@ -1669,6 +1669,71 @@ func TestParseEnvBlockUnknownChild(t *testing.T) {
 	}
 }
 
+func TestParsePprofBlock(t *testing.T) {
+	cfg, err := Parse([]byte("pprof {\nenabled true\nlisten \"127.0.0.1:7000\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if !cfg.PprofEnabled {
+		t.Errorf("PprofEnabled = false, want true")
+	}
+	if cfg.PprofListen != "127.0.0.1:7000" {
+		t.Errorf("PprofListen = %q, want %q", cfg.PprofListen, "127.0.0.1:7000")
+	}
+}
+
+func TestParsePprofBlockEnabledOnly(t *testing.T) {
+	// enabled with no listen leaves the address empty so cmd/serve.go
+	// applies its loopback default.
+	cfg, err := Parse([]byte("pprof {\nenabled true\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if !cfg.PprofEnabled {
+		t.Errorf("PprofEnabled = false, want true")
+	}
+	if cfg.PprofListen != "" {
+		t.Errorf("PprofListen = %q, want empty when unset", cfg.PprofListen)
+	}
+}
+
+func TestParsePprofBlockUnsetDefaults(t *testing.T) {
+	// No `pprof` block → disabled, address empty.
+	cfg, err := Parse([]byte(`listen ":8080"`))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.PprofEnabled {
+		t.Errorf("PprofEnabled = true, want false when unset")
+	}
+	if cfg.PprofListen != "" {
+		t.Errorf("PprofListen = %q, want empty when unset", cfg.PprofListen)
+	}
+}
+
+func TestParsePprofBlockNonBoolEnabled(t *testing.T) {
+	cfg, err := Parse([]byte("pprof {\nenabled \"yes\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if cfg.PprofEnabled {
+		t.Errorf("PprofEnabled = true, want false after invalid value")
+	}
+	if !hasErrorContaining(cfg.Errors, "enabled") {
+		t.Errorf("Errors = %v, want one mentioning the bad enabled value", cfg.Errors)
+	}
+}
+
+func TestParsePprofBlockUnknownChild(t *testing.T) {
+	cfg, err := Parse([]byte("pprof {\nwidget \"x\"\n}"))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if !hasErrorContaining(cfg.Errors, "widget") {
+		t.Errorf("Errors = %v, want one mentioning the unknown child", cfg.Errors)
+	}
+}
+
 func TestParseFatalOnKDLSyntaxError(t *testing.T) {
 	// Unclosed brace — KDL parse should fail and we return a real error.
 	input := `

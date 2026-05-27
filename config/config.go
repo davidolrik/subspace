@@ -133,6 +133,13 @@ type Config struct {
 	// The parser enforces a 10s minimum so a config typo can't turn
 	// the refresher into a fork bomb.
 	EnvRefreshInterval time.Duration
+	// PprofEnabled turns on the Go net/http/pprof debug server. Off by
+	// default. PprofListen is its bind address; empty means cmd/serve.go
+	// applies its loopback default. pprof exposes runtime internals and
+	// lets callers trigger expensive CPU/heap profiles, so it should
+	// stay bound to localhost.
+	PprofEnabled bool
+	PprofListen  string
 	// Theme names the CLI color theme. Empty means "dark" (the default).
 	// Built-in values "dark" and "light" short-circuit; any other name
 	// resolves to <configdir>/themes/<name>.kdl. The actual resolution
@@ -340,6 +347,11 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 
 		case "env":
 			for _, msg := range parseEnvBlock(node, &p.cfg.EnvShell, &p.cfg.EnvRefreshInterval) {
+				p.collect(currentFile, msg)
+			}
+
+		case "pprof":
+			for _, msg := range parsePprofBlock(node, &p.cfg.PprofEnabled, &p.cfg.PprofListen) {
 				p.collect(currentFile, msg)
 			}
 
@@ -778,6 +790,39 @@ func parseEnvBlock(node *document.Node, shell *string, refresh *time.Duration) [
 			*refresh = d
 		default:
 			errs = append(errs, fmt.Sprintf("env block: unknown node %q", child.Name.ValueString()))
+		}
+	}
+	return errs
+}
+
+// parsePprofBlock walks `pprof { ... }` nodes. Recognised children are
+// `enabled <bool>` and `listen "<addr>"`; anything else is a non-fatal
+// error so the block can grow without breaking older configs. An absent
+// or empty listen leaves the field zero so cmd/serve.go applies its
+// loopback default.
+func parsePprofBlock(node *document.Node, enabled *bool, listen *string) []string {
+	var errs []string
+	for _, child := range node.Children {
+		switch child.Name.ValueString() {
+		case "enabled":
+			if len(child.Arguments) < 1 {
+				errs = append(errs, "pprof enabled requires a boolean argument")
+				continue
+			}
+			b, perr := asBool(child.Arguments[0])
+			if perr != nil {
+				errs = append(errs, fmt.Sprintf("pprof enabled: %v", perr))
+				continue
+			}
+			*enabled = b
+		case "listen":
+			if len(child.Arguments) < 1 {
+				errs = append(errs, "pprof listen requires an address argument")
+				continue
+			}
+			*listen = child.Arguments[0].ValueString()
+		default:
+			errs = append(errs, fmt.Sprintf("pprof block: unknown node %q", child.Name.ValueString()))
 		}
 	}
 	return errs

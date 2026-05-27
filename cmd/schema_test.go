@@ -67,6 +67,7 @@ func TestSchemaCoversAllTopLevelNodes(t *testing.T) {
 		"include",
 		"listen",
 		"page",
+		"pprof",
 		"route",
 		"search-engines",
 		"stats",
