@@ -2,6 +2,7 @@ package stats
 
 import (
 	"log/slog"
+	"sync"
 	"time"
 )
 
@@ -41,6 +42,8 @@ type Recorder struct {
 	store     *Store
 	config    RecorderConfig
 	stop      chan struct{}
+	done      chan struct{} // closed by Run on exit so Stop can wait for it
+	stopOnce  sync.Once
 }
 
 // NewRecorder creates a recorder that will periodically persist stats.
@@ -54,12 +57,14 @@ func NewRecorder(collector *Collector, store *Store, config RecorderConfig) *Rec
 		store:     store,
 		config:    config,
 		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 }
 
 // Run starts the periodic snapshot and downsample loops. Blocks until
 // Stop is called.
 func (r *Recorder) Run() {
+	defer close(r.done)
 	snapTicker := time.NewTicker(r.config.SnapshotInterval)
 	defer snapTicker.Stop()
 
@@ -91,10 +96,17 @@ func (r *Recorder) Run() {
 	}
 }
 
-// Stop signals the recorder to stop and writes a final snapshot.
+// Stop signals the recorder to stop, blocks until the Run loop has
+// exited, then writes a final snapshot. Waiting for the loop first
+// means the flush is genuinely the last write — it can't race with a
+// final snapshot still in flight inside Run. Idempotent: safe to call
+// multiple times; the final flush happens exactly once.
 func (r *Recorder) Stop() {
-	close(r.stop)
-	r.Flush()
+	r.stopOnce.Do(func() {
+		close(r.stop)
+		<-r.done
+		r.Flush()
+	})
 }
 
 // Flush writes one final snapshot to the store.

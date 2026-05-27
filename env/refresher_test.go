@@ -121,6 +121,22 @@ func TestRefresherResumesCaptureWhenReferencesAdded(t *testing.T) {
 	}
 }
 
+func TestRefresherStopIdempotent(t *testing.T) {
+	// Stop must be safe to call more than once — a second call should
+	// not panic on an already-closed channel.
+	snap := NewSnapshot()
+	snap.SetReferences(map[string]struct{}{"X": {}})
+	capture := func(_ context.Context) (map[string]string, error) {
+		return map[string]string{"X": "v"}, nil
+	}
+	r := NewRefresher(snap, 5*time.Millisecond, capture, func() {})
+	go r.Run()
+	time.Sleep(15 * time.Millisecond)
+
+	r.Stop()
+	r.Stop() // must not panic
+}
+
 func TestRefresherStopHaltsTicker(t *testing.T) {
 	snap := NewSnapshot()
 	snap.SetReferences(map[string]struct{}{"X": {}})

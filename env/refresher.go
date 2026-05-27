@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -139,6 +140,7 @@ type Refresher struct {
 	onChange func()
 	stop     chan struct{}
 	done     chan struct{} // closed by Run on exit so Stop can wait for it
+	stopOnce sync.Once
 }
 
 // NewRefresher constructs a refresher. The cmd/ layer enforces the
@@ -198,11 +200,13 @@ func (r *Refresher) tickOnce() {
 
 // Stop signals Run to return and blocks until it has. After Stop
 // returns, no further capture can run — callers (and tests) can rely
-// on the loop being fully halted. Safe to call once; subsequent calls
-// will panic on the closed channel — matches the stats.Recorder idiom.
+// on the loop being fully halted. Idempotent: safe to call multiple
+// times and from multiple goroutines.
 func (r *Refresher) Stop() {
-	close(r.stop)
-	<-r.done
+	r.stopOnce.Do(func() {
+		close(r.stop)
+		<-r.done
+	})
 }
 
 // ResolveShell picks the shell to invoke for env capture. Order:

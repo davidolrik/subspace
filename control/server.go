@@ -29,7 +29,11 @@ type Server struct {
 	store     *stats.Store
 	pool      PoolStatsSource
 	mux       *http.ServeMux
+	srv       *http.Server
 	sockPath  string
+	done      chan struct{} // closed by Serve on exit so Close can wait for it
+	closeOnce sync.Once
+	closeErr  error
 
 	mu      sync.RWMutex
 	monitor *upstream.Monitor
@@ -56,12 +60,15 @@ func NewServer(sockPath string, buf *LogBuffer, collector *stats.Collector, stor
 		mux:       http.NewServeMux(),
 		sockPath:  sockPath,
 		monitor:   monitor,
+		done:      make(chan struct{}),
 	}
 
 	s.mux.HandleFunc("/logs", s.handleLogs)
 	s.mux.HandleFunc("/stats", s.handleStats)
 	s.mux.HandleFunc("/stats/purge", s.handleStatsPurge)
 	s.mux.HandleFunc("/status", s.handleStatus)
+
+	s.srv = &http.Server{Handler: s.mux}
 
 	return s, nil
 }
@@ -73,17 +80,24 @@ func (s *Server) SetMonitor(monitor *upstream.Monitor) {
 	s.mu.Unlock()
 }
 
-// Serve starts accepting connections. Blocks until the listener is closed.
+// Serve starts accepting connections. Blocks until Close is called.
 func (s *Server) Serve() error {
-	srv := &http.Server{Handler: s.mux}
-	return srv.Serve(s.listener)
+	defer close(s.done)
+	return s.srv.Serve(s.listener)
 }
 
-// Close shuts down the control server and removes the socket file.
+// Close shuts down the control server and removes the socket file. It
+// closes the listener and any active connections, then blocks until
+// Serve has returned — so after Close returns the server is fully
+// stopped with no accept loop or handlers still running. Idempotent:
+// safe to call multiple times; repeated calls return the same error.
 func (s *Server) Close() error {
-	err := s.listener.Close()
-	os.Remove(s.sockPath)
-	return err
+	s.closeOnce.Do(func() {
+		s.closeErr = s.srv.Close()
+		<-s.done
+		os.Remove(s.sockPath)
+	})
+	return s.closeErr
 }
 
 // SocketPath returns the path to the Unix socket.

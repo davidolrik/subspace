@@ -198,6 +198,89 @@ func TestControlServerColorParam(t *testing.T) {
 	}
 }
 
+func TestControlServerCloseStopsServeAndConns(t *testing.T) {
+	// Close is synchronous and force-closes active connections: after it
+	// returns, Serve has returned (no accept loop left) and an in-flight
+	// streaming handler's connection has been closed rather than left
+	// dangling — which closing only the listener wouldn't achieve.
+	buf := NewLogBuffer(16)
+	buf.Append(testEntry(slog.LevelInfo, "a line"))
+
+	sockPath := tempSocket(t)
+	srv, err := NewServer(sockPath, buf, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve() }()
+
+	// Open a streaming log connection so there's an active handler the
+	// accept-loop shutdown alone wouldn't reach.
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "GET /logs?n=1 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+
+	// Read past the response headers so the handler is actively streaming.
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		if scanner.Text() == "" {
+			break
+		}
+	}
+
+	if err := srv.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	// Close blocked until Serve returned, so it must already be done.
+	select {
+	case <-served:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after Close()")
+	}
+
+	// The active connection must have been closed by Close(): a read
+	// should reach EOF rather than block until the deadline.
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	b := make([]byte, 256)
+	for {
+		if _, rerr := conn.Read(b); rerr != nil {
+			if ne, ok := rerr.(net.Error); ok && ne.Timeout() {
+				t.Error("active connection still open after Close (read timed out)")
+			}
+			break
+		}
+	}
+
+	// The socket file is removed.
+	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
+		t.Errorf("socket file not removed after Close: stat err=%v", err)
+	}
+}
+
+func TestControlServerCloseIdempotent(t *testing.T) {
+	// Close must be safe to call more than once and return consistently.
+	buf := NewLogBuffer(16)
+	sockPath := tempSocket(t)
+	srv, err := NewServer(sockPath, buf, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+	go srv.Serve()
+	time.Sleep(15 * time.Millisecond)
+
+	if err := srv.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+	if err := srv.Close(); err != nil { // must not panic; same result
+		t.Errorf("second Close: %v", err)
+	}
+}
+
 func tempSocket(t *testing.T) string {
 	t.Helper()
 	f, err := os.CreateTemp("/tmp", "subspace-test-*.sock")
