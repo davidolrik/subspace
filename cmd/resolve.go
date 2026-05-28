@@ -254,8 +254,23 @@ func extractHostname(rawURL string) (string, error) {
 
 	// Maybe it's just a bare hostname or hostname:port
 	if u != nil && u.Scheme == "" && u.Host == "" && u.Path != "" {
-		// url.Parse("example.com") puts it in Path, not Host
-		return u.Path, nil
+		// url.Parse("example.com") puts the whole input in Path, not
+		// Host — including any trailing slash or path ("host/a/b").
+		// Keep only the host segment so the slash doesn't leak into
+		// route matching.
+		host := u.Path
+		if i := strings.IndexByte(host, '/'); i >= 0 {
+			host = host[:i]
+		}
+		return host, nil
+	}
+
+	// Bare "host:port" with no scheme parses as scheme:opaque (e.g.
+	// "host:8080" → scheme="host", opaque="8080"), so neither branch
+	// above matches. Re-parse with a "//" authority prefix to force the
+	// host:port to be recognised as the URL authority, then drop the port.
+	if u2, err := url.Parse("//" + rawURL); err == nil && u2.Host != "" {
+		return u2.Hostname(), nil
 	}
 
 	return "", fmt.Errorf("cannot extract hostname from %q", rawURL)
