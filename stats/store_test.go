@@ -181,6 +181,72 @@ func TestStoreDownsample(t *testing.T) {
 	}
 }
 
+// TestStoreDownsampleDoesNotReprocess verifies downsampling is incremental:
+// once a time range has been aggregated into buckets, a later run must not
+// re-aggregate it. We simulate the (production-impossible, since Record is
+// monotonic) case of a stray raw row landing inside an already-bucketed
+// minute and assert the existing bucket is left untouched. With a
+// reprocess-everything implementation the stray row's value folds into the
+// bucket via MAX(); the incremental implementation skips it.
+func TestStoreDownsampleDoesNotReprocess(t *testing.T) {
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	base := time.Now().Add(-2 * time.Hour).Truncate(time.Minute)
+	for i := 0; i < 12; i++ {
+		ts := base.Add(time.Duration(i) * 5 * time.Second)
+		snap := Snapshot{
+			Protocols: map[string]int64{},
+			Errors:    map[string]int64{},
+			Upstreams: map[string]UpstreamStats{},
+			Domains:   map[string]UpstreamStats{"a.example": {Success: int64(i + 1)}},
+		}
+		if err := store.Record(ts, snap); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := store.Downsample(time.Hour, time.Minute); err != nil {
+		t.Fatalf("first Downsample failed: %v", err)
+	}
+
+	var got int64
+	if err := store.db.QueryRow(
+		"SELECT success FROM snapshot_domains WHERE timestamp = ? AND domain = ?",
+		base.Unix(), "a.example",
+	).Scan(&got); err != nil {
+		t.Fatalf("reading bucket after first downsample: %v", err)
+	}
+	if got != 12 {
+		t.Fatalf("bucket success after first downsample = %d, want 12", got)
+	}
+
+	// Stray raw row inside the already-bucketed minute, below the watermark.
+	if _, err := store.db.Exec(
+		"INSERT INTO snapshot_domains (timestamp, domain, success, failures, bytes_in, bytes_out) VALUES (?, ?, ?, 0, 0, 0)",
+		base.Add(2*time.Second).Unix(), "a.example", 9999,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Downsample(time.Hour, time.Minute); err != nil {
+		t.Fatalf("second Downsample failed: %v", err)
+	}
+
+	if err := store.db.QueryRow(
+		"SELECT success FROM snapshot_domains WHERE timestamp = ? AND domain = ?",
+		base.Unix(), "a.example",
+	).Scan(&got); err != nil {
+		t.Fatalf("reading bucket after second downsample: %v", err)
+	}
+	if got != 12 {
+		t.Errorf("bucket was reprocessed: success = %d, want 12 (stray row must be ignored)", got)
+	}
+}
+
 func TestStorePruneDeletesOldRows(t *testing.T) {
 	store, err := OpenStore(tempDB(t))
 	if err != nil {
