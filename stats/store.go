@@ -79,6 +79,11 @@ CREATE TABLE IF NOT EXISTS snapshot_routes (
 	bytes_out INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_snap_rt_ts ON snapshot_routes(timestamp);
+
+CREATE TABLE IF NOT EXISTS downsample_state (
+	rule TEXT PRIMARY KEY,
+	watermark INTEGER NOT NULL
+);
 `
 
 // OpenStore opens or creates a SQLite database at the given path.
@@ -373,9 +378,33 @@ func (s *Store) Prune(olderThan time.Duration) error {
 // buckets of the given duration. Within each bucket, cumulative counters
 // (connections, success, bytes) keep the max value and gauges (active)
 // keep the average.
+//
+// Downsampling is incremental: a per-rule watermark records the highest
+// bucket-aligned timestamp already aggregated, so each call only processes
+// whole buckets that have aged past the threshold since the previous call
+// instead of rewriting the entire history every time. Only complete buckets
+// (those fully older than the cutoff) are aggregated; rows in the
+// still-filling boundary bucket stay raw until that bucket completes.
 func (s *Store) Downsample(olderThan time.Duration, bucket time.Duration) error {
-	cutoff := time.Now().Add(-olderThan).Unix()
 	bucketSec := int64(bucket.Seconds())
+	if bucketSec <= 0 {
+		return nil
+	}
+	cutoff := time.Now().Add(-olderThan).Unix()
+	// Align the upper bound down to a bucket boundary so a partially-filled
+	// boundary bucket is never aggregated and then re-aggregated next run.
+	hi := (cutoff / bucketSec) * bucketSec
+	ruleKey := fmt.Sprintf("%d:%d", int64(olderThan.Seconds()), bucketSec)
+
+	var lo int64
+	if err := s.db.QueryRow(
+		"SELECT watermark FROM downsample_state WHERE rule = ?", ruleKey,
+	).Scan(&lo); err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("reading downsample watermark: %w", err)
+	}
+	if hi <= lo {
+		return nil // no whole buckets have aged past the threshold since last run
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -383,19 +412,19 @@ func (s *Store) Downsample(olderThan time.Duration, bucket time.Duration) error 
 	}
 	defer tx.Rollback()
 
-	// For each table: create a temp table with aggregated data, delete
-	// old rows, insert aggregated rows back.
+	// For each table: aggregate the newly-aged [lo, hi) slice into a temp
+	// table, delete those rows, insert the aggregated rows back.
 
 	// --- snapshots ---
 	if _, err := tx.Exec(`
 		CREATE TEMP TABLE tmp_snap AS
 		SELECT (timestamp / ?) * ? AS ts, MAX(connections) AS connections, CAST(AVG(active) AS INTEGER) AS active
-		FROM snapshots WHERE timestamp < ?
+		FROM snapshots WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY ts
-	`, bucketSec, bucketSec, cutoff); err != nil {
+	`, bucketSec, bucketSec, lo, hi); err != nil {
 		return fmt.Errorf("aggregate snapshots: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM snapshots WHERE timestamp < ?", cutoff); err != nil {
+	if _, err := tx.Exec("DELETE FROM snapshots WHERE timestamp >= ? AND timestamp < ?", lo, hi); err != nil {
 		return fmt.Errorf("delete old snapshots: %w", err)
 	}
 	if _, err := tx.Exec("INSERT INTO snapshots SELECT * FROM tmp_snap"); err != nil {
@@ -407,12 +436,12 @@ func (s *Store) Downsample(olderThan time.Duration, bucket time.Duration) error 
 	if _, err := tx.Exec(`
 		CREATE TEMP TABLE tmp_proto AS
 		SELECT (timestamp / ?) * ? AS ts, protocol, MAX(count) AS count
-		FROM snapshot_protocols WHERE timestamp < ?
+		FROM snapshot_protocols WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY ts, protocol
-	`, bucketSec, bucketSec, cutoff); err != nil {
+	`, bucketSec, bucketSec, lo, hi); err != nil {
 		return fmt.Errorf("aggregate protocols: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM snapshot_protocols WHERE timestamp < ?", cutoff); err != nil {
+	if _, err := tx.Exec("DELETE FROM snapshot_protocols WHERE timestamp >= ? AND timestamp < ?", lo, hi); err != nil {
 		return fmt.Errorf("delete old protocols: %w", err)
 	}
 	if _, err := tx.Exec("INSERT INTO snapshot_protocols SELECT * FROM tmp_proto"); err != nil {
@@ -424,12 +453,12 @@ func (s *Store) Downsample(olderThan time.Duration, bucket time.Duration) error 
 	if _, err := tx.Exec(`
 		CREATE TEMP TABLE tmp_err AS
 		SELECT (timestamp / ?) * ? AS ts, error_type, MAX(count) AS count
-		FROM snapshot_errors WHERE timestamp < ?
+		FROM snapshot_errors WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY ts, error_type
-	`, bucketSec, bucketSec, cutoff); err != nil {
+	`, bucketSec, bucketSec, lo, hi); err != nil {
 		return fmt.Errorf("aggregate errors: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM snapshot_errors WHERE timestamp < ?", cutoff); err != nil {
+	if _, err := tx.Exec("DELETE FROM snapshot_errors WHERE timestamp >= ? AND timestamp < ?", lo, hi); err != nil {
 		return fmt.Errorf("delete old errors: %w", err)
 	}
 	if _, err := tx.Exec("INSERT INTO snapshot_errors SELECT * FROM tmp_err"); err != nil {
@@ -442,12 +471,12 @@ func (s *Store) Downsample(olderThan time.Duration, bucket time.Duration) error 
 		CREATE TEMP TABLE tmp_up AS
 		SELECT (timestamp / ?) * ? AS ts, upstream, MAX(success) AS success, MAX(failures) AS failures,
 		       MAX(bytes_in) AS bytes_in, MAX(bytes_out) AS bytes_out
-		FROM snapshot_upstreams WHERE timestamp < ?
+		FROM snapshot_upstreams WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY ts, upstream
-	`, bucketSec, bucketSec, cutoff); err != nil {
+	`, bucketSec, bucketSec, lo, hi); err != nil {
 		return fmt.Errorf("aggregate upstreams: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM snapshot_upstreams WHERE timestamp < ?", cutoff); err != nil {
+	if _, err := tx.Exec("DELETE FROM snapshot_upstreams WHERE timestamp >= ? AND timestamp < ?", lo, hi); err != nil {
 		return fmt.Errorf("delete old upstreams: %w", err)
 	}
 	if _, err := tx.Exec("INSERT INTO snapshot_upstreams SELECT * FROM tmp_up"); err != nil {
@@ -460,12 +489,12 @@ func (s *Store) Downsample(olderThan time.Duration, bucket time.Duration) error 
 		CREATE TEMP TABLE tmp_dom AS
 		SELECT (timestamp / ?) * ? AS ts, domain, MAX(success) AS success, MAX(failures) AS failures,
 		       MAX(bytes_in) AS bytes_in, MAX(bytes_out) AS bytes_out
-		FROM snapshot_domains WHERE timestamp < ?
+		FROM snapshot_domains WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY ts, domain
-	`, bucketSec, bucketSec, cutoff); err != nil {
+	`, bucketSec, bucketSec, lo, hi); err != nil {
 		return fmt.Errorf("aggregate domains: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM snapshot_domains WHERE timestamp < ?", cutoff); err != nil {
+	if _, err := tx.Exec("DELETE FROM snapshot_domains WHERE timestamp >= ? AND timestamp < ?", lo, hi); err != nil {
 		return fmt.Errorf("delete old domains: %w", err)
 	}
 	if _, err := tx.Exec("INSERT INTO snapshot_domains SELECT * FROM tmp_dom"); err != nil {
@@ -478,18 +507,26 @@ func (s *Store) Downsample(olderThan time.Duration, bucket time.Duration) error 
 		CREATE TEMP TABLE tmp_rt AS
 		SELECT (timestamp / ?) * ? AS ts, route, MAX(success) AS success, MAX(failures) AS failures,
 		       MAX(bytes_in) AS bytes_in, MAX(bytes_out) AS bytes_out
-		FROM snapshot_routes WHERE timestamp < ?
+		FROM snapshot_routes WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY ts, route
-	`, bucketSec, bucketSec, cutoff); err != nil {
+	`, bucketSec, bucketSec, lo, hi); err != nil {
 		return fmt.Errorf("aggregate routes: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM snapshot_routes WHERE timestamp < ?", cutoff); err != nil {
+	if _, err := tx.Exec("DELETE FROM snapshot_routes WHERE timestamp >= ? AND timestamp < ?", lo, hi); err != nil {
 		return fmt.Errorf("delete old routes: %w", err)
 	}
 	if _, err := tx.Exec("INSERT INTO snapshot_routes SELECT * FROM tmp_rt"); err != nil {
 		return fmt.Errorf("insert aggregated routes: %w", err)
 	}
 	tx.Exec("DROP TABLE tmp_rt")
+
+	if _, err := tx.Exec(
+		"INSERT INTO downsample_state (rule, watermark) VALUES (?, ?) "+
+			"ON CONFLICT(rule) DO UPDATE SET watermark = excluded.watermark",
+		ruleKey, hi,
+	); err != nil {
+		return fmt.Errorf("updating downsample watermark: %w", err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return err
