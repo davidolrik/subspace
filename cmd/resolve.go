@@ -93,7 +93,7 @@ func newResolveCommand(configFile *string) *cobra.Command {
 					fb = "  " + strings.Repeat(" ", maxFallback+len("fallback="))
 				}
 
-				file := formatFile(m.File, cfg)
+				file := includeChain(m.File, cfg)
 
 				marker := "  "
 				if isActive {
@@ -198,6 +198,36 @@ func fetchHealth(controlSocket string) map[string]control.UpstreamStatus {
 	}
 
 	return status.Upstreams
+}
+
+// includeChain renders the include path leading to file, with each
+// segment formatted relative to the main config's directory and joined
+// with " › ". The root config is the common ancestor of every included
+// file, so it's dropped from the chain — except for a rule that lives
+// in the root itself, where it's the only segment and is kept. Returns
+// "" for an empty file, matching formatFile.
+func includeChain(file string, cfg *config.Config) string {
+	if file == "" {
+		return ""
+	}
+	// Walk parents from the rule's file up to the root. The seen guard
+	// is belt-and-suspenders: circular includes are already rejected at
+	// parse time, so the chain is always finite.
+	var chain []string
+	seen := make(map[string]bool)
+	for f := file; f != "" && !seen[f]; f = cfg.IncludedBy[f] {
+		seen[f] = true
+		chain = append(chain, formatFile(f, cfg))
+	}
+	// chain is leaf→root. Drop the root (last element) unless it's the
+	// only one, then reverse so the remaining path renders root-first.
+	if len(chain) > 1 {
+		chain = chain[:len(chain)-1]
+	}
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	return strings.Join(chain, " › ")
 }
 
 // formatFile returns a short display path for a config file, relative to the

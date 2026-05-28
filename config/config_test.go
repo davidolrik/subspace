@@ -602,6 +602,44 @@ include "extra.kdl"
 	}
 }
 
+func TestParseFileIncludedByTracksParents(t *testing.T) {
+	dir := t.TempDir()
+
+	// main.kdl → b.kdl → c.kdl: a two-level include chain so we can
+	// assert each child records the file that pulled it in, and the
+	// root records no parent.
+	writeFile(t, filepath.Join(dir, "c.kdl"), `
+upstream "deep" {
+	type "http"
+	address "deep:3128"
+}
+`)
+	writeFile(t, filepath.Join(dir, "b.kdl"), `include "c.kdl"`)
+	writeFile(t, filepath.Join(dir, "a.kdl"), `
+listen ":8080"
+include "b.kdl"
+`)
+
+	cfg, err := ParseFile(filepath.Join(dir, "a.kdl"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	a := filepath.Join(dir, "a.kdl")
+	b := filepath.Join(dir, "b.kdl")
+	c := filepath.Join(dir, "c.kdl")
+
+	if parent := cfg.IncludedBy[b]; parent != a {
+		t.Errorf("IncludedBy[b.kdl] = %q, want %q", parent, a)
+	}
+	if parent := cfg.IncludedBy[c]; parent != b {
+		t.Errorf("IncludedBy[c.kdl] = %q, want %q", parent, b)
+	}
+	if parent, ok := cfg.IncludedBy[a]; ok {
+		t.Errorf("IncludedBy[a.kdl] = %q, want root to have no parent", parent)
+	}
+}
+
 func TestParseFileIncludeRelativePath(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub")

@@ -147,6 +147,11 @@ type Config struct {
 	// surfaces the operator's choice.
 	Theme              string
 	IncludedFiles      []string // absolute paths of all files parsed (main + includes)
+	// IncludedBy maps an included file's absolute path to the absolute
+	// path of the file whose `include` directive pulled it in. The root
+	// config file has no entry. Lets tooling (e.g. `resolve`) show the
+	// include chain a rule's source file was reached through.
+	IncludedBy map[string]string
 	// Errors holds non-fatal config problems collected during parsing
 	// and finalization (e.g. a route that refers to an unknown
 	// upstream). Subspace skips the offending item and continues so the
@@ -201,6 +206,7 @@ func ParseFile(path string) (*Config, error) {
 			Upstreams:     make(map[string]Upstream),
 			Tags:          make(map[string]Tag),
 			SearchEngines: make(map[string]SearchEngine),
+			IncludedBy:    make(map[string]string),
 		},
 		seen: make(map[string]bool),
 	}
@@ -220,6 +226,7 @@ func Parse(data []byte) (*Config, error) {
 			Upstreams:     make(map[string]Upstream),
 			Tags:          make(map[string]Tag),
 			SearchEngines: make(map[string]SearchEngine),
+			IncludedBy:    make(map[string]string),
 		},
 		seen:         make(map[string]bool),
 		noIncludes:   true,
@@ -360,7 +367,7 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 			// circular reference, glob errors). Per-item problems
 			// inside the included file go through the same collect
 			// path as the main file.
-			if err := p.handleInclude(node, baseDir); err != nil {
+			if err := p.handleInclude(node, baseDir, currentFile); err != nil {
 				return err
 			}
 
@@ -382,7 +389,7 @@ func (p *parser) collect(file, msg string) {
 	p.cfg.Errors = append(p.cfg.Errors, msg)
 }
 
-func (p *parser) handleInclude(node *document.Node, baseDir string) error {
+func (p *parser) handleInclude(node *document.Node, baseDir, parentFile string) error {
 	if p.noIncludes {
 		return fmt.Errorf("include directives require ParseFile (not Parse)")
 	}
@@ -408,6 +415,11 @@ func (p *parser) handleInclude(node *document.Node, baseDir string) error {
 	sort.Strings(matches)
 
 	for _, match := range matches {
+		// Record which file pulled this one in before recursing, so the
+		// edge is present even if the nested parse later errors out.
+		if parentFile != "" {
+			p.cfg.IncludedBy[match] = parentFile
+		}
 		if err := p.parseFile(match); err != nil {
 			return err
 		}
