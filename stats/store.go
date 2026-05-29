@@ -3,14 +3,34 @@ package stats
 import (
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
+// keyframeInterval is how often every live per-domain/route counter is
+// re-persisted even when unchanged. Between keyframes, Record writes a
+// row only for keys whose counters actually moved (see Record). The
+// interval must stay <= preWindowLookback (see topn.go): the windowed-
+// delta top-N query seeds its LAG from the last sample before the
+// window, so an idle domain needs a row within the lookback or the
+// query mistakes its whole cumulative total for in-window growth. Five
+// minutes also matches the smallest selectable UI window, so every live
+// key has a real sample at least once per window the dashboard offers.
+const keyframeInterval = 5 * time.Minute
+
 // Store persists time-series statistics snapshots to a SQLite database.
 type Store struct {
 	db *sql.DB
+
+	// sparseMu guards the change-detection state below. Record is the
+	// only writer and runs serially, but the state lives behind its own
+	// mutex so it never widens or races with any read path on the DB.
+	sparseMu     sync.Mutex
+	lastDomains  map[string]UpstreamStats
+	lastRoutes   map[string]UpstreamStats
+	lastKeyframe time.Time
 }
 
 // TimeSeries holds a sequence of data points returned by a query.
@@ -20,12 +40,12 @@ type TimeSeries struct {
 
 // DataPoint is a single time-series entry with all metrics at that instant.
 type DataPoint struct {
-	Timestamp   time.Time                  `json:"timestamp"`
-	Connections int64                      `json:"connections"`
-	Active      int64                      `json:"active"`
-	Protocols   map[string]int64           `json:"protocols"`
-	Errors      map[string]int64           `json:"errors"`
-	Upstreams   map[string]UpstreamStats   `json:"upstreams"`
+	Timestamp   time.Time                `json:"timestamp"`
+	Connections int64                    `json:"connections"`
+	Active      int64                    `json:"active"`
+	Protocols   map[string]int64         `json:"protocols"`
+	Errors      map[string]int64         `json:"errors"`
+	Upstreams   map[string]UpstreamStats `json:"upstreams"`
 }
 
 const schema = `
@@ -114,7 +134,16 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("creating stats schema: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	if err := applyMigrations(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrating stats database: %w", err)
+	}
+
+	return &Store{
+		db:          db,
+		lastDomains: make(map[string]UpstreamStats),
+		lastRoutes:  make(map[string]UpstreamStats),
+	}, nil
 }
 
 // Close runs a TRUNCATE checkpoint so the *-wal sidecar is flushed and
@@ -137,6 +166,14 @@ func (s *Store) truncateWAL() {
 // Record persists a snapshot at the given timestamp.
 func (s *Store) Record(ts time.Time, snap Snapshot) error {
 	unix := ts.Unix()
+
+	s.sparseMu.Lock()
+	defer s.sparseMu.Unlock()
+
+	// A keyframe re-persists every live per-domain/route counter even
+	// when unchanged. The first record (zero lastKeyframe) is always a
+	// keyframe so the baseline is established immediately.
+	keyframe := s.lastKeyframe.IsZero() || ts.Sub(s.lastKeyframe) >= keyframeInterval
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -178,25 +215,84 @@ func (s *Store) Record(ts time.Time, snap Snapshot) error {
 		}
 	}
 
-	for host, ds := range snap.Domains {
-		if _, err := tx.Exec(
-			"INSERT INTO snapshot_domains (timestamp, domain, success, failures, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?)",
-			unix, host, ds.Success, ds.Failures, ds.BytesIn, ds.BytesOut,
-		); err != nil {
-			return err
-		}
+	// Per-domain and per-route rows are written sparsely: only when a
+	// counter changed since its last persisted value, or on a keyframe.
+	// These tables dominate cardinality (a long-running daemon
+	// accumulates every host it ever saw), and re-writing an unchanged
+	// counter every tick is pure write amplification — an idle domain
+	// produced ~250 rows/snapshot in the field. An unchanged row also
+	// contributes zero to the windowed-delta top-N query (v-prev == 0),
+	// so omitting it is lossless for that query; the periodic keyframe
+	// keeps a seed sample within preWindowLookback so an idle-then-
+	// active domain isn't mistaken for growth-from-zero.
+	domainsWritten, err := writeSparseRows(tx, sqlInsertDomain, unix, keyframe, snap.Domains, s.lastDomains)
+	if err != nil {
+		return err
+	}
+	routesWritten, err := writeSparseRows(tx, sqlInsertRoute, unix, keyframe, snap.Routes, s.lastRoutes)
+	if err != nil {
+		return err
 	}
 
-	for pattern, rs := range snap.Routes {
-		if _, err := tx.Exec(
-			"INSERT INTO snapshot_routes (timestamp, route, success, failures, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?)",
-			unix, pattern, rs.Success, rs.Failures, rs.BytesIn, rs.BytesOut,
-		); err != nil {
-			return err
-		}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 
-	return tx.Commit()
+	// Advance the change-detection state only after the commit succeeds,
+	// so a failed write never causes the next snapshot to skip a row
+	// that was never actually persisted.
+	for _, host := range domainsWritten {
+		s.lastDomains[host] = snap.Domains[host]
+	}
+	for _, pattern := range routesWritten {
+		s.lastRoutes[pattern] = snap.Routes[pattern]
+	}
+	if keyframe {
+		s.lastKeyframe = ts
+	}
+	return nil
+}
+
+// Per-name insert statements, shared by Record and writeSparseRows. The
+// column list differs only in the name column (domain vs route); the
+// six bound parameters are (timestamp, name, success, failures,
+// bytes_in, bytes_out) in both.
+const (
+	sqlInsertDomain = "INSERT INTO snapshot_domains (timestamp, domain, success, failures, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?)"
+	sqlInsertRoute  = "INSERT INTO snapshot_routes (timestamp, route, success, failures, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?)"
+)
+
+// writeSparseRows inserts a row for each key whose counters changed
+// since its last persisted value (in last), plus every key when
+// keyframe is true. It returns the keys actually written so the caller
+// can advance its change-detection state after the transaction commits.
+//
+// The INSERT is prepared once and reused across the batch: the pure-Go
+// SQLite driver re-parses the SQL on every tx.Exec, and that parse cost
+// is the bulk of the work on a keyframe tick that re-persists every live
+// key. The statement is prepared lazily, so an idle tick — where nothing
+// changed and it isn't a keyframe — does no database work at all.
+func writeSparseRows(tx *sql.Tx, query string, unix int64, keyframe bool, current, last map[string]UpstreamStats) ([]string, error) {
+	var stmt *sql.Stmt
+	written := make([]string, 0, len(current))
+	for name, v := range current {
+		if !keyframe && last[name] == v {
+			continue
+		}
+		if stmt == nil {
+			prepared, err := tx.Prepare(query)
+			if err != nil {
+				return nil, err
+			}
+			defer prepared.Close()
+			stmt = prepared
+		}
+		if _, err := stmt.Exec(unix, name, v.Success, v.Failures, v.BytesIn, v.BytesOut); err != nil {
+			return nil, err
+		}
+		written = append(written, name)
+	}
+	return written, nil
 }
 
 // Query returns all data points within the given time range, ordered by timestamp.
