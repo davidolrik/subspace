@@ -90,11 +90,14 @@ func TestCompactionMigrationIsLosslessForTopDomains(t *testing.T) {
 	preRows := countDomainRows(t, pre)
 	pre.db.Close()
 
-	store, err := OpenStore(path) // runs the compaction migration
+	store, err := OpenStore(path)
 	if err != nil {
 		t.Fatalf("OpenStore: %v", err)
 	}
 	defer store.Close()
+	if err := store.Maintain(); err != nil { // runs the compaction migration
+		t.Fatalf("Maintain: %v", err)
+	}
 
 	postRows := countDomainRows(t, store)
 	if postRows >= preRows {
@@ -117,6 +120,41 @@ func TestCompactionMigrationIsLosslessForTopDomains(t *testing.T) {
 	}
 }
 
+// TestOpenStoreDoesNotMigrate pins the startup contract: opening the
+// store must be cheap and must NOT run the compaction migration, because
+// OpenStore sits on the path the proxy waits on before it starts
+// accepting connections. The heavy work happens only in Maintain, which
+// the daemon runs off the startup path.
+func TestOpenStoreDoesNotMigrate(t *testing.T) {
+	path := tempDB(t)
+	seedDenseDomains(t, path, time.Now().Add(-time.Hour).Truncate(time.Second))
+
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	before := countDomainRows(t, store)
+
+	// OpenStore must leave the legacy dense rows untouched...
+	var migRecorded int
+	_ = store.db.QueryRow(
+		"SELECT COUNT(*) FROM schema_migrations WHERE id = ?", migrations[0].id,
+	).Scan(&migRecorded)
+	if migRecorded != 0 {
+		t.Errorf("OpenStore recorded the migration; it should defer to Maintain")
+	}
+
+	// ...and Maintain must then compact them.
+	if err := store.Maintain(); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
+	if after := countDomainRows(t, store); after >= before {
+		t.Errorf("Maintain did not compact: before=%d after=%d", before, after)
+	}
+}
+
 // TestMigrationRunsExactlyOnce confirms the migration is recorded and not
 // re-applied: reopening the same database leaves the (already compacted)
 // row count untouched.
@@ -128,6 +166,9 @@ func TestMigrationRunsExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := store.Maintain(); err != nil {
+		t.Fatalf("Maintain: %v", err)
+	}
 	first := countDomainRows(t, store)
 	store.Close()
 
@@ -136,6 +177,9 @@ func TestMigrationRunsExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
+	if err := reopened.Maintain(); err != nil { // must be a no-op the second time
+		t.Fatalf("Maintain (reopen): %v", err)
+	}
 	if again := countDomainRows(t, reopened); again != first {
 		t.Errorf("migration re-ran on reopen: %d -> %d rows", first, again)
 	}

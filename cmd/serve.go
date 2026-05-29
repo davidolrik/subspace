@@ -20,8 +20,8 @@ import (
 	"go.olrik.dev/subspace/internal/style"
 	"go.olrik.dev/subspace/pages"
 	"go.olrik.dev/subspace/proxy"
-	"go.olrik.dev/subspace/stats"
 	"go.olrik.dev/subspace/route"
+	"go.olrik.dev/subspace/stats"
 	"go.olrik.dev/subspace/upstream"
 )
 
@@ -97,7 +97,20 @@ func newServeCommand(configFile *string) *cobra.Command {
 				recorderCfg.Retention = 0
 			}
 			recorder := stats.NewRecorder(srv.Stats, statsStore, recorderCfg)
-			go recorder.Run()
+			// Run one-time database maintenance (legacy compaction +
+			// VACUUM) and then start the recorder, both in the
+			// background. The maintenance can take tens of seconds on a
+			// large legacy database; keeping it off this path means it
+			// never delays the proxy accept loop (srv.Serve, below) — the
+			// proxy is decoupled from the stats store. The recorder starts
+			// only after maintenance so the VACUUM has exclusive DB access
+			// and doesn't fight the 5s snapshot writes.
+			go func() {
+				if err := statsStore.Maintain(); err != nil {
+					slog.Error("stats database maintenance failed", "error", err)
+				}
+				recorder.Run()
+			}()
 			defer recorder.Stop()
 
 			// Bootstrap the environment snapshot before parsing pages

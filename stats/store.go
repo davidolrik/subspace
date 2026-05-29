@@ -134,16 +134,23 @@ func OpenStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("creating stats schema: %w", err)
 	}
 
-	if err := applyMigrations(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("migrating stats database: %w", err)
-	}
-
 	return &Store{
 		db:          db,
 		lastDomains: make(map[string]UpstreamStats),
 		lastRoutes:  make(map[string]UpstreamStats),
 	}, nil
+}
+
+// Maintain runs one-time, potentially expensive database maintenance:
+// any pending migrations, including the legacy per-name compaction and
+// its VACUUM. It is deliberately separate from OpenStore so the daemon
+// can run it off the startup path — on a large legacy database the
+// compaction and VACUUM can take tens of seconds, and running them in
+// OpenStore would delay the proxy from accepting connections (see
+// cmd/serve.go). Call it before starting the snapshot recorder so the
+// VACUUM has exclusive access and doesn't contend with periodic writes.
+func (s *Store) Maintain() error {
+	return applyMigrations(s.db)
 }
 
 // Close runs a TRUNCATE checkpoint so the *-wal sidecar is flushed and
