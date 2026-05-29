@@ -124,6 +124,11 @@ type Config struct {
 	// configured default in cmd/serve.go applies when the user hasn't
 	// set a value).
 	StatsRetention time.Duration
+	// StatsBurstThreshold sets the new-connections-per-snapshot count
+	// above which a connection-burst warning is logged. Zero means
+	// "unset" (the cmd/serve.go default applies); BurstThresholdDisabled
+	// turns the check off. See parseStatsBlock.
+	StatsBurstThreshold int64
 	// EnvShell is the shell to spawn for env capture. Empty means
 	// cmd/serve.go falls back to $SHELL (or /bin/sh as a last resort).
 	EnvShell string
@@ -145,8 +150,8 @@ type Config struct {
 	// resolves to <configdir>/themes/<name>.kdl. The actual resolution
 	// and palette application happens in cmd/, not here — config just
 	// surfaces the operator's choice.
-	Theme              string
-	IncludedFiles      []string // absolute paths of all files parsed (main + includes)
+	Theme         string
+	IncludedFiles []string // absolute paths of all files parsed (main + includes)
 	// IncludedBy maps an included file's absolute path to the absolute
 	// path of the file whose `include` directive pulled it in. The root
 	// config file has no entry. Lets tooling (e.g. `resolve`) show the
@@ -228,8 +233,8 @@ func Parse(data []byte) (*Config, error) {
 			SearchEngines: make(map[string]SearchEngine),
 			IncludedBy:    make(map[string]string),
 		},
-		seen:         make(map[string]bool),
-		noIncludes:   true,
+		seen:       make(map[string]bool),
+		noIncludes: true,
 	}
 
 	if err := p.parseData(data, ""); err != nil {
@@ -348,7 +353,7 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 			}
 
 		case "stats":
-			for _, msg := range parseStatsBlock(node, &p.cfg.StatsRetention) {
+			for _, msg := range parseStatsBlock(node, &p.cfg.StatsRetention, &p.cfg.StatsBurstThreshold) {
 				p.collect(currentFile, msg)
 			}
 
@@ -736,10 +741,11 @@ func parseSearchEnginesBlock(node *document.Node, engines map[string]SearchEngin
 	return errs
 }
 
-// parseStatsBlock walks `stats { ... }` nodes. Today only `retention`
-// is recognised; unknown children are reported as non-fatal errors
-// so we can grow the block without breaking older configs.
-func parseStatsBlock(node *document.Node, retention *time.Duration) []string {
+// parseStatsBlock walks `stats { ... }` nodes. Recognised children are
+// `retention` and `burst-threshold`; unknown children are reported as
+// non-fatal errors so we can grow the block without breaking older
+// configs.
+func parseStatsBlock(node *document.Node, retention *time.Duration, burst *int64) []string {
 	var errs []string
 	for _, child := range node.Children {
 		switch child.Name.ValueString() {
@@ -755,6 +761,28 @@ func parseStatsBlock(node *document.Node, retention *time.Duration) []string {
 				continue
 			}
 			*retention = d
+		case "burst-threshold":
+			if len(child.Arguments) < 1 {
+				errs = append(errs, "stats burst-threshold requires a number argument")
+				continue
+			}
+			val := child.Arguments[0].ValueString()
+			n, err := strconv.ParseInt(val, 10, 64)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("stats burst-threshold %q: must be a non-negative integer", val))
+				continue
+			}
+			if n < 0 {
+				errs = append(errs, fmt.Sprintf("stats burst-threshold %q: must be non-negative", val))
+				continue
+			}
+			// 0 means "disable the check"; map it to the sentinel so it's
+			// distinguishable from the unset (zero-value) field.
+			if n == 0 {
+				*burst = BurstThresholdDisabled
+			} else {
+				*burst = n
+			}
 		default:
 			errs = append(errs, fmt.Sprintf("stats block: unknown node %q", child.Name.ValueString()))
 		}
@@ -847,6 +875,13 @@ func parsePprofBlock(node *document.Node, enabled *bool, listen *string) []strin
 // specified anything, while still honouring an explicit "keep
 // everything" request.
 const RetentionForever = time.Duration(-1)
+
+// BurstThresholdDisabled is the sentinel the parser writes when the
+// operator sets `stats { burst-threshold 0 }` to turn off connection-
+// burst warnings. The Config zero value (0) means "unset" — cmd/serve.go
+// then applies the recorder's built-in default — so disabling needs a
+// distinct value.
+const BurstThresholdDisabled = int64(-1)
 
 // parseRetentionDuration extends time.ParseDuration with day suffixes
 // ("30d") and the explicit sentinels "forever" / "0" for "never

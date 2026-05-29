@@ -195,6 +195,10 @@ document {
                 description "How long historical samples are kept. Accepts day suffixes (\"30d\"), Go duration syntax (\"168h\", \"12h30m\"), or \"forever\" / \"0\" to disable pruning. Defaults to 365d."
                 value type="string"
             }
+            node "burst-threshold" max=1 {
+                description "Log a warning when more than this many new connections arrive within one snapshot interval (~5s) — a sign of a connection storm. 0 disables the check. Defaults to 1000."
+                value type="integer"
+            }
         }
     }
 

@@ -96,6 +96,12 @@ func newServeCommand(configFile *string) *cobra.Command {
 			case cfg.StatsRetention == config.RetentionForever:
 				recorderCfg.Retention = 0
 			}
+			switch {
+			case cfg.StatsBurstThreshold > 0:
+				recorderCfg.BurstThreshold = cfg.StatsBurstThreshold
+			case cfg.StatsBurstThreshold == config.BurstThresholdDisabled:
+				recorderCfg.BurstThreshold = 0
+			}
 			recorder := stats.NewRecorder(srv.Stats, statsStore, recorderCfg)
 			// Run one-time database maintenance (legacy compaction +
 			// VACUUM) and then start the recorder, both in the

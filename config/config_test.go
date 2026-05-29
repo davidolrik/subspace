@@ -362,8 +362,6 @@ func TestParseConfigPageNoPages(t *testing.T) {
 	}
 }
 
-
-
 func TestParseFilePageResolvesPath(t *testing.T) {
 	dir := t.TempDir()
 
@@ -1511,6 +1509,56 @@ func TestParseStatsRetentionInvalid(t *testing.T) {
 	}
 	if !hasErrorContaining(cfg.Errors, "retention") {
 		t.Errorf("Errors = %v, want one mentioning the bad retention", cfg.Errors)
+	}
+}
+
+func TestParseStatsBurstThreshold(t *testing.T) {
+	cfg, err := Parse([]byte("stats {\nburst-threshold 5000\n}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := cfg.StatsBurstThreshold, int64(5000); got != want {
+		t.Errorf("StatsBurstThreshold = %d, want %d", got, want)
+	}
+}
+
+func TestParseStatsBurstThresholdDisabled(t *testing.T) {
+	// `burst-threshold 0` explicitly disables the check; the parser maps
+	// it to the sentinel so cmd/serve.go can tell it apart from "unset".
+	cfg, err := Parse([]byte("stats {\nburst-threshold 0\n}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StatsBurstThreshold != BurstThresholdDisabled {
+		t.Errorf("StatsBurstThreshold = %d, want BurstThresholdDisabled (%d)", cfg.StatsBurstThreshold, BurstThresholdDisabled)
+	}
+}
+
+func TestParseStatsBurstThresholdUnsetIsZero(t *testing.T) {
+	cfg, err := Parse([]byte("stats {\nretention \"30d\"\n}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StatsBurstThreshold != 0 {
+		t.Errorf("StatsBurstThreshold = %d, want 0 when unset", cfg.StatsBurstThreshold)
+	}
+}
+
+func TestParseStatsBurstThresholdInvalid(t *testing.T) {
+	for _, in := range []string{
+		"stats {\nburst-threshold \"lots\"\n}",
+		"stats {\nburst-threshold -5\n}",
+	} {
+		cfg, err := Parse([]byte(in))
+		if err != nil {
+			t.Fatalf("Parse(%q) should succeed and collect the error, got: %v", in, err)
+		}
+		if cfg.StatsBurstThreshold != 0 {
+			t.Errorf("Parse(%q): StatsBurstThreshold = %d, want 0 after invalid value", in, cfg.StatsBurstThreshold)
+		}
+		if !hasErrorContaining(cfg.Errors, "burst-threshold") {
+			t.Errorf("Parse(%q): Errors = %v, want one mentioning burst-threshold", in, cfg.Errors)
+		}
 	}
 }
 

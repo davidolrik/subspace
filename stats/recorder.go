@@ -13,6 +13,11 @@ type RecorderConfig struct {
 	// Retention controls how long historical data is kept. Zero or
 	// negative disables pruning entirely (data accumulates forever).
 	Retention time.Duration
+	// BurstThreshold logs a warning when more than this many new
+	// connections arrive within a single snapshot interval — a sign of a
+	// connection storm (e.g. a client reconnecting in a tight loop).
+	// Zero or negative disables the check.
+	BurstThreshold int64
 }
 
 // DownsampleRule defines when and how to aggregate old data.
@@ -32,6 +37,10 @@ func DefaultRecorderConfig() RecorderConfig {
 			{OlderThan: 7 * 24 * time.Hour, Bucket: time.Hour},
 		},
 		Retention: 365 * 24 * time.Hour,
+		// ~200 new connections/second sustained over a 5s interval: far
+		// above ordinary personal-daemon traffic, low enough to surface a
+		// genuine connection storm.
+		BurstThreshold: 1000,
 	}
 }
 
@@ -44,6 +53,11 @@ type Recorder struct {
 	stop      chan struct{}
 	done      chan struct{} // closed by Run on exit so Stop can wait for it
 	stopOnce  sync.Once
+
+	// Burst detection state. Run is the only caller of recordSnapshot, so
+	// these need no synchronisation.
+	lastConnections int64
+	haveLast        bool
 }
 
 // NewRecorder creates a recorder that will periodically persist stats.
@@ -77,10 +91,7 @@ func (r *Recorder) Run() {
 		case <-r.stop:
 			return
 		case <-snapTicker.C:
-			snap := r.collector.Snapshot()
-			if err := r.store.Record(time.Now(), snap); err != nil {
-				slog.Error("stats record failed", "error", err)
-			}
+			r.recordSnapshot(time.Now())
 		case <-dsampleTicker.C:
 			for _, rule := range r.config.DownsampleRules {
 				if err := r.store.Downsample(rule.OlderThan, rule.Bucket); err != nil {
@@ -93,6 +104,41 @@ func (r *Recorder) Run() {
 				}
 			}
 		}
+	}
+}
+
+// recordSnapshot captures the collector, persists it, and checks for a
+// connection burst. Called only from Run's snapshot tick.
+func (r *Recorder) recordSnapshot(now time.Time) {
+	snap := r.collector.Snapshot()
+	if err := r.store.Record(now, snap); err != nil {
+		slog.Error("stats record failed", "error", err)
+	}
+	r.detectBurst(snap)
+}
+
+// detectBurst logs a warning when the number of new connections since the
+// previous snapshot exceeds the configured threshold. The cumulative
+// connections counter is used (not the active gauge), so a storm that
+// opens and drains within one interval is still caught. The first
+// snapshot only establishes the baseline — there's nothing to diff
+// against — and a counter reset (process restart) yields a negative
+// delta that can't exceed the threshold, so neither false-positives.
+func (r *Recorder) detectBurst(snap Snapshot) {
+	defer func() {
+		r.lastConnections = snap.Connections
+		r.haveLast = true
+	}()
+	if r.config.BurstThreshold <= 0 || !r.haveLast {
+		return
+	}
+	newConns := snap.Connections - r.lastConnections
+	if newConns >= r.config.BurstThreshold {
+		slog.Warn("connection burst detected",
+			"new_connections", newConns,
+			"interval", r.config.SnapshotInterval,
+			"active", snap.Active,
+		)
 	}
 }
 

@@ -1,9 +1,90 @@
 package stats
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
+
+// captureWarnLogs redirects slog to a buffer for the duration of the test
+// so assertions can inspect emitted warnings.
+func captureWarnLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+// TestRecorderDetectsConnectionBurst checks that a jump in new
+// connections between two snapshots beyond the configured threshold logs
+// a warning, while the establishing (first) snapshot never does — there's
+// no prior sample to diff against.
+func TestRecorderDetectsConnectionBurst(t *testing.T) {
+	buf := captureWarnLogs(t)
+
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	col := New()
+	rec := NewRecorder(col, store, RecorderConfig{SnapshotInterval: time.Second, BurstThreshold: 100})
+
+	now := time.Now().Truncate(time.Second)
+
+	// Baseline snapshot: a handful of connections, no prior sample.
+	for i := 0; i < 5; i++ {
+		col.IncProtocol("TLS")
+	}
+	rec.recordSnapshot(now)
+	if strings.Contains(buf.String(), "burst") {
+		t.Fatalf("baseline snapshot logged a burst: %q", buf.String())
+	}
+
+	// Storm: 500 new connections in one interval, over the 100 threshold.
+	for i := 0; i < 500; i++ {
+		col.IncProtocol("TLS")
+	}
+	rec.recordSnapshot(now.Add(time.Second))
+
+	if !strings.Contains(buf.String(), "connection burst") {
+		t.Errorf("expected a connection burst warning, got: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "new_connections=500") {
+		t.Errorf("burst log should report the new-connection count, got: %q", buf.String())
+	}
+}
+
+// TestRecorderNoBurstUnderThreshold guards against noise: ordinary
+// per-interval growth below the threshold must not warn.
+func TestRecorderNoBurstUnderThreshold(t *testing.T) {
+	buf := captureWarnLogs(t)
+
+	store, err := OpenStore(tempDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	col := New()
+	rec := NewRecorder(col, store, RecorderConfig{SnapshotInterval: time.Second, BurstThreshold: 100})
+
+	now := time.Now().Truncate(time.Second)
+	rec.recordSnapshot(now)
+	for i := 0; i < 50; i++ { // well under the threshold
+		col.IncProtocol("TLS")
+	}
+	rec.recordSnapshot(now.Add(time.Second))
+
+	if strings.Contains(buf.String(), "burst") {
+		t.Errorf("threshold should suppress small growth, got: %q", buf.String())
+	}
+}
 
 // countSnapshotRows returns the raw number of rows in the snapshots
 // table. Counting rows (rather than Query's per-second DataPoints)
