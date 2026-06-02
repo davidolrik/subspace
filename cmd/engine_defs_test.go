@@ -12,7 +12,7 @@ import (
 // converter so a future drift between the two structs is caught here.
 func TestEngineDefs(t *testing.T) {
 	const input = `
-search-engines default="google" {
+search default="google" {
 	engine "google"   url="https://www.google.com/search?q={query}" icon="si-google" alias="g" description="Web search"
 	engine "metacpan" url="https://metacpan.org/search?q={query}"   alias="cpan"
 	engine "kagi"     url="https://kagi.com/search?q={query}"       fallback=#true

@@ -590,7 +590,7 @@ func TestHandleSearchEnginesAPI(t *testing.T) {
 		"metacpan": {Name: "metacpan", Alias: "cpan", URL: "https://metacpan.org/search?q={query}"},
 	}, "google")
 
-	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search-engines", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search", nil)
 	rec := httptest.NewRecorder()
 	h.mux.ServeHTTP(rec, req)
 
@@ -598,7 +598,7 @@ func TestHandleSearchEnginesAPI(t *testing.T) {
 		t.Fatalf("expected 200, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
 
-	var resp searchEnginesResponse
+	var resp searchResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
@@ -629,6 +629,41 @@ func TestHandleSearchEnginesAPI(t *testing.T) {
 	}
 }
 
+func TestSearchEnginesAPIOpenTargets(t *testing.T) {
+	h := New([]PageInfo{{Name: "dev", Page: &PageConfig{Title: "Development"}}}, nil, nil)
+
+	get := func() searchResponse {
+		req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search", nil)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+		var resp searchResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("decoding response: %v", err)
+		}
+		return resp
+	}
+
+	// Both default to same-tab even before the setter is called.
+	if r := get(); r.OpenInNewTab || r.OpenPagesInNewTab {
+		t.Errorf("defaults = (links %v, pages %v), want both false", r.OpenInNewTab, r.OpenPagesInNewTab)
+	}
+
+	// The two targets are independent: links new-tab, pages same-tab.
+	h.SetSearchTargets(true, false)
+	if r := get(); !r.OpenInNewTab || r.OpenPagesInNewTab {
+		t.Errorf("after SetSearchTargets(true,false) = (links %v, pages %v), want (true,false)", r.OpenInNewTab, r.OpenPagesInNewTab)
+	}
+
+	// And the reverse: links same-tab, pages new-tab.
+	h.SetSearchTargets(false, true)
+	if r := get(); r.OpenInNewTab || !r.OpenPagesInNewTab {
+		t.Errorf("after SetSearchTargets(false,true) = (links %v, pages %v), want (false,true)", r.OpenInNewTab, r.OpenPagesInNewTab)
+	}
+}
+
 func TestSearchEnginesAPIHotReload(t *testing.T) {
 	pages := []PageInfo{
 		{Name: "dev", Page: &PageConfig{Title: "Development"}},
@@ -643,11 +678,11 @@ func TestSearchEnginesAPIHotReload(t *testing.T) {
 		"ddg": {Name: "ddg", URL: "https://duckduckgo.com/?q={query}"},
 	}, "ddg")
 
-	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search-engines", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search", nil)
 	rec := httptest.NewRecorder()
 	h.mux.ServeHTTP(rec, req)
 
-	var resp searchEnginesResponse
+	var resp searchResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
@@ -666,7 +701,7 @@ func TestSearchEnginesAPIEmpty(t *testing.T) {
 	}
 	h := New(pages, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search-engines", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://pages.subspace.pub/dev/api/search", nil)
 	rec := httptest.NewRecorder()
 	h.mux.ServeHTTP(rec, req)
 
@@ -674,7 +709,7 @@ func TestSearchEnginesAPIEmpty(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
-	var resp searchEnginesResponse
+	var resp searchResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}

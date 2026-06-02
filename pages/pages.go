@@ -19,7 +19,7 @@ import (
 	"go.olrik.dev/subspace/stats"
 )
 
-// Internal page hosts. Link pages are served under pages.subspace.pub
+// Internal page hosts. Pages are served under pages.subspace.pub
 // (with p.subspace.pub as alias). Statistics stays on its own hostname.
 const (
 	PagesHost      = "pages.subspace.pub"
@@ -71,10 +71,17 @@ type SearchEngineDef struct {
 	URLEncode   string `json:"urlEncode,omitempty"`
 }
 
-// searchEnginesResponse is the JSON shape returned by /api/search-engines.
-type searchEnginesResponse struct {
+// searchResponse is the JSON shape returned by /api/search.
+type searchResponse struct {
 	Engines []SearchEngineDef `json:"engines"`
 	Default string            `json:"default,omitempty"`
+	// OpenInNewTab tells the palette whether a plain Enter on an outbound
+	// result (a link or an engine search) opens a new tab;
+	// OpenPagesInNewTab is the same for internal page navigation.
+	// Cmd/Ctrl+Enter inverts whichever applies. Always emitted (no
+	// omitempty) so the frontend can distinguish "false" from "absent".
+	OpenInNewTab      bool `json:"openInNewTab"`
+	OpenPagesInNewTab bool `json:"openPagesInNewTab"`
 }
 
 // linksResponse is the JSON shape returned by the /api/links endpoint.
@@ -119,10 +126,17 @@ type Handler struct {
 	status      StatusProvider
 	tags        map[string]TagDef
 	// searchEngines maps engine name → definition, exposed to the
-	// frontend search palette via /api/search-engines.
+	// frontend search palette via /api/search.
 	// defaultEngine names the engine to use as the no-match fallback row.
 	searchEngines map[string]SearchEngineDef
 	defaultEngine string
+	// searchLinksNewTab and searchPagesNewTab are reported to the
+	// frontend so pressing Enter opens, respectively, an outbound result
+	// (link or engine search) and internal page navigation in a new tab
+	// (true) or the current tab (false). Cmd/Ctrl+Enter always does the
+	// opposite.
+	searchLinksNewTab bool
+	searchPagesNewTab bool
 	// faviconCache stores fetched favicons keyed by host so we don't
 	// hammer the engine origin once per dashboard tab. Both successful
 	// fetches and upstream failures are cached (with different TTLs)
@@ -177,7 +191,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 	frontendFS, _ := fs.Sub(frontend, "frontend")
 	fileServer := http.FileServer(http.FS(frontendFS))
 
-	// Register link page routes under pages.subspace.pub/{name}/...
+	// Register page routes under pages.subspace.pub/{name}/...
 	for i, lp := range pageList {
 		names := []string{lp.Name}
 		if lp.Alias != "" {
@@ -189,7 +203,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 				prefix := "/" + name
 				mux.HandleFunc(host+prefix+"/api/links", h.handleLinksAPI)
 				mux.HandleFunc(host+prefix+"/api/all-links", h.handleAllLinksAPI)
-				mux.HandleFunc(host+prefix+"/api/search-engines", h.handleSearchEnginesAPI)
+				mux.HandleFunc(host+prefix+"/api/search", h.handleSearchAPI)
 				mux.HandleFunc(host+prefix+"/api/favicon", h.handleFaviconAPI)
 				mux.HandleFunc(host+prefix+"/api/nav", h.handleNavAPI)
 				mux.HandleFunc(host+prefix+"/api/config-errors", h.handleConfigErrorsAPI)
@@ -226,7 +240,7 @@ func (h *Handler) buildMux(pageList []PageInfo) {
 		mux.HandleFunc(host+"/api/status", h.handleStatusAPI)
 		mux.HandleFunc(host+"/api/top", h.handleTopAPI)
 		mux.HandleFunc(host+"/api/all-links", h.handleAllLinksAPI)
-		mux.HandleFunc(host+"/api/search-engines", h.handleSearchEnginesAPI)
+		mux.HandleFunc(host+"/api/search", h.handleSearchAPI)
 		mux.HandleFunc(host+"/api/favicon", h.handleFaviconAPI)
 		mux.HandleFunc(host+"/api/nav", h.handleNavAPI)
 		mux.HandleFunc(host+"/api/config-errors", h.handleConfigErrorsAPI)
@@ -261,13 +275,25 @@ func (h *Handler) SetTags(tags map[string]TagDef) {
 }
 
 // SetSearchEngines installs the configured external search engines
-// surfaced by the dashboard search palette via /api/search-engines.
+// surfaced by the dashboard search palette via /api/search.
 // The defaultName parameter is the engine the frontend renders as the
 // no-match fallback row; pass "" to disable the fallback.
 func (h *Handler) SetSearchEngines(engines map[string]SearchEngineDef, defaultName string) {
 	h.mu.Lock()
 	h.searchEngines = engines
 	h.defaultEngine = defaultName
+	h.mu.Unlock()
+}
+
+// SetSearchTargets sets where the search palette opens results when the
+// user presses Enter: linksNewTab covers outbound results (links and
+// engine searches) and pagesNewTab covers internal page navigation. In
+// both cases Cmd/Ctrl+Enter does the opposite. Surfaced to the frontend
+// via /api/search.
+func (h *Handler) SetSearchTargets(linksNewTab, pagesNewTab bool) {
+	h.mu.Lock()
+	h.searchLinksNewTab = linksNewTab
+	h.searchPagesNewTab = pagesNewTab
 	h.mu.Unlock()
 }
 
@@ -340,7 +366,7 @@ func (h *Handler) ValidateTagReferences() []string {
 	return errs
 }
 
-// ReloadPages rebuilds the mux with a new set of link pages.
+// ReloadPages rebuilds the mux with a new set of pages.
 func (h *Handler) ReloadPages(pages []PageInfo) {
 	h.buildMux(pages)
 }
@@ -727,13 +753,15 @@ func (h *Handler) handleBlackholeTopAPI(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (h *Handler) handleSearchEnginesAPI(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleSearchAPI(w http.ResponseWriter, r *http.Request) {
 	h.mu.RLock()
 	engines := make([]SearchEngineDef, 0, len(h.searchEngines))
 	for _, e := range h.searchEngines {
 		engines = append(engines, e)
 	}
 	defaultEngine := h.defaultEngine
+	linksNewTab := h.searchLinksNewTab
+	pagesNewTab := h.searchPagesNewTab
 	h.mu.RUnlock()
 
 	// Stable order so the frontend can render engines deterministically
@@ -741,7 +769,7 @@ func (h *Handler) handleSearchEnginesAPI(w http.ResponseWriter, r *http.Request)
 	sort.Slice(engines, func(i, j int) bool { return engines[i].Name < engines[j].Name })
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(searchEnginesResponse{Engines: engines, Default: defaultEngine})
+	json.NewEncoder(w).Encode(searchResponse{Engines: engines, Default: defaultEngine, OpenInNewTab: linksNewTab, OpenPagesInNewTab: pagesNewTab})
 }
 
 func (h *Handler) handleAllLinksAPI(w http.ResponseWriter, r *http.Request) {

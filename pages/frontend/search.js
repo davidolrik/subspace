@@ -120,17 +120,30 @@ export function engineFaviconURL(engine) {
 }
 
 // navigationIntent returns the URL the modal should navigate to and
-// whether it should open in a new tab, given a result row and the
-// modifier keys held when the user pressed Enter (or clicked).
-// Returns null when the row has no destination — engine-prefix rows
-// expand the keyword instead of navigating, and an absent result is a
-// no-op.
-export function navigationIntent(result, modifiers) {
+// whether it should open in a new tab, given a result row, the modifier
+// keys held when the user pressed Enter (or clicked), and the operator's
+// configured default (defaultNewTab). The default decides where a plain
+// activation opens; a held Cmd/Ctrl inverts it, so newTab is the XOR of
+// the two. Returns null when the row has no destination — engine-prefix
+// rows expand the keyword instead of navigating, and an absent result is
+// a no-op.
+// resultOpensInNewTab picks the configured default for a result based on
+// its kind: internal page navigation follows the pages setting, while
+// links and engine searches (everything outbound) follow the links
+// setting. targets is { linksNewTab, pagesNewTab }.
+export function resultOpensInNewTab(result, targets) {
+    const t = targets || {};
+    if (result && result.type === 'page') return !!t.pagesNewTab;
+    return !!t.linksNewTab;
+}
+
+export function navigationIntent(result, modifiers, defaultNewTab) {
     if (!result || result.type === 'engine-prefix') return null;
     const url = result.type === 'engine'
         ? buildEngineURL(result.engine, result.query)
         : result.url;
-    const newTab = !!(modifiers && (modifiers.metaKey || modifiers.ctrlKey));
+    const modifierHeld = !!(modifiers && (modifiers.metaKey || modifiers.ctrlKey));
+    const newTab = !!defaultNewTab !== modifierHeld;
     return { url, newTab };
 }
 
@@ -524,6 +537,14 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
             allLinks: [],
             engines: [],
             defaultEngine: '',
+            // Where a plain Enter opens a result; Cmd/Ctrl+Enter inverts
+            // it. openInNewTab covers outbound results (links and engine
+            // searches), openPagesInNewTab covers internal page
+            // navigation. Both default to same-tab and are overridden by
+            // the values the server reports from the `open-in` config
+            // properties on the search and pages blocks.
+            openInNewTab: false,
+            openPagesInNewTab: false,
             // flashing toggles a CSS class on the modal whenever Tab
             // can't extend the input further (ambiguous prefix).
             flashing: false,
@@ -660,15 +681,20 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
                     });
                     return;
                 }
-                const intent = navigationIntent(item, modifiers || {});
+                const defaultNewTab = resultOpensInNewTab(item, {
+                    linksNewTab: this.openInNewTab,
+                    pagesNewTab: this.openPagesInNewTab,
+                });
+                const intent = navigationIntent(item, modifiers || {}, defaultNewTab);
                 if (!intent) return;
+                // Close the modal either way. For a new tab this leaves
+                // nothing to dismiss when the user switches back; for the
+                // current tab we're navigating away regardless.
+                this.open = false;
                 if (intent.newTab) {
-                    // Keep the modal open so the user can fire several
-                    // lookups in a row without losing context.
                     window.open(intent.url, '_blank', 'noopener,noreferrer');
                     return;
                 }
-                this.open = false;
                 this.$nextTick(() => {
                     window.location.href = intent.url;
                 });
@@ -744,12 +770,18 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
                 try {
                     const [linksResp, enginesResp] = await Promise.all([
                         fetch('api/all-links').then(r => r.json()).catch(() => []),
-                        fetch('api/search-engines').then(r => r.json()).catch(() => null),
+                        fetch('api/search').then(r => r.json()).catch(() => null),
                     ]);
                     this.allLinks = linksResp || [];
                     if (enginesResp) {
                         this.engines = enginesResp.engines || [];
                         this.defaultEngine = enginesResp.default || '';
+                        if (typeof enginesResp.openInNewTab === 'boolean') {
+                            this.openInNewTab = enginesResp.openInNewTab;
+                        }
+                        if (typeof enginesResp.openPagesInNewTab === 'boolean') {
+                            this.openPagesInNewTab = enginesResp.openPagesInNewTab;
+                        }
                     }
                 } catch (e) {
                     console.error('Failed to load search data:', e);
@@ -849,12 +881,12 @@ export const keybindings = [
     {
         keys: ['↵'],
         scope: 'search',
-        description: 'Open the selected result',
+        description: 'Open the selected result using your default (new tab or current tab)',
     },
     {
         keys: ['⌘↵', 'Ctrl+↵'],
         scope: 'search',
-        description: 'Open the selected result in a new tab; modal stays open',
+        description: 'Open the selected result the opposite way from your default',
     },
     {
         keys: ['Esc', '?'],

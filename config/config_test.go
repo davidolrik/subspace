@@ -1162,7 +1162,7 @@ func TestParseSearchEnginesBlock(t *testing.T) {
 	input := `
 listen ":8080"
 
-search-engines {
+search {
 	engine "google"   url="https://www.google.com/search?q={query}" icon="si-google" alias="g"
 	engine "metacpan" url="https://metacpan.org/search?q={query}"   icon="fa-cube"   alias="cpan"
 }
@@ -1200,7 +1200,7 @@ search-engines {
 
 func TestParseSearchEnginesDefault(t *testing.T) {
 	input := `
-search-engines default="google" {
+search default="google" {
 	engine "google" url="https://www.google.com/search?q={query}"
 }
 `
@@ -1215,7 +1215,7 @@ search-engines default="google" {
 
 func TestParseSearchEnginesUnknownDefault(t *testing.T) {
 	input := `
-search-engines default="missing" {
+search default="missing" {
 	engine "google" url="https://www.google.com/search?q={query}"
 }
 `
@@ -1231,9 +1231,222 @@ search-engines default="missing" {
 	}
 }
 
+func TestSearchEnginesAliasParsesWithDeprecationWarning(t *testing.T) {
+	// `search-engines` is the original block name, kept as a deprecated
+	// alias for `search`. It must still parse identically and surface a
+	// deprecation notice so the operator knows to migrate.
+	input := `
+search-engines default="google" open-in="new-tab" {
+	engine "google" url="https://www.google.com/search?q={query}" alias="g"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if _, ok := cfg.SearchEngines["google"]; !ok {
+		t.Errorf("engine from deprecated `search-engines` block was not parsed: %+v", cfg.SearchEngines)
+	}
+	if cfg.DefaultSearchEngine != "google" {
+		t.Errorf("DefaultSearchEngine = %q, want %q (via alias)", cfg.DefaultSearchEngine, "google")
+	}
+	if !cfg.SearchLinksNewTab {
+		t.Errorf("SearchLinksNewTab = false, want true (open-in via alias)")
+	}
+	if !hasErrorContaining(cfg.Errors, "deprecated") {
+		t.Errorf("Errors = %v, want one flagging `search-engines` as deprecated", cfg.Errors)
+	}
+}
+
+func TestSearchTargetsDefaultFalse(t *testing.T) {
+	// With no open-in properties (or no blocks at all), both outbound
+	// links and internal page navigation open in the current tab by
+	// default — a held Cmd/Ctrl is what opts into a new tab.
+	for name, input := range map[string]string{
+		"no blocks": ``,
+		"blocks without open-in": `
+search {
+	engine "google" url="https://www.google.com/search?q={query}"
+}
+pages
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Parse([]byte(input))
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
+			if cfg.SearchLinksNewTab {
+				t.Errorf("SearchLinksNewTab = true, want false (default)")
+			}
+			if cfg.SearchPagesNewTab {
+				t.Errorf("SearchPagesNewTab = true, want false (default)")
+			}
+		})
+	}
+}
+
+func TestParseSearchEnginesOpenIn(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"new-tab", true},
+		{"same-tab", false},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			input := `
+search open-in="` + tc.value + `" {
+	engine "google" url="https://www.google.com/search?q={query}"
+}
+`
+			cfg, err := Parse([]byte(input))
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
+			if cfg.SearchLinksNewTab != tc.want {
+				t.Errorf("SearchLinksNewTab = %v, want %v for open-in=%q", cfg.SearchLinksNewTab, tc.want, tc.value)
+			}
+			// The engine setting must not bleed into page navigation.
+			if cfg.SearchPagesNewTab {
+				t.Errorf("SearchPagesNewTab = true, want false (search open-in must not affect pages)")
+			}
+		})
+	}
+}
+
+func TestParsePagesOpenIn(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"new-tab", true},
+		{"same-tab", false},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			input := `
+pages open-in="` + tc.value + `"
+`
+			cfg, err := Parse([]byte(input))
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
+			if cfg.SearchPagesNewTab != tc.want {
+				t.Errorf("SearchPagesNewTab = %v, want %v for pages open-in=%q", cfg.SearchPagesNewTab, tc.want, tc.value)
+			}
+			// The pages setting must not bleed into outbound links.
+			if cfg.SearchLinksNewTab {
+				t.Errorf("SearchLinksNewTab = true, want false (pages open-in must not affect links)")
+			}
+		})
+	}
+}
+
+func TestParsePagesBlockNestedPages(t *testing.T) {
+	// Page definitions nested inside the `pages` block are the preferred
+	// form (mirroring `tag` in `tags` and `engine` in `search`) and must
+	// parse without any deprecation warning.
+	input := `
+listen ":8080"
+pages open-in="new-tab" {
+	page "dev.kdl" alias="d"
+	page "ops.kdl" name="internal"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(cfg.Pages) != 2 {
+		t.Fatalf("got %d pages, want 2: %+v", len(cfg.Pages), cfg.Pages)
+	}
+	if cfg.Pages[0].Name != "dev" || cfg.Pages[0].Alias != "d" {
+		t.Errorf("page[0] = %+v, want name=dev alias=d", cfg.Pages[0])
+	}
+	if cfg.Pages[1].Name != "internal" {
+		t.Errorf("page[1].Name = %q, want %q", cfg.Pages[1].Name, "internal")
+	}
+	if !cfg.SearchPagesNewTab {
+		t.Errorf("SearchPagesNewTab = false, want true (open-in alongside nested pages)")
+	}
+	if hasErrorContaining(cfg.Errors, "deprecated") {
+		t.Errorf("nested pages should not warn about deprecation, got: %v", cfg.Errors)
+	}
+}
+
+func TestParsePagesBlockUnknownChild(t *testing.T) {
+	input := `
+pages {
+	widget "nope"
+}
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+	}
+	if !hasErrorContaining(cfg.Errors, "widget") {
+		t.Errorf("Errors = %v, want one mentioning the unknown child", cfg.Errors)
+	}
+}
+
+func TestTopLevelPageDeprecatedButAllowed(t *testing.T) {
+	// Top-level `page` still parses (so existing configs keep working)
+	// but collects a single deprecation notice regardless of how many
+	// pages are declared that way.
+	input := `
+listen ":8080"
+page "dev.kdl"
+page "ops.kdl"
+page "tools.kdl"
+`
+	cfg, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	if len(cfg.Pages) != 3 {
+		t.Fatalf("got %d pages, want 3 (top-level page must still parse)", len(cfg.Pages))
+	}
+	var deprecations int
+	for _, e := range cfg.Errors {
+		if strings.Contains(e, "top-level `page` is deprecated") {
+			deprecations++
+		}
+	}
+	if deprecations != 1 {
+		t.Errorf("got %d top-level-page deprecation notices, want exactly 1: %v", deprecations, cfg.Errors)
+	}
+}
+
+func TestParseOpenInInvalid(t *testing.T) {
+	for name, input := range map[string]string{
+		"search": `
+search open-in="sideways" {
+	engine "google" url="https://www.google.com/search?q={query}"
+}
+`,
+		"pages": `
+pages open-in="sideways"
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Parse([]byte(input))
+			if err != nil {
+				t.Fatalf("Parse should succeed and collect the error, got: %v", err)
+			}
+			// An invalid value is reported and the default (same-tab) is kept.
+			if cfg.SearchLinksNewTab || cfg.SearchPagesNewTab {
+				t.Errorf("targets should stay false (default kept on invalid value)")
+			}
+			if !hasErrorContaining(cfg.Errors, "open-in") {
+				t.Errorf("Errors = %v, want one mentioning open-in", cfg.Errors)
+			}
+		})
+	}
+}
+
 func TestParseSearchEnginesNoDefault(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine "google" url="https://www.google.com/search?q={query}"
 }
 `
@@ -1251,7 +1464,7 @@ search-engines {
 
 func TestParseSearchEnginesEmptyBlock(t *testing.T) {
 	input := `
-search-engines {
+search {
 }
 `
 	cfg, err := Parse([]byte(input))
@@ -1278,7 +1491,7 @@ func TestParseSearchEnginesNoBlock(t *testing.T) {
 
 func TestParseSearchEnginesDuplicateName(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine "google" url="https://www.google.com/search?q={query}"
 	engine "google" url="https://other.example.com/?q={query}"
 }
@@ -1298,7 +1511,7 @@ search-engines {
 
 func TestParseSearchEnginesMissingURL(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine "google"
 }
 `
@@ -1316,7 +1529,7 @@ search-engines {
 
 func TestParseSearchEnginesMissingPlaceholder(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine "google" url="https://www.google.com/search"
 }
 `
@@ -1334,7 +1547,7 @@ search-engines {
 
 func TestParseSearchEnginesMissingName(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine url="https://www.google.com/search?q={query}"
 }
 `
@@ -1349,7 +1562,7 @@ search-engines {
 
 func TestParseSearchEnginesUnknownChild(t *testing.T) {
 	input := `
-search-engines {
+search {
 	widget "google" url="https://www.google.com/search?q={query}"
 }
 `
@@ -1364,7 +1577,7 @@ search-engines {
 
 func TestParseSearchEnginesPreservesNameCase(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine "MetaCPAN" url="https://metacpan.org/search?q={query}" alias="cpan"
 }
 `
@@ -1389,7 +1602,7 @@ search-engines {
 
 func TestParseSearchEnginesDuplicateNameCaseInsensitive(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine "Google" url="https://www.google.com/search?q={query}"
 	engine "google" url="https://other.example.com/?q={query}"
 }
@@ -1411,7 +1624,7 @@ search-engines {
 
 func TestParseSearchEnginesDefaultCaseInsensitive(t *testing.T) {
 	input := `
-search-engines default="MetaCPAN" {
+search default="MetaCPAN" {
 	engine "metacpan" url="https://metacpan.org/search?q={query}"
 }
 `
@@ -1426,7 +1639,7 @@ search-engines default="MetaCPAN" {
 
 func TestParseSearchEnginesFallbackFlag(t *testing.T) {
 	input := `
-search-engines default="google" {
+search default="google" {
 	engine "google"   url="https://www.google.com/search?q={query}"
 	engine "kagi"     url="https://kagi.com/search?q={query}"     fallback=#true
 	engine "urlscan"  url="https://urlscan.io/search/?q={query}"
@@ -1574,7 +1787,7 @@ func TestParseStatsUnknownChild(t *testing.T) {
 
 func TestParseSearchEnginesURLEncode(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine "default" url="https://www.google.com/search?q={query}"
 	engine "form"    url="https://www.example.com/?q={query}"        url-encode="form"
 	engine "raw"     url="https://internal.example.com/?q={query}"   url-encode="raw"
@@ -1602,7 +1815,7 @@ search-engines {
 
 func TestParseSearchEnginesURLEncodeRejectsUnknown(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine "bad" url="https://www.example.com/?q={query}" url-encode="nonsense"
 }
 `
@@ -1620,7 +1833,7 @@ search-engines {
 
 func TestParseSearchEnginesAliasDefaultsEmpty(t *testing.T) {
 	input := `
-search-engines {
+search {
 	engine "google" url="https://www.google.com/search?q={query}"
 }
 `

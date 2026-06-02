@@ -4,12 +4,18 @@ Subspace serves internal pages at `pages.subspace.pub` (alias `p.subspace.pub`) 
 
 ## Overview
 
-All link pages are served under `pages.subspace.pub/{name}/`, with each page getting its own path. Statistics is available at `stats.subspace.pub`. Pages are defined in KDL files and configured via `page` directives in the main config.
+All pages are served under `pages.subspace.pub/{name}/`, with each page getting its own path. Statistics is available at `stats.subspace.pub`. Pages are defined in KDL files and mounted with `page` entries inside the `pages` block of the main config.
 
 ```kdl
-page "dev.kdl"
-page "ops.kdl" alias="o"
+pages {
+    page "dev.kdl"
+    page "ops.kdl" alias="o"
+}
 ```
+
+::: tip Top-level `page` is deprecated
+`page` was originally written at the top level (outside any block). That still works as a deprecated alias — it parses and emits a config warning — but nesting `page` inside `pages` is preferred, mirroring `engine` inside `search` and `tag` inside `tags`. The `pages` block also carries the [`open-in`](#page-settings) setting.
+:::
 
 This creates:
 
@@ -20,9 +26,9 @@ This creates:
 
 All pages share a navigation menu, search, and dark theme. Icons and fonts are embedded in the binary — no external requests are made.
 
-## Link Pages
+## Page Files
 
-A link page is a KDL file with an optional title, optional footer, and one or more named sections containing links.
+A page is a KDL file with an optional title, optional footer, and one or more named sections containing links.
 
 ```kdl
 title "Development Tools"
@@ -142,7 +148,7 @@ list "Observability" {
 }
 ```
 
-CommonMark plus GFM extensions (tables, strikethrough, autolinks, task lists) are supported. **Task list checkboxes are interactive** — click one to toggle it, and the state persists in your browser's localStorage so it survives reloads. State is keyed per (page, label hash), so two pages with identical task wording keep independent state, and renaming a task starts it fresh. Use raw KDL strings (`r#"..."#`) to embed multi-line markdown without having to escape newlines or quotes. All links rendered from markdown open in a new tab.
+CommonMark plus GFM extensions (tables, strikethrough, autolinks, task lists) are supported. **Task list checkboxes are interactive** — click one to toggle it, and the state persists in your browser's localStorage so it survives reloads. State is keyed per (page, label hash), so two pages with identical task wording keep independent state, and renaming a task starts it fresh. Use raw KDL strings (`r#"..."#`) to embed multi-line markdown without having to escape newlines or quotes. Links rendered from markdown open in the current tab, matching the dashboard's link cards; an author who wants a new-tab link can write raw `<a target="_blank">` in the markdown, which survives sanitisation.
 
 Fenced code blocks are syntax-highlighted server-side using [chroma](https://github.com/alecthomas/chroma). Tag the block with a language name (`go`, `rust`, `python`, `js`, `sh`, `yaml`, `json`, `sql`, …) and the dashboard themes the tokens to match the current colour scheme. Unknown languages fall back to plain text without erroring. Dark and light mode each have their own palette so highlighted code stays readable when you toggle themes.
 
@@ -275,7 +281,7 @@ The search matches against:
 - **Page names** — the primary name and alias
 - **Link names** — the name of every link across all pages
 - **Link descriptions** — the `description` property of links
-- **Engine keywords** — names and aliases of any [search engines](#search-engines) you've configured
+- **Engine keywords** — names and aliases of any [search engines](#search) you've configured
 
 ### Result ordering
 
@@ -307,17 +313,19 @@ Only labels that themselves extend what you typed are considered. Rows that surf
 | `Escape`                  | Close search                                                                      |
 | `Arrow Up` / `Arrow Down` | Navigate results                                                                  |
 | `Tab`                     | Autocomplete to the longest unambiguous shared prefix                             |
-| `Enter`                   | Go to selected result (or expand keyword on a prefix row)                         |
-| `Cmd`+`Enter` / `Ctrl`+`Enter` | Open selected result in a new tab; the search modal stays open for the next query |
+| `Enter`                   | Open selected result using your default (or expand keyword on a prefix row)        |
+| `Cmd`+`Enter` / `Ctrl`+`Enter` | Open selected result the opposite way from your default                       |
 
-You can also click any result or click outside the popup to close it. `Cmd`/`Ctrl`-click on a result also opens it in a new tab via the browser's native link handling.
+Where a plain `Enter` opens a result — a new tab or the current one — depends on the kind of result: outbound links and engine searches follow the [`search` block's `open-in`](#where-results-open), while internal page navigation follows the [pages `open-in`](#page-settings). Both default to the current tab, and `Cmd`/`Ctrl`+`Enter` always does the opposite. Either way the search modal closes once you pick a result — so when you switch back from a newly opened tab there's nothing left to dismiss.
 
-## Search Engines
+You can also click any result or click outside the popup to close it. A plain click follows the same defaults, and `Cmd`/`Ctrl`-click does the opposite.
 
-External search engines let you route queries from the `/` palette to sites like Google, Metacpan, GitHub, urlscan, etc. — without leaving the palette. Engines are declared in your main config alongside `tags { ... }`:
+## Search
+
+External search engines let you route queries from the `/` palette to sites like Google, Metacpan, GitHub, urlscan, etc. — without leaving the palette. They live in the top-level `search` block, declared in your main config alongside `tags { ... }`:
 
 ```kdl
-search-engines default="google" {
+search default="google" {
     engine "google"   url="https://www.google.com/search?q={query}"        icon="si-google"     alias="g"
     engine "metacpan" url="https://metacpan.org/search?q={query}"          icon="fa-cube"       alias="cpan"
     engine "github"   url="https://github.com/search?q={query}&type=code"  icon="si-github"     alias="gh"
@@ -325,6 +333,10 @@ search-engines default="google" {
     engine "ddg"      url="https://duckduckgo.com/?q={query}"              icon="si-duckduckgo"
 }
 ```
+
+::: tip Renamed from `search-engines`
+This block was originally called `search-engines`. That name still works as a deprecated alias (it parses and emits a config warning nudging you to rename), but `search` is preferred now that the block also carries palette settings like `default` and `open-in`.
+:::
 
 ### Engine fields
 
@@ -345,7 +357,7 @@ The block-level `default=` property names the engine shown first in the no-match
 The default reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared (you'll see it in the config error banner). The default engine is implicitly part of the fallback list, so you don't need to set `fallback=#true` on it.
 
 ```kdl
-search-engines default="google" {
+search default="google" {
     engine "google"  url="https://www.google.com/search?q={query}"
     engine "kagi"    url="https://kagi.com/search?q={query}"     fallback=#true
     engine "ddg"     url="https://duckduckgo.com/?q={query}"     fallback=#true
@@ -354,6 +366,25 @@ search-engines default="google" {
 ```
 
 With this config, an unknown query like `xyzzy` shows three fallback rows — google (default, first), then ddg and kagi alphabetically. urlscan only fires when you type its keyword.
+
+### Where results open
+
+The block-level `open-in` property controls where an **outbound** result — a configured link or an engine search — opens when you press `Enter` (or click it):
+
+| Value        | Plain `Enter` / click   | `Cmd`/`Ctrl`+`Enter` / `Cmd`/`Ctrl`-click |
+| ------------ | ----------------------- | ----------------------------------------- |
+| `"same-tab"` | Current tab (default)   | New tab                                   |
+| `"new-tab"`  | New tab                 | Current tab                               |
+
+```kdl
+search default="google" open-in="new-tab" {
+    engine "google" url="https://www.google.com/search?q={query}"
+}
+```
+
+When omitted, `open-in` defaults to `"same-tab"`. The modifier (`Cmd` on macOS, `Ctrl` elsewhere) always inverts whichever default you set, so both behaviours are always one keystroke away. An invalid value is downgraded to a non-fatal config error and the default is kept. This setting applies only to the search palette — link cards and markdown links are unaffected.
+
+Navigation to a subspace **page** (an internal result) is controlled separately by the [`pages`](#page-settings) block's own `open-in`, so you can keep jumping between dashboard pages in-tab while outbound links open in a new tab.
 
 ### URL placeholder
 
@@ -390,6 +421,21 @@ Type `cpan ojo` → top row "Search metacpan for "ojo"", press `Enter` → opens
 Type `cp` → engine-prefix row for `metacpan` appears, press `Tab` → input becomes `metacpan⎵` and you can keep typing the query.
 
 Type `xyzzy-no-such-thing` (with `default="google"`) → fallback row "Search google for "xyzzy-no-such-thing"", press `Enter` → opens Google.
+
+## Page settings
+
+The top-level `pages` block holds settings that apply across all dashboard pages. Today it has a single property, `open-in`, which controls where the search palette opens **internal page navigation** — jumping to one of your own subspace pages:
+
+| Value        | Plain `Enter` / click   | `Cmd`/`Ctrl`+`Enter` / `Cmd`/`Ctrl`-click |
+| ------------ | ----------------------- | ----------------------------------------- |
+| `"same-tab"` | Current tab (default)   | New tab                                   |
+| `"new-tab"`  | New tab                 | Current tab                               |
+
+```kdl
+pages open-in="same-tab"
+```
+
+It behaves exactly like the [`search` block's `open-in`](#where-results-open), with the same default (`"same-tab"`), the same `Cmd`/`Ctrl` inversion, and the same non-fatal handling of invalid values — but it governs only internal page results. Keeping the two separate lets you, for example, open outbound links in a new tab (`search open-in="new-tab"`) while still switching between dashboard pages in the current tab.
 
 ## Statistics Page
 

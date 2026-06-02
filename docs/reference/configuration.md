@@ -158,12 +158,14 @@ tags {
 
 Tag names must be unique within the block. Aliases may repeat — use this to render multiple distinct tags (each with its own color) under the same display label, e.g. two `services` pills in different colors. Pages that reference an undefined tag fail validation at startup. See [Internal Pages → Tags](/guide/pages#tags) for usage.
 
-### `search-engines`
+### `search`
 
-Defines external search engines that the `/` palette can route queries to. The first token of a query is matched (case-insensitively) against engine names and aliases; on a hit, a top-of-list row routes the rest of the query through the engine.
+Configures the `/` palette: the external engines it can route queries to, the default fallback engine, and where outbound results open. The first token of a query is matched (case-insensitively) against engine names and aliases; on a hit, a top-of-list row routes the rest of the query through the engine.
+
+> Previously named `search-engines`. That name still parses as a deprecated alias and emits a config warning; prefer `search`.
 
 ```kdl
-search-engines default="<name>" {
+search default="<name>" open-in="same-tab" {
   engine "<name>" url="<https://...{query}...>" alias="<keyword>" icon="<icon>" description="<text>"
 }
 ```
@@ -180,7 +182,36 @@ search-engines default="<name>" {
 
 The block-level `default=` property names the engine shown first in the no-match fallback list. Additional engines appear in the same list when declared with `fallback=#true`, alphabetised by name. Engines without `fallback` (and not the default) stay keyword-only. The default reference is case-insensitive and must point at an engine declared in the same block — an unknown reference is downgraded to a non-fatal config error and the field is cleared. With no `default=` and no `fallback=#true` engines, queries with no matches produce empty results.
 
-Engine names are stored case-insensitively (so duplicates and the default reference are matched without regard to case), but the original casing is preserved on the search palette row label. Engines hot-reload alongside the rest of the config; open dashboard tabs automatically reload within a few seconds. See [Internal Pages → Search Engines](/guide/pages#search-engines) for usage.
+The block-level `open-in=` property controls where an **outbound** result (a configured link or an engine search) opens on Enter: `"same-tab"` (default) or `"new-tab"`; `Cmd`/`Ctrl`+Enter always does the opposite. An invalid value is a non-fatal config error and the default is kept. Internal page navigation is controlled separately by the [`pages`](#pages) block.
+
+Engine names are stored case-insensitively (so duplicates and the default reference are matched without regard to case), but the original casing is preserved on the search palette row label. Engines hot-reload alongside the rest of the config; open dashboard tabs automatically reload within a few seconds. See [Internal Pages → Search](/guide/pages#search) for usage.
+
+### `pages`
+
+The dashboard pages: a `page` entry per mounted page plus settings that apply across all of them.
+
+```kdl
+pages open-in="same-tab" {
+  page "dev.kdl" alias="d"
+  page "ops.kdl" name="internal"
+}
+```
+
+Block property:
+
+| Property  | Required | Description                                                                                                                                                          |
+| --------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `open-in` | No       | Where the `/` palette opens **internal page navigation** on Enter: `"same-tab"` (default) or `"new-tab"`. `Cmd`/`Ctrl`+Enter always does the opposite. Invalid values are a non-fatal config error and the default is kept. Outbound links and engine searches are controlled by the [`search`](#search) block's `open-in`. |
+
+Each `page` child mounts a page KDL file under `pages.subspace.pub/<name>/`:
+
+| `page` property | Required | Description                                                                                          |
+| --------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| _value_         | Yes      | Positional argument: relative or absolute path to the page's KDL file.                               |
+| `name`          | No       | Override the page name (and URL segment). Defaults to the filename minus `.kdl`.                     |
+| `alias`         | No       | Additional URL segment mapping to the same page (e.g. `alias="o"` → `p.subspace.pub/o/`).            |
+
+> A top-level `page` (outside the `pages` block) still parses as a deprecated alias and emits a config warning. Prefer nesting `page` inside `pages`.
 
 ### `stats`
 

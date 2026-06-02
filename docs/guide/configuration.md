@@ -133,7 +133,7 @@ Glob patterns are supported via standard shell glob syntax (`*`, `?`, `[...]`). 
 ```text
 ~/.config/subspace/
 ├── config.kdl           # main config
-├── dashboard.kdl        # link page
+├── dashboard.kdl        # page
 ├── upstreams/
 │   ├── corporate.kdl    # corporate proxy definition
 │   └── tunnel.kdl       # SOCKS5 tunnel definition
@@ -148,7 +148,9 @@ Glob patterns are supported via standard shell glob syntax (`*`, `?`, `[...]`). 
 listen "127.0.0.1:8118"
 include "upstreams/*.kdl"
 include "routes/*.kdl"
-page "dashboard.kdl" alias="dash"
+pages {
+  page "dashboard.kdl" alias="dash"
+}
 ```
 
 `upstreams/corporate.kdl`:
@@ -167,17 +169,21 @@ route ".corp.internal" via="corporate"
 route ".corp.com" via="corporate"
 ```
 
-## `page`
+## `pages`
 
-Defines an internal page served at `pages.subspace.pub/{name}/` when browsing through the proxy. Multiple `page` directives create multiple pages, each with its own path and menu entry.
+Mounts internal pages, each served at `pages.subspace.pub/{name}/` when browsing through the proxy. Declare one `page` entry per page inside the `pages` block; each gets its own path and menu entry. The block also holds the [`open-in`](/reference/configuration#pages) setting.
 
 ```kdl
-page "dev.kdl"
-page "ops.kdl"
-page "my-page.kdl" name="internal" alias="int"
+pages {
+  page "dev.kdl"
+  page "ops.kdl"
+  page "my-page.kdl" name="internal" alias="int"
+}
 ```
 
 By default, the page name is derived from the filename (minus the `.kdl` extension). Override it with `name=`, and add an alias with `alias=`.
+
+> A top-level `page` (outside the `pages` block) still works as a deprecated alias — it parses and emits a config warning. Prefer nesting it in `pages`.
 
 | Config                            | URL                                                              |
 | --------------------------------- | ---------------------------------------------------------------- |
@@ -189,18 +195,18 @@ By default, the page name is derived from the filename (minus the `.kdl` extensi
 
 Each page is configured in its own KDL file with links, sections, icons, and optional descriptions. See [Internal Pages](/guide/pages) for the full page file format, search, statistics, and other features.
 
-## Search Engines
+## Search
 
-The `/` search palette can route queries through external services (Google, Metacpan, GitHub, etc.) by declaring a `search-engines` block:
+The `/` search palette can route queries through external services (Google, Metacpan, GitHub, etc.) by declaring a `search` block:
 
 ```kdl
-search-engines default="google" {
+search default="google" {
     engine "google"   url="https://www.google.com/search?q={query}" icon="si-google" alias="g"
     engine "metacpan" url="https://metacpan.org/search?q={query}"   icon="fa-cube"   alias="cpan"
 }
 ```
 
-Type `cpan ojo` to search Metacpan, or let any unmatched query fall through to the default engine. See [Internal Pages → Search Engines](/guide/pages#search-engines) for keyword and Tab autocomplete behaviour, and the [`search-engines` reference](/reference/configuration#search-engines) for the full field list.
+Type `cpan ojo` to search Metacpan, or let any unmatched query fall through to the default engine. (The block was previously named `search-engines`; that name still works as a deprecated alias.) See [Internal Pages → Search](/guide/pages#search) for keyword and Tab autocomplete behaviour, and the [`search` reference](/reference/configuration#search) for the full field list.
 
 ## Hot Reload
 
@@ -234,11 +240,13 @@ include "upstreams/*.kdl"
 include "routes/*.kdl"
 
 // Internal pages
-page "dev.kdl"
-page "ops.kdl" alias="o"
+pages {
+    page "dev.kdl"
+    page "ops.kdl" alias="o"
+}
 
 // External search engines reachable from the `/` palette
-search-engines default="google" {
+search default="google" {
     engine "google"   url="https://www.google.com/search?q={query}" icon="si-google" alias="g"
     engine "metacpan" url="https://metacpan.org/search?q={query}"   icon="fa-cube"   alias="cpan"
 }

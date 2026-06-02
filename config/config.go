@@ -119,6 +119,18 @@ type Config struct {
 	// finalize and the field is cleared.
 	SearchEngines       map[string]SearchEngine
 	DefaultSearchEngine string
+	// SearchLinksNewTab controls whether pressing Enter on an outbound
+	// search palette result — a configured link or an external engine
+	// search — opens it in a new tab (true) or the current tab (false,
+	// the default). Set via the `open-in` property on the `search`
+	// block ("new-tab" or "same-tab").
+	SearchLinksNewTab bool
+	// SearchPagesNewTab is the same toggle for internal navigation to a
+	// subspace dashboard page. Kept separate so jumping between pages can
+	// stay in-tab while outbound links open in a new tab. Set via the
+	// `open-in` property on the top-level `pages` block.
+	// Cmd/Ctrl+Enter inverts either default.
+	SearchPagesNewTab bool
 	// StatsRetention controls how long the SQLite stats database keeps
 	// historical samples. Zero means "no automatic pruning" (the
 	// configured default in cmd/serve.go applies when the user hasn't
@@ -249,6 +261,10 @@ type parser struct {
 	cfg        *Config
 	seen       map[string]bool // absolute paths already parsed (circular include detection)
 	noIncludes bool            // true when using Parse() without file context
+	// warnedTopLevelPage ensures the deprecation notice for top-level
+	// `page` nodes (now preferred nested in the `pages` block) is
+	// collected once, not once per page.
+	warnedTopLevelPage bool
 }
 
 func (p *parser) parseFile(absPath string) error {
@@ -321,15 +337,14 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 			p.cfg.Theme = node.Arguments[0].ValueString()
 
 		case "page":
-			pg, err := parsePage(node, baseDir)
-			if err != nil {
-				p.collect(currentFile, err.Error())
-				continue
+			// Top-level `page` is the original form, kept as a deprecated
+			// alias now that page definitions belong inside the `pages`
+			// block (mirroring `tag` in `tags` and `engine` in `search`).
+			if !p.warnedTopLevelPage {
+				p.collect(currentFile, "top-level `page` is deprecated; nest page definitions inside the `pages` block")
+				p.warnedTopLevelPage = true
 			}
-			if baseDir != "" {
-				p.cfg.IncludedFiles = append(p.cfg.IncludedFiles, pg.File)
-			}
-			p.cfg.Pages = append(p.cfg.Pages, pg)
+			p.addPage(node, baseDir, currentFile)
 
 		case "route":
 			r, err := parseRoute(node)
@@ -346,10 +361,30 @@ func (p *parser) parseData(data []byte, baseDir string, filePath ...string) erro
 				p.collect(currentFile, msg)
 			}
 
-		case "search-engines":
-			engineErrs := parseSearchEnginesBlock(node, p.cfg.SearchEngines, &p.cfg.DefaultSearchEngine)
+		case "search", "search-engines":
+			// `search-engines` is the original block name, kept as a
+			// deprecated alias now that the block also carries palette
+			// settings (default engine, open-in) rather than only engine
+			// definitions.
+			if node.Name.ValueString() == "search-engines" {
+				p.collect(currentFile, "`search-engines` is a deprecated alias for `search`; rename the block to `search`")
+			}
+			engineErrs := parseSearchBlock(node, p.cfg.SearchEngines, &p.cfg.DefaultSearchEngine, &p.cfg.SearchLinksNewTab)
 			for _, msg := range engineErrs {
 				p.collect(currentFile, msg)
+			}
+
+		case "pages":
+			for _, msg := range parsePagesBlock(node, &p.cfg.SearchPagesNewTab) {
+				p.collect(currentFile, msg)
+			}
+			for _, child := range node.Children {
+				switch child.Name.ValueString() {
+				case "page":
+					p.addPage(child, baseDir, currentFile)
+				default:
+					p.collect(currentFile, fmt.Sprintf("pages block: unknown node %q", child.Name.ValueString()))
+				}
 			}
 
 		case "stats":
@@ -477,7 +512,7 @@ func (p *parser) finalize() (*Config, error) {
 	// nothing.
 	if cfg.DefaultSearchEngine != "" {
 		if _, ok := cfg.SearchEngines[cfg.DefaultSearchEngine]; !ok {
-			cfg.Errors = append(cfg.Errors, fmt.Sprintf("search-engines: default %q does not match any configured engine (default cleared)", cfg.DefaultSearchEngine))
+			cfg.Errors = append(cfg.Errors, fmt.Sprintf("search: default %q does not match any configured engine (default cleared)", cfg.DefaultSearchEngine))
 			cfg.DefaultSearchEngine = ""
 		}
 	}
@@ -633,17 +668,64 @@ func parseTagsBlock(node *document.Node, tags map[string]Tag) []string {
 	return errs
 }
 
-// parseSearchEnginesBlock walks the children of a `search-engines { ... }`
-// node and adds each successfully parsed engine to the supplied map.
-// Engine names are stored under their lowercase form so duplicate
-// detection and the default-engine cross-reference are case-insensitive,
-// while the original casing is preserved on the SearchEngine.Name field
-// for display in the search palette. The block-level `default=`
-// property names the engine used as the no-match fallback; it is
-// recorded in *defaultName (lowercased) and validated later in
-// finalize. Per-child errors are returned as a slice so the caller
-// can collect them; the bad engine is skipped and parsing continues.
-func parseSearchEnginesBlock(node *document.Node, engines map[string]SearchEngine, defaultName *string) []string {
+// parseOpenInProp reads a "new-tab"/"same-tab" target property off a
+// node and writes the result to target. An absent property leaves target
+// untouched; an invalid value is reported and target is left at its
+// default.
+func parseOpenInProp(node *document.Node, prop string, target *bool) []string {
+	val, ok := node.Properties.Get(prop)
+	if !ok || val == nil {
+		return nil
+	}
+	switch val.ValueString() {
+	case "new-tab":
+		*target = true
+	case "same-tab":
+		*target = false
+	default:
+		return []string{fmt.Sprintf("%s must be \"new-tab\" or \"same-tab\", got %q", prop, val.ValueString())}
+	}
+	return nil
+}
+
+// parsePagesBlock reads settings that apply across the dashboard pages.
+// Currently the only setting is the `open-in` property, which controls
+// where the search palette opens internal page navigation (new tab vs
+// current tab); Cmd/Ctrl+Enter always does the opposite.
+func parsePagesBlock(node *document.Node, pagesNewTab *bool) []string {
+	return parseOpenInProp(node, "open-in", pagesNewTab)
+}
+
+// addPage parses a single `page` node (top-level or nested in the
+// `pages` block) and appends it to the config, recording the resolved
+// file under IncludedFiles when parsing from disk. Per-page errors are
+// collected and the page is skipped.
+func (p *parser) addPage(node *document.Node, baseDir, currentFile string) {
+	pg, err := parsePage(node, baseDir)
+	if err != nil {
+		p.collect(currentFile, err.Error())
+		return
+	}
+	if baseDir != "" {
+		p.cfg.IncludedFiles = append(p.cfg.IncludedFiles, pg.File)
+	}
+	p.cfg.Pages = append(p.cfg.Pages, pg)
+}
+
+// parseSearchBlock walks the children of a `search { ... }` node (also
+// reachable via the deprecated `search-engines` alias) and adds each
+// successfully parsed engine to the supplied map. Engine names are
+// stored under their lowercase form so duplicate detection and the
+// default-engine cross-reference are case-insensitive, while the
+// original casing is preserved on the SearchEngine.Name field for
+// display in the search palette. The block-level `default=` property
+// names the engine used as the no-match fallback; it is recorded in
+// *defaultName (lowercased) and validated later in finalize. The
+// `open-in` property controls where an outbound result (a link or an
+// engine search) opens. Per-child errors are returned as a slice so the
+// caller can collect them; the bad engine is skipped and parsing
+// continues.
+func parseSearchBlock(node *document.Node, engines map[string]SearchEngine, defaultName *string, linksNewTab *bool) []string {
 	var errs []string
 
 	if defVal, ok := node.Properties.Get("default"); ok && defVal != nil {
@@ -652,9 +734,11 @@ func parseSearchEnginesBlock(node *document.Node, engines map[string]SearchEngin
 		}
 	}
 
+	errs = append(errs, parseOpenInProp(node, "open-in", linksNewTab)...)
+
 	for _, child := range node.Children {
 		if child.Name.ValueString() != "engine" {
-			errs = append(errs, fmt.Sprintf("search-engines block: unknown node %q", child.Name.ValueString()))
+			errs = append(errs, fmt.Sprintf("search block: unknown node %q", child.Name.ValueString()))
 			continue
 		}
 		if len(child.Arguments) < 1 {

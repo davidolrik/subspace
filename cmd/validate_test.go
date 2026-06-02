@@ -52,7 +52,7 @@ tags {
     tag "prod" color="#00ff88"
 }
 
-search-engines default="google" {
+search default="google" {
     engine "google" url="https://www.google.com/search?q={query}"
 }
 `,

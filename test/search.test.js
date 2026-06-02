@@ -8,6 +8,7 @@ import {
     commonPrefix,
     tabCompleteFrom,
     navigationIntent,
+    resultOpensInNewTab,
     engineFaviconURL,
     pollConfigVersion,
     resolveTheme,
@@ -534,19 +535,39 @@ describe('engineFaviconURL', () => {
 });
 
 describe('navigationIntent', () => {
-    it('returns plain navigation for a page row with no modifier', () => {
+    // The configured default (defaultNewTab) decides where a plain Enter
+    // opens the result; a held Cmd/Ctrl inverts it. So newTab is the XOR
+    // of the default and the modifier.
+
+    it('opens in the current tab with a same-tab default and no modifier', () => {
+        const result = { type: 'page', url: 'http://example.com/dev/' };
+        expect(navigationIntent(result, {}, false)).toEqual({ url: 'http://example.com/dev/', newTab: false });
+    });
+
+    it('opens in a new tab with a new-tab default and no modifier', () => {
+        const result = { type: 'page', url: 'http://example.com/dev/' };
+        expect(navigationIntent(result, {}, true)).toEqual({ url: 'http://example.com/dev/', newTab: true });
+    });
+
+    it('inverts a same-tab default to a new tab when metaKey is held (Cmd on macOS)', () => {
+        const result = { type: 'link', url: 'https://github.com' };
+        expect(navigationIntent(result, { metaKey: true }, false)).toEqual({ url: 'https://github.com', newTab: true });
+    });
+
+    it('inverts a same-tab default to a new tab when ctrlKey is held (Linux/Windows)', () => {
+        const result = { type: 'link', url: 'https://github.com' };
+        expect(navigationIntent(result, { ctrlKey: true }, false)).toEqual({ url: 'https://github.com', newTab: true });
+    });
+
+    it('inverts a new-tab default to the current tab when a modifier is held', () => {
+        const result = { type: 'link', url: 'https://github.com' };
+        expect(navigationIntent(result, { metaKey: true }, true)).toEqual({ url: 'https://github.com', newTab: false });
+        expect(navigationIntent(result, { ctrlKey: true }, true)).toEqual({ url: 'https://github.com', newTab: false });
+    });
+
+    it('treats an absent default as same-tab', () => {
         const result = { type: 'page', url: 'http://example.com/dev/' };
         expect(navigationIntent(result, {})).toEqual({ url: 'http://example.com/dev/', newTab: false });
-    });
-
-    it('returns new-tab navigation when metaKey is held (Cmd on macOS)', () => {
-        const result = { type: 'link', url: 'https://github.com' };
-        expect(navigationIntent(result, { metaKey: true })).toEqual({ url: 'https://github.com', newTab: true });
-    });
-
-    it('returns new-tab navigation when ctrlKey is held (Linux/Windows)', () => {
-        const result = { type: 'link', url: 'https://github.com' };
-        expect(navigationIntent(result, { ctrlKey: true })).toEqual({ url: 'https://github.com', newTab: true });
     });
 
     it('builds the engine URL on demand for engine rows', () => {
@@ -555,19 +576,46 @@ describe('navigationIntent', () => {
             engine: { name: 'metacpan', url: 'https://metacpan.org/search?q={query}' },
             query: 'ojo',
         };
-        expect(navigationIntent(result, { metaKey: true }))
+        expect(navigationIntent(result, { metaKey: true }, false))
             .toEqual({ url: 'https://metacpan.org/search?q=ojo', newTab: true });
     });
 
     it('returns null for engine-prefix rows regardless of modifier', () => {
         const result = { type: 'engine-prefix', engine: { name: 'metacpan' } };
-        expect(navigationIntent(result, {})).toBeNull();
-        expect(navigationIntent(result, { metaKey: true })).toBeNull();
+        expect(navigationIntent(result, {}, true)).toBeNull();
+        expect(navigationIntent(result, { metaKey: true }, true)).toBeNull();
     });
 
     it('returns null when no result is supplied', () => {
-        expect(navigationIntent(null, {})).toBeNull();
-        expect(navigationIntent(undefined, { ctrlKey: true })).toBeNull();
+        expect(navigationIntent(null, {}, true)).toBeNull();
+        expect(navigationIntent(undefined, { ctrlKey: true }, false)).toBeNull();
+    });
+});
+
+describe('resultOpensInNewTab', () => {
+    const targets = { linksNewTab: true, pagesNewTab: false };
+
+    it('uses the links setting for link results', () => {
+        expect(resultOpensInNewTab({ type: 'link' }, targets)).toBe(true);
+    });
+
+    it('uses the links setting for engine search results', () => {
+        expect(resultOpensInNewTab({ type: 'engine' }, targets)).toBe(true);
+    });
+
+    it('uses the pages setting for internal page navigation', () => {
+        expect(resultOpensInNewTab({ type: 'page' }, targets)).toBe(false);
+    });
+
+    it('keeps the two settings independent', () => {
+        const flipped = { linksNewTab: false, pagesNewTab: true };
+        expect(resultOpensInNewTab({ type: 'link' }, flipped)).toBe(false);
+        expect(resultOpensInNewTab({ type: 'page' }, flipped)).toBe(true);
+    });
+
+    it('treats absent targets as same-tab', () => {
+        expect(resultOpensInNewTab({ type: 'link' }, undefined)).toBe(false);
+        expect(resultOpensInNewTab({ type: 'page' }, {})).toBe(false);
     });
 });
 

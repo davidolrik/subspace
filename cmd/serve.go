@@ -134,7 +134,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			envSnap.Replace(initialEnv)
 			pages.EnvLookup = envSnap.Lookup
 
-			// Set up internal pages (link pages, statistics, error pages).
+			// Set up internal pages (pages, statistics, error pages).
 			// Pages that fail to load are skipped and their errors
 			// joined into cfg.Errors.
 			pageInfos := loadPages(cfg)
@@ -142,6 +142,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			pagesHandler := pages.New(pageInfos, srv.Stats, statsStore)
 			pagesHandler.SetTags(tagDefs(cfg))
 			pagesHandler.SetSearchEngines(engineDefs(cfg), cfg.DefaultSearchEngine)
+			pagesHandler.SetSearchTargets(cfg.SearchLinksNewTab, cfg.SearchPagesNewTab)
 			cfg.Errors = append(cfg.Errors, pagesHandler.ValidateTagReferences()...)
 			srv.Pages = pagesHandler
 
@@ -574,12 +575,13 @@ func reloadConfig(currentCfg *config.Config, srv *proxy.Server, ctrlSrv *control
 	// Close old dialers that hold resources (e.g. WireGuard tunnels)
 	closeDialers(currentDialers)
 
-	// Reload link pages (skipping any that fail to parse).
+	// Reload pages (skipping any that fail to parse).
 	if pagesHandler != nil {
 		pageInfos := loadPages(newCfg)
 		pagesHandler.ReloadPages(pageInfos)
 		pagesHandler.SetTags(tagDefs(newCfg))
 		pagesHandler.SetSearchEngines(engineDefs(newCfg), newCfg.DefaultSearchEngine)
+		pagesHandler.SetSearchTargets(newCfg.SearchLinksNewTab, newCfg.SearchPagesNewTab)
 		newCfg.Errors = append(newCfg.Errors, pagesHandler.ValidateTagReferences()...)
 		if envSnap != nil {
 			// Page set may have new (or fewer) `${NAME}` references;
@@ -647,7 +649,7 @@ func reloadPagesForEnv(cfg *config.Config, pagesHandler *pages.Handler, envSnap 
 	envSnap.SetReferences(unionEnvRefs(infos))
 }
 
-// loadPages parses all configured link page files into PageInfo
+// loadPages parses all configured page files into PageInfo
 // structs. Every configured page is registered, even when its KDL
 // file is unreadable, syntactically broken, or has malformed nodes —
 // keeping the page in the routing table means the operator lands on

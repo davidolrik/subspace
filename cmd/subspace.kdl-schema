@@ -114,7 +114,7 @@ document {
     // -- pages --------------------------------------------------------
 
     node "page" {
-        description "Mount a link-page KDL file under pages.subspace.pub/<name>/."
+        description "Deprecated at the top level: nest `page` inside the `pages` block instead. Still parses (with a config warning). Mounts a page KDL file under pages.subspace.pub/<name>/."
         value type="string" description="Relative or absolute path to the page KDL file."
         prop "name" {
             description "Override the page name (defaults to the filename minus .kdl)."
@@ -146,12 +146,16 @@ document {
         }
     }
 
-    // -- search engines ----------------------------------------------
+    // -- search ------------------------------------------------------
 
-    node "search-engines" max=1 {
-        description "External search engines invokable from the / search palette."
+    node "search" max=1 {
+        description "Search palette configuration: the external engines invokable from the / palette, the default fallback engine, and where outbound results open."
         prop "default" {
             description "Engine name (case-insensitive) shown first in the no-match fallback list."
+            type "string"
+        }
+        prop "open-in" {
+            description "Where an outbound search result (a configured link or an engine search) opens on Enter: \"same-tab\" (default) or \"new-tab\". Cmd/Ctrl+Enter always does the opposite. Internal page navigation is controlled by the pages block's open-in."
             type "string"
         }
         children {
@@ -180,6 +184,36 @@ document {
                 }
                 prop "url-encode" {
                     description "Encoding mode applied to the query before substitution. One of: \"component\" (default; encodeURIComponent — spaces → %20), \"form\" (spaces → +), \"raw\" (passthrough)."
+                    type "string"
+                }
+            }
+        }
+    }
+
+    // Deprecated alias for `search`; still parses but emits a config
+    // warning. Prefer `search`. Same shape as the node above.
+    node "search-engines" max=1 {
+        description "Deprecated alias for `search`. Rename the block to `search`."
+    }
+
+    // -- pages --------------------------------------------------------
+
+    node "pages" max=1 {
+        description "Dashboard pages: the `page` definitions and settings that apply across all of them."
+        prop "open-in" {
+            description "Where the search palette opens internal page navigation on Enter: \"same-tab\" (default) or \"new-tab\". Cmd/Ctrl+Enter always does the opposite. Outbound links and engine searches are controlled by the search block's open-in."
+            type "string"
+        }
+        children {
+            node "page" {
+                description "Mount a page KDL file under pages.subspace.pub/<name>/."
+                value type="string" description="Relative or absolute path to the page KDL file."
+                prop "name" {
+                    description "Override the page name (defaults to the filename minus .kdl)."
+                    type "string"
+                }
+                prop "alias" {
+                    description "Additional URL segment that maps to the same page."
                     type "string"
                 }
             }
