@@ -153,6 +153,24 @@ header .space {
     color: var(--cyan);
 }
 
+header .wordmark {
+    position: relative;
+    display: inline-block;
+}
+
+/* Build version tucked just below the wordmark. Absolutely positioned
+   so it doesn't shift the header's baseline alignment. */
+header .version {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: -4px;
+    font-size: 0.65rem;
+    font-weight: 400;
+    line-height: 1;
+    color: var(--text-muted);
+}
+
 header .title-dash {
     color: var(--border);
     font-weight: 400;

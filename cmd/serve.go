@@ -139,6 +139,7 @@ func newServeCommand(configFile *string) *cobra.Command {
 			// joined into cfg.Errors.
 			pageInfos := loadPages(cfg)
 			envSnap.SetReferences(unionEnvRefs(pageInfos))
+			pages.Version = Version
 			pagesHandler := pages.New(pageInfos, srv.Stats, statsStore)
 			pagesHandler.SetTags(tagDefs(cfg))
 			pagesHandler.SetSearchEngines(engineDefs(cfg), cfg.DefaultSearchEngine)

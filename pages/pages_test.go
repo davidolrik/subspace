@@ -206,6 +206,37 @@ func TestUndefinedPageRedirectsToDocs(t *testing.T) {
 	}
 }
 
+func TestDashboardInjectsVersion(t *testing.T) {
+	oldVersion := Version
+	Version = "1.2.3-test"
+	defer func() { Version = oldVersion }()
+
+	pages := []PageInfo{
+		{Name: "dev", Page: &PageConfig{Title: "Development"}},
+	}
+	h := New(pages, nil, nil)
+
+	for _, url := range []string{
+		"http://pages.subspace.pub/dev/",
+		"http://statistics.subspace.pub/",
+	} {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, want %d", url, rec.Code, http.StatusOK)
+		}
+		body := rec.Body.String()
+		if !contains(body, "1.2.3-test") {
+			t.Errorf("%s: body does not contain version", url)
+		}
+		if contains(body, "{{VERSION}}") {
+			t.Errorf("%s: body still contains {{VERSION}} placeholder", url)
+		}
+	}
+}
+
 func TestRootRedirectsToStatisticsWhenNoPagesDefined(t *testing.T) {
 	h := New(nil, nil, nil)
 

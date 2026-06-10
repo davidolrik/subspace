@@ -28,6 +28,10 @@ const (
 	StatsHostAlias = "stats.subspace.pub"
 )
 
+// Version is the subspace version displayed in the page header. It is
+// set from the build version before the handler is created.
+var Version = "dev"
+
 // IsInternalHost returns true if the hostname serves internal pages.
 func IsInternalHost(hostname string) bool {
 	switch hostname {
@@ -424,21 +428,22 @@ func pageName(r *http.Request) string {
 }
 
 func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	data, err := frontend.ReadFile("frontend/index.html")
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(data)
+	h.serveFrontendPage(w, "frontend/index.html")
 }
 
 func (h *Handler) handleStatistics(w http.ResponseWriter, r *http.Request) {
-	data, err := frontend.ReadFile("frontend/statistics.html")
+	h.serveFrontendPage(w, "frontend/statistics.html")
+}
+
+// serveFrontendPage serves an embedded HTML page with the {{VERSION}}
+// placeholder replaced by the build version.
+func (h *Handler) serveFrontendPage(w http.ResponseWriter, name string) {
+	data, err := frontend.ReadFile(name)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	data = []byte(strings.ReplaceAll(string(data), "{{VERSION}}", Version))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(data)
 }
