@@ -164,8 +164,8 @@ header .version {
     position: absolute;
     top: 100%;
     right: 0;
-    margin-top: -4px;
-    font-size: 0.65rem;
+    margin-top: -2px;
+    font-size: 0.70rem;
     font-weight: 400;
     line-height: 1;
     color: var(--text-muted);
