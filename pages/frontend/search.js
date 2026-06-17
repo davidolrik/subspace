@@ -1,7 +1,8 @@
 // Search popup component for Subspace internal pages.
 // Activated by pressing "/" — searches page titles, hostnames, aliases,
-// and links, and routes external queries through configured search
-// engines (e.g. "cpan ojo" → Metacpan).
+// and links (by name, section, page, description, and URL), and routes
+// external queries through configured search engines (e.g. "cpan ojo"
+// → Metacpan).
 
 // Score a single token against the candidate fields: lower is better.
 // Prefix matches on the primary field (label/name) rank highest, then
@@ -349,7 +350,7 @@ export function buildResults({ query, nav, allLinks, engines, defaultEngine }) {
     if (scoreQuery) {
         for (const link of allLinks) {
             const score = matchScore(
-                [link.name, link.section, link.page, link.description], scoreQuery
+                [link.name, link.section, link.page, link.description, link.url], scoreQuery
             );
             if (score < Infinity) {
                 links.push({

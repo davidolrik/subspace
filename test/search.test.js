@@ -163,6 +163,21 @@ describe('buildResults', () => {
         expect(labels).toContain('ojo');
     });
 
+    it('matches a link by a fragment of its URL', () => {
+        // "davidolrik" appears only in the GitHub link's URL, not its
+        // name/section/page — so a hit proves the URL is searched.
+        const rows = buildResults({
+            query: 'davidolrik',
+            nav,
+            allLinks,
+            engines,
+            defaultEngine: 'google',
+        });
+        const link = rows.find(r => r.type === 'link');
+        expect(link).toBeDefined();
+        expect(link.label).toBe('GitHub');
+    });
+
     it('keyword without trailing query still emits an engine row with empty query', () => {
         const rows = buildResults({
             query: 'cpan',
