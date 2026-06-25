@@ -1,7 +1,10 @@
 package pages
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -408,13 +411,119 @@ func (h *Handler) ServeHTTP(conn net.Conn, req *http.Request) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	// Prevent browsers from caching internal page responses so they
-	// don't replay stale redirects from the external fallback server.
-	rec.Header().Set("Cache-Control", "no-store")
-
 	resp := rec.Result()
 	defer resp.Body.Close()
+
+	// Apply the cache policy to the response header map (the one
+	// resp.Write actually serializes). Editing rec.Header() here would
+	// be silently dropped: the recorder snapshots its headers when the
+	// handler first commits the response, and Result() returns that
+	// snapshot.
+	applyCachePolicy(resp, req)
+
 	resp.Write(conn)
+}
+
+// applyCachePolicy sets caching headers on an internal-page response.
+// The goal is strict freshness without re-downloading the render-
+// blocking asset bundle every time a backgrounded tab is discarded and
+// reselected (which shows a dimmed, frozen page until it reloads):
+//
+//   - Static assets revalidate against the build version, so a binary
+//     upgrade refetches them and everything in between is a cheap 304.
+//   - The dashboard HTML and the config-derived APIs revalidate against
+//     a hash of their body — i.e. the pages/config they render from — so
+//     an operator's edit refetches them and an unchanged config is a 304.
+//   - Live metrics, the config-version poll, redirects and errors stay
+//     uncached so they're always fresh. This also subsumes the old
+//     no-store guard against replaying stale redirects from the external
+//     fallback server.
+//   - A handler that set its own Cache-Control (the favicon cache) keeps
+//     it.
+//
+// no-cache means the browser must revalidate before every use, so
+// freshness is never traded away; the ETag just lets that revalidation
+// return an empty 304 instead of the full body.
+func applyCachePolicy(resp *http.Response, req *http.Request) {
+	h := resp.Header
+	if h.Get("Cache-Control") != "" {
+		return
+	}
+
+	path := req.URL.Path
+	if resp.StatusCode == http.StatusOK {
+		if strings.Contains(path, "/static/") {
+			setRevalidation(resp, req, `"`+Version+`"`)
+			return
+		}
+		if isConfigAPI(path) || strings.HasPrefix(h.Get("Content-Type"), "text/html") {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+			resp.ContentLength = int64(len(body))
+			sum := sha256.Sum256(body)
+			setRevalidation(resp, req, `"`+hex.EncodeToString(sum[:])+`"`)
+			return
+		}
+	}
+
+	h.Set("Cache-Control", "no-store")
+}
+
+// setRevalidation marks resp as cacheable-but-always-revalidated with
+// the given strong ETag. When the request carries a matching
+// If-None-Match, resp is rewritten into a bodiless 304 so the browser
+// reuses its cached copy instead of re-downloading.
+func setRevalidation(resp *http.Response, req *http.Request, etag string) {
+	resp.Header.Set("ETag", etag)
+	resp.Header.Set("Cache-Control", "no-cache")
+	if !etagMatches(req.Header.Get("If-None-Match"), etag) {
+		return
+	}
+	resp.StatusCode = http.StatusNotModified
+	resp.Status = http.StatusText(http.StatusNotModified)
+	if resp.Body != nil {
+		resp.Body.Close()
+	}
+	resp.Body = http.NoBody
+	resp.ContentLength = 0
+	resp.Header.Del("Content-Type")
+	resp.Header.Del("Content-Length")
+}
+
+// isConfigAPI reports whether the path is one of the API endpoints whose
+// body is derived purely from the loaded pages/config (and so is safe to
+// revalidate with a content hash), as opposed to the live-metrics
+// endpoints whose body changes on every request.
+func isConfigAPI(path string) bool {
+	switch {
+	case strings.HasSuffix(path, "/api/links"),
+		strings.HasSuffix(path, "/api/all-links"),
+		strings.HasSuffix(path, "/api/nav"),
+		strings.HasSuffix(path, "/api/search"):
+		return true
+	}
+	return false
+}
+
+// etagMatches reports whether an If-None-Match header value matches the
+// given strong ETag. Handles the "*" wildcard, comma-separated lists,
+// and a weak-validator (W/) prefix the client may echo back.
+func etagMatches(ifNoneMatch, etag string) bool {
+	ifNoneMatch = strings.TrimSpace(ifNoneMatch)
+	if ifNoneMatch == "" {
+		return false
+	}
+	if ifNoneMatch == "*" {
+		return true
+	}
+	for _, part := range strings.Split(ifNoneMatch, ",") {
+		candidate := strings.TrimPrefix(strings.TrimSpace(part), "W/")
+		if candidate == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // pageName extracts the page name from the request URL path.
