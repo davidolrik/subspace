@@ -44,7 +44,7 @@ func TestSchemaIsParseableKDL(t *testing.T) {
 // publishes at https://subspace.pub/subspace.kdl-schema. A diff here
 // means either copy was edited without the other; fix by copying:
 //
-//   cp cmd/subspace.kdl-schema docs/public/subspace.kdl-schema
+//	cp cmd/subspace.kdl-schema docs/public/subspace.kdl-schema
 func TestSchemaDocsCopyIsInSync(t *testing.T) {
 	publicCopy, err := os.ReadFile("../docs/public/subspace.kdl-schema")
 	if err != nil {

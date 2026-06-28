@@ -14,10 +14,10 @@ type StatusResponse struct {
 
 // UpstreamStatus describes the health and stats of a single upstream.
 type UpstreamStatus struct {
-	Type    string              `json:"type"`
-	Address string              `json:"address"`
-	Healthy bool                `json:"healthy"`
-	Latency string              `json:"latency"`
+	Type    string               `json:"type"`
+	Address string               `json:"address"`
+	Healthy bool                 `json:"healthy"`
+	Latency string               `json:"latency"`
 	Stats   *stats.UpstreamStats `json:"stats,omitempty"`
 }
 

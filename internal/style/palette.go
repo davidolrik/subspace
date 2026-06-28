@@ -14,13 +14,13 @@ import (
 // active theme.
 type Palette struct {
 	// Foregrounds — primary roles
-	Heading string // section headers, labels, banner accent
-	Success string // OK / healthy / "direct"
-	Error   string // failures, error markers
-	Warning string // soft warnings (e.g. fallback notes)
-	Caution string // reserved for stronger warnings
-	Info    string // reserved for informational / links
-	Notice  string // reserved for emphasis variation
+	Heading   string // section headers, labels, banner accent
+	Success   string // OK / healthy / "direct"
+	Error     string // failures, error markers
+	Warning   string // soft warnings (e.g. fallback notes)
+	Caution   string // reserved for stronger warnings
+	Info      string // reserved for informational / links
+	Notice    string // reserved for emphasis variation
 	Highlight string // reserved for alt accent
 
 	// Foregrounds — text weight / contrast

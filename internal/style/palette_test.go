@@ -7,9 +7,9 @@ import (
 
 func TestParseHexColor(t *testing.T) {
 	cases := []struct {
-		in            string
+		in                  string
 		wantR, wantG, wantB int
-		wantErr       bool
+		wantErr             bool
 	}{
 		{"#000000", 0, 0, 0, false},
 		{"#ffffff", 255, 255, 255, false},

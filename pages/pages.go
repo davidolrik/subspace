@@ -113,12 +113,12 @@ type searchLink struct {
 
 // navEntry is a single menu item returned by the /api/nav endpoint.
 type navEntry struct {
-	Label string `json:"label"`
-	URL   string `json:"url"`
-	Active bool  `json:"active"`
-	Icon  string `json:"icon,omitempty"`
-	Name  string `json:"name,omitempty"`
-	Alias string `json:"alias,omitempty"`
+	Label  string `json:"label"`
+	URL    string `json:"url"`
+	Active bool   `json:"active"`
+	Icon   string `json:"icon,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Alias  string `json:"alias,omitempty"`
 }
 
 // Handler serves internal pages at pages.subspace.pub and stats.subspace.pub.
@@ -561,7 +561,7 @@ func (h *Handler) serveFrontendPage(w http.ResponseWriter, name string) {
 // over a window. Query parameters:
 //   - kind:     "upstreams" (default), "domains", "routes"
 //   - metric:   "bytes_total" (default), "success", "failures",
-//               "bytes_in", "bytes_out"
+//     "bytes_in", "bytes_out"
 //   - duration: window in seconds (default 86400 = 24h)
 //   - n:        max entries (default 10, capped at 100)
 func (h *Handler) handleTopAPI(w http.ResponseWriter, r *http.Request) {
@@ -772,8 +772,8 @@ func (h *Handler) handleConfigErrorsAPI(w http.ResponseWriter, r *http.Request) 
 // the live drop counters so the dashboard can render its "Blocked
 // Traffic" card from a single fetch.
 type blackholeResponse struct {
-	Active   bool                `json:"active"`
-	Patterns []string            `json:"patterns,omitempty"`
+	Active   bool                 `json:"active"`
+	Patterns []string             `json:"patterns,omitempty"`
 	Stats    *stats.UpstreamStats `json:"stats,omitempty"`
 }
 
@@ -808,7 +808,7 @@ func (h *Handler) handleBlackholeAPI(w http.ResponseWriter, r *http.Request) {
 //
 // Query parameters mirror /api/top:
 //   - metric:   "bytes_total" (default), "success", "failures",
-//               "bytes_in", "bytes_out"
+//     "bytes_in", "bytes_out"
 //   - duration: window in seconds (default 86400 = 24h)
 //   - n:        max entries (default 10, capped at 100)
 func (h *Handler) handleBlackholeTopAPI(w http.ResponseWriter, r *http.Request) {
@@ -931,9 +931,9 @@ type faviconEntry struct {
 }
 
 const (
-	faviconPositiveTTL = 24 * time.Hour
-	faviconNegativeTTL = 1 * time.Hour
-	faviconMaxBytes    = 256 * 1024 // arbitrary cap; favicons should be tiny
+	faviconPositiveTTL  = 24 * time.Hour
+	faviconNegativeTTL  = 1 * time.Hour
+	faviconMaxBytes     = 256 * 1024 // arbitrary cap; favicons should be tiny
 	faviconFetchTimeout = 5 * time.Second
 )
 

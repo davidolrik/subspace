@@ -284,13 +284,13 @@ func buildClientHelloWithSNI(serverName string) []byte {
 	// cipher_suites_len(2) + cipher_suite(2) + comp_methods_len(1) + comp_method(1) +
 	// extensions_len(2) + extensions
 	body := make([]byte, 0, 256)
-	body = append(body, 0x03, 0x03)        // TLS 1.2
+	body = append(body, 0x03, 0x03)          // TLS 1.2
 	body = append(body, make([]byte, 32)...) // random
-	body = append(body, 0x00)               // session ID length = 0
-	body = append(body, 0x00, 0x02)         // cipher suites length = 2
-	body = append(body, 0x00, 0x2f)         // TLS_RSA_WITH_AES_128_CBC_SHA
-	body = append(body, 0x01)               // compression methods length = 1
-	body = append(body, 0x00)               // null compression
+	body = append(body, 0x00)                // session ID length = 0
+	body = append(body, 0x00, 0x02)          // cipher suites length = 2
+	body = append(body, 0x00, 0x2f)          // TLS_RSA_WITH_AES_128_CBC_SHA
+	body = append(body, 0x01)                // compression methods length = 1
+	body = append(body, 0x00)                // null compression
 	extLen := len(extensions)
 	body = append(body, byte(extLen>>8), byte(extLen))
 	body = append(body, extensions...)

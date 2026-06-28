@@ -12,9 +12,9 @@ func TestExtractHostname(t *testing.T) {
 		// Bare host with a trailing slash or path must yield just the
 		// host — otherwise the slash leaks into route matching and a
 		// suffix rule like ".olrik.cloud" stops matching.
-		"unifi.hq.olrik.cloud/":     "unifi.hq.olrik.cloud",
-		"unifi.hq.olrik.cloud/a/b":  "unifi.hq.olrik.cloud",
-		"unifi.hq.olrik.cloud":      "unifi.hq.olrik.cloud",
+		"unifi.hq.olrik.cloud/":    "unifi.hq.olrik.cloud",
+		"unifi.hq.olrik.cloud/a/b": "unifi.hq.olrik.cloud",
+		"unifi.hq.olrik.cloud":     "unifi.hq.olrik.cloud",
 		// Full URLs go through the Host branch.
 		"https://unifi.hq.olrik.cloud/path": "unifi.hq.olrik.cloud",
 		"http://host:8080/x":                "host",

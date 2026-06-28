@@ -125,9 +125,9 @@ func TestTopUpstreamsByMetric(t *testing.T) {
 	})
 
 	cases := []struct {
-		metric    string
-		topName   string
-		topValue  int64
+		metric   string
+		topName  string
+		topValue int64
 	}{
 		{"success", "wg", 80},      // wg has more successful conns
 		{"failures", "wg", 20},     // wg has more failures

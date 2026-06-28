@@ -75,10 +75,10 @@ func TestBlackholePatterns(t *testing.T) {
 	cfg := &config.Config{
 		Routes: []config.Route{
 			{Pattern: ".ads.example", Via: "blackhole"},
-			{Pattern: ".corp.internal", Via: "corporate"},                                  // ignored
-			{Pattern: ".risky.com", Via: "corporate", Fallback: "blackhole"},                // counted via fallback
+			{Pattern: ".corp.internal", Via: "corporate"},                    // ignored
+			{Pattern: ".risky.com", Via: "corporate", Fallback: "blackhole"}, // counted via fallback
 			{Pattern: "*.telemetry.com", Via: "blackhole"},
-			{Pattern: ".ads.example", Via: "blackhole"},                                     // duplicate pattern dedup'd
+			{Pattern: ".ads.example", Via: "blackhole"}, // duplicate pattern dedup'd
 		},
 	}
 	got := blackholePatterns(cfg)
