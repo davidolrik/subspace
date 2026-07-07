@@ -439,9 +439,9 @@ func (h *Handler) ServeHTTP(conn net.Conn, req *http.Request) {
 }
 
 // applyCachePolicy sets caching headers on an internal-page response.
-// The goal is strict freshness without re-downloading the render-
-// blocking asset bundle every time a backgrounded tab is discarded and
-// reselected (which shows a dimmed, frozen page until it reloads):
+// The goal is instant paint from cache every time a backgrounded tab is
+// discarded and reselected (which shows a dimmed, frozen page until it
+// renders), without serving a meaningfully stale dashboard:
 //
 //   - Static assets revalidate against the build version, so a binary
 //     upgrade refetches them and everything in between is a cheap 304.
@@ -455,9 +455,13 @@ func (h *Handler) ServeHTTP(conn net.Conn, req *http.Request) {
 //   - A handler that set its own Cache-Control (the favicon cache) keeps
 //     it.
 //
-// no-cache means the browser must revalidate before every use, so
-// freshness is never traded away; the ETag just lets that revalidation
-// return an empty 304 instead of the full body.
+// max-age=0 makes every cached copy immediately stale, but the
+// stale-while-revalidate window lets the browser use it right away and
+// revalidate in the background instead of blocking rendering on the
+// round trip. Staleness is bounded twice over: the background
+// revalidation swaps in fresh content for the next paint, and the
+// dashboard's config-version poll hard-reloads every open tab within
+// seconds of a config change or daemon restart.
 func applyCachePolicy(resp *http.Response, req *http.Request) {
 	h := resp.Header
 	if h.Get("Cache-Control") != "" {
@@ -484,13 +488,14 @@ func applyCachePolicy(resp *http.Response, req *http.Request) {
 	h.Set("Cache-Control", "no-store")
 }
 
-// setRevalidation marks resp as cacheable-but-always-revalidated with
-// the given strong ETag. When the request carries a matching
-// If-None-Match, resp is rewritten into a bodiless 304 so the browser
-// reuses its cached copy instead of re-downloading.
+// setRevalidation marks resp as cacheable, immediately stale, and
+// usable while a background revalidation runs, keyed on the given
+// strong ETag. When the request carries a matching If-None-Match, resp
+// is rewritten into a bodiless 304 so the browser reuses its cached
+// copy instead of re-downloading.
 func setRevalidation(resp *http.Response, req *http.Request, etag string) {
 	resp.Header.Set("ETag", etag)
-	resp.Header.Set("Cache-Control", "no-cache")
+	resp.Header.Set("Cache-Control", "max-age=0, stale-while-revalidate=86400")
 	if !etagMatches(req.Header.Get("If-None-Match"), etag) {
 		return
 	}

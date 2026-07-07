@@ -46,7 +46,10 @@ func newRequest(t *testing.T, target string) *http.Request {
 
 // Static assets must be cacheable but revalidated against the build
 // version, so a reselected (discarded) tab gets a cheap 304 instead of
-// re-downloading the render-blocking CSS/JS/font bundle.
+// re-downloading the render-blocking CSS/JS/font bundle. The
+// stale-while-revalidate window lets the browser paint from cache
+// immediately and revalidate in the background instead of blocking
+// first paint on the round trip.
 func TestStaticAssetsRevalidateByVersion(t *testing.T) {
 	h := New([]PageInfo{{Name: "dev", Page: &PageConfig{}}}, nil, nil)
 
@@ -54,8 +57,8 @@ func TestStaticAssetsRevalidateByVersion(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if cc := resp.Header.Get("Cache-Control"); cc != "no-cache" {
-		t.Errorf("Cache-Control = %q, want no-cache", cc)
+	if cc := resp.Header.Get("Cache-Control"); cc != "max-age=0, stale-while-revalidate=86400" {
+		t.Errorf("Cache-Control = %q, want max-age=0, stale-while-revalidate=86400", cc)
 	}
 	wantETag := `"` + Version + `"`
 	if et := resp.Header.Get("ETag"); et != wantETag {
@@ -94,8 +97,8 @@ func TestDynamicResponsesRevalidateByContentHash(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("%s: status = %d, want 200", target, resp.StatusCode)
 		}
-		if cc := resp.Header.Get("Cache-Control"); cc != "no-cache" {
-			t.Errorf("%s: Cache-Control = %q, want no-cache", target, cc)
+		if cc := resp.Header.Get("Cache-Control"); cc != "max-age=0, stale-while-revalidate=86400" {
+			t.Errorf("%s: Cache-Control = %q, want max-age=0, stale-while-revalidate=86400", target, cc)
 		}
 		etag := resp.Header.Get("ETag")
 		if etag == "" || etag == `"`+Version+`"` {
