@@ -814,6 +814,35 @@ describe('matchGlobal', () => {
         }
         expect(calls).toEqual(['1', '5', '9']);
     });
+
+    // Browser/OS chords like Cmd+2 (Zen: switch essential) reach the
+    // page with the same e.key as the bare keypress. Those belong to
+    // the browser — dispatching them would navigate the dashboard
+    // behind the user's back.
+    it('ignores events with cmd, ctrl or alt held', () => {
+        const handler = vi.fn();
+        const fakeBindings = [
+            {
+                keys: ['1', '2', '3', '4', '5', '6', '7', '8', '9'],
+                scope: 'global',
+                description: 'jump',
+                handler,
+            },
+        ];
+        expect(matchGlobal(fakeBindings, {}, { key: '2', metaKey: true })).toBe(false);
+        expect(matchGlobal(fakeBindings, {}, { key: '2', ctrlKey: true })).toBe(false);
+        expect(matchGlobal(fakeBindings, {}, { key: '2', altKey: true })).toBe(false);
+        expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('still matches shifted keys (? is shift+/)', () => {
+        const handler = vi.fn();
+        const fakeBindings = [
+            { keys: ['?'], scope: 'global', description: 'help', handler },
+        ];
+        expect(matchGlobal(fakeBindings, {}, { key: '?', shiftKey: true })).toBe(true);
+        expect(handler).toHaveBeenCalledOnce();
+    });
 });
 
 describe('groupBindingsForLegend', () => {

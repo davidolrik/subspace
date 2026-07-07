@@ -899,7 +899,13 @@ export const keybindings = [
 // matchGlobal tries every global binding against the event and, on a
 // hit, dispatches the handler. Returns true when something matched so
 // the caller can stop propagating.
+//
+// Events with cmd, ctrl or alt held are never dispatched: those chords
+// belong to the browser or OS (e.g. Cmd+2 switches tabs in Zen) and
+// reach the page with the same e.key as the bare keypress. Shift is
+// allowed — bindings like `?` are shifted keys.
 export function matchGlobal(bindings, c, e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return false;
     for (const b of bindings) {
         if (b.scope !== 'global') continue;
         if (!b.keys.includes(e.key)) continue;
