@@ -1153,6 +1153,78 @@ func TestInternalPagesLinksAPI(t *testing.T) {
 	}
 }
 
+// A reselected dashboard tab fires a dozen asset revalidations at once;
+// internal pages must honor HTTP/1.1 keep-alive like the forwarding
+// path does, so those requests share connections instead of each racing
+// the close of a single-use one.
+func TestInternalPagesKeepAlive(t *testing.T) {
+	matcher := route.NewMatcher(nil)
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+	srv.Pages = pages.New([]pages.PageInfo{{Name: "dashboard", Page: &pages.PageConfig{}}}, srv.Stats, nil)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	br := bufio.NewReader(conn)
+
+	// Several requests on the SAME connection; each must be answered,
+	// length-framed, and must not advertise (or perform) a close.
+	for i, path := range []string{"/dashboard/api/links", "/dashboard/api/nav", "/dashboard/api/config-errors"} {
+		fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: pages.subspace.pub\r\n\r\n", path)
+
+		resp, err := http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatalf("response %d (%s): %v", i+1, path, err)
+		}
+		if resp.StatusCode != 200 {
+			t.Errorf("response %d (%s): status = %d, want 200", i+1, path, resp.StatusCode)
+		}
+		if resp.ContentLength < 0 {
+			t.Errorf("response %d (%s): not length-framed (no Content-Length)", i+1, path)
+		}
+		if resp.Close {
+			t.Errorf("response %d (%s): advertises Connection: close on a keep-alive request", i+1, path)
+		}
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}
+}
+
+// When the client asks for Connection: close, the internal-pages
+// response must say so and the proxy must actually close — the browser
+// should never be left believing a dead connection is reusable.
+func TestInternalPagesConnectionClose(t *testing.T) {
+	matcher := route.NewMatcher(nil)
+	srv, proxyAddr := startProxyServer(t, matcher, nil)
+	srv.Pages = pages.New([]pages.PageInfo{{Name: "dashboard", Page: &pages.PageConfig{}}}, srv.Stats, nil)
+
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	br := bufio.NewReader(conn)
+
+	fmt.Fprintf(conn, "GET /dashboard/api/links HTTP/1.1\r\nHost: pages.subspace.pub\r\nConnection: close\r\n\r\n")
+
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("response: %v", err)
+	}
+	if !resp.Close {
+		t.Errorf("response does not advertise Connection: close")
+	}
+	io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	if _, err := br.ReadByte(); err == nil {
+		t.Fatal("expected connection to be closed after Connection: close")
+	}
+}
+
 func TestInternalPagesDoNotForwardUpstream(t *testing.T) {
 	// Start a backend that should NOT receive the request
 	var backendHit atomic.Int32

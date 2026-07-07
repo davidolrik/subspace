@@ -421,6 +421,20 @@ func (h *Handler) ServeHTTP(conn net.Conn, req *http.Request) {
 	// snapshot.
 	applyCachePolicy(resp, req)
 
+	// Length-frame the response so the connection can carry another
+	// request afterwards — a body of unknown length is delimited by
+	// EOF, which would force a close after every response. The recorder
+	// buffers the whole body in memory, so the length is free.
+	if resp.ContentLength < 0 {
+		resp.ContentLength = int64(rec.Body.Len())
+	}
+	// Attaching the request lets resp.Write suppress the body on HEAD
+	// responses (whose Content-Length describes the GET equivalent),
+	// and Close mirrors the client's connection preference back so the
+	// browser never pools a connection the proxy is about to close.
+	resp.Request = req
+	resp.Close = req.Close
+
 	resp.Write(conn)
 }
 

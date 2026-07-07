@@ -32,10 +32,14 @@ func (s *Server) handleHTTP(conn *PeekConn, req *http.Request, l boundListener) 
 
 	hostname, _, _ := net.SplitHostPort(targetAddr)
 
-	// Serve internal pages for pages.subspace.pub and stats.subspace.pub
+	// Serve internal pages for pages.subspace.pub and stats.subspace.pub.
+	// These honor keep-alive like the forwarding path: the dashboard
+	// fires a dozen asset requests on reselection, and single-use
+	// connections would leave the browser pooling sockets the proxy
+	// has already closed.
 	if s.Pages != nil && pages.IsInternalHost(hostname) {
 		s.Pages.ServeHTTP(conn, req)
-		return false
+		return !req.Close
 	}
 
 	route := s.routeFor(hostname, l.cfg.Private)

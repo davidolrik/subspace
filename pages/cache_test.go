@@ -153,6 +153,26 @@ func TestVolatileResponsesAreNoStore(t *testing.T) {
 	}
 }
 
+// Every internal response must carry a Content-Length so a keep-alive
+// connection knows where the body ends; an EOF-framed body would force
+// closing the connection after every response.
+func TestResponsesAreLengthFramed(t *testing.T) {
+	h := New([]PageInfo{{Name: "dev", Page: &PageConfig{Title: "Dev"}}}, nil, nil)
+
+	for _, target := range []string{
+		"http://pages.subspace.pub/dev/",
+		"http://pages.subspace.pub/dev/api/links",
+		"http://pages.subspace.pub/dev/api/config-errors",
+	} {
+		resp, body := serveOverPipe(t, h, newRequest(t, target))
+		if resp.ContentLength < 0 {
+			t.Errorf("%s: response is EOF-framed (no Content-Length)", target)
+		} else if resp.ContentLength != int64(len(body)) {
+			t.Errorf("%s: Content-Length = %d, body = %d bytes", target, resp.ContentLength, len(body))
+		}
+	}
+}
+
 // The favicon endpoint deliberately sets a long-lived Cache-Control;
 // the connection-level handler must not clobber it back to no-store.
 func TestFaviconCacheHeaderSurvives(t *testing.T) {
