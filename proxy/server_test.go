@@ -744,6 +744,19 @@ func TestKeepAliveIdleTimeout(t *testing.T) {
 	}
 }
 
+// Firefox keeps an idle persistent connection reusable for up to 115
+// seconds (network.http.keep-alive.timeout). The proxy's idle timeout
+// must outlive that window, or the browser picks up connections the
+// server has already closed and stalls on the dead socket.
+func TestDefaultIdleTimeoutOutlivesBrowserReuseWindow(t *testing.T) {
+	matcher := route.NewMatcher(nil)
+	srv, _ := startProxyServer(t, matcher, nil)
+
+	if srv.IdleTimeout <= 115*time.Second {
+		t.Errorf("default IdleTimeout = %v, must exceed the 115s browser keep-alive reuse window", srv.IdleTimeout)
+	}
+}
+
 func TestKeepAliveWebSocketBreaksLoop(t *testing.T) {
 	// Backend serves normal HTTP on /hello and upgrades WebSocket on /ws
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

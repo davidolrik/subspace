@@ -107,15 +107,18 @@ func NewServer(listeners []ListenerConfig, matcher *route.Matcher, dialers map[s
 	}
 
 	return &Server{
-		listeners:   bound,
-		matcher:     matcher,
-		dialers:     dialers,
-		direct:      upstream.NewDirectDialer(),
-		ctx:         ctx,
-		cancel:      cancel,
-		Stats:       stats.New(),
-		Pool:        pool,
-		IdleTimeout: 60 * time.Second,
+		listeners: bound,
+		matcher:   matcher,
+		dialers:   dialers,
+		direct:    upstream.NewDirectDialer(),
+		ctx:       ctx,
+		cancel:    cancel,
+		Stats:     stats.New(),
+		Pool:      pool,
+		// Longer than Firefox's 115s keep-alive reuse window
+		// (network.http.keep-alive.timeout), so the browser never
+		// trusts a pooled connection this server has already closed.
+		IdleTimeout: 180 * time.Second,
 	}
 }
 
