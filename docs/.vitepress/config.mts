@@ -11,6 +11,9 @@ export default withMermaid(
     title: "Subspace",
     description: "Transparent proxy with upstream routing",
     appearance: "force-dark",
+    // Links drop the .html suffix; the subspace.pub nginx vhost maps
+    // /guide/page to /guide/page.html (clean_urls in its site config).
+    cleanUrls: true,
 
     head: [["link", { rel: "icon", type: "image/png", href: "/subspace.png" }]],
 

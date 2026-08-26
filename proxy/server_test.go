@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1251,9 +1252,16 @@ func TestInternalPagesDoNotForwardUpstream(t *testing.T) {
 	srv, proxyAddr := startProxyServer(t, matcher, nil)
 	srv.Pages = pages.New(nil, srv.Stats, nil)
 
+	// With no pages defined the handler answers with a redirect to
+	// the public troubleshooting guide. Don't follow it: the point is
+	// that the proxy answered locally, and following would send the
+	// test out to the real subspace.pub.
 	client := &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyURL(mustParseURL(t, "http://"+proxyAddr)),
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
 	}
 
@@ -1263,6 +1271,12 @@ func TestInternalPagesDoNotForwardUpstream(t *testing.T) {
 	}
 	resp.Body.Close()
 
+	if resp.StatusCode != http.StatusFound {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusFound)
+	}
+	if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "https://subspace.pub/guide/troubleshooting?host=pages.subspace.pub/dashboard/") {
+		t.Errorf("Location = %q, want troubleshooting guide", loc)
+	}
 	if backendHit.Load() != 0 {
 		t.Error("request to pages.subspace.pub was forwarded to upstream backend")
 	}
